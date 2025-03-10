@@ -49,7 +49,7 @@
       />
       {{ processingRestore ? "Processing..." : "Restore defaults" }}
     </v-btn>
-  </div>
+  </div>  
 </template>
 
 <script setup lang="ts">
@@ -63,19 +63,6 @@ const props = defineProps<{
     backendApi: string,
     disabled: boolean
 }>()
-
-watch(
-    () => props.selectedCameraUuid,
-    (newValue) => {
-        if (newValue) {
-            getImageParameters()
-        }
-    }
-)
-
-onMounted(() => {
-    getImageParameters()
-})
 
 const processingWhiteBalance = ref(false)
 const processingRestore = ref(false)
@@ -136,6 +123,18 @@ const imageSliders = [
     },
 ]
 
+onMounted(() => {
+    getImageParameters()
+})
+
+watch(
+    () => props.selectedCameraUuid,
+    async (newValue) => {
+        if (newValue) {
+            getImageParameters()
+        }
+    }
+)
 
 const updateImageParameter = (param: keyof BaseParameterSetting, value: number) => {
     if (!props.selectedCameraUuid) {
@@ -158,7 +157,7 @@ const updateImageParameter = (param: keyof BaseParameterSetting, value: number) 
             update_sliders_values(settings)
         })
         .catch((error) =>
-            console.error(`Error sending ${param} control with value '${value}':`, error.message)
+            console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
         )
 }
 
@@ -249,6 +248,5 @@ const doRestore = async () => {
             processingRestore.value = false
         })
 }
-
 
 </script>
