@@ -29,7 +29,10 @@ fn generate_typescript_bindings_for_mcm_client() -> Result<()> {
     let inputs = vec![root_dir.join("backend/libs/mcm_client")];
     let output = root_dir.join("frontend/src/bindings/mcm_client.d.ts");
 
-    let _ = fs::remove_file(output.clone());
+    if fs::remove_file(output.clone()).is_err() {
+        let output_dir = output.parent().unwrap();
+        fs::create_dir_all(output_dir).unwrap();
+    }
 
     let rsync_bindings = {
         tsync::generate_typescript_defs(inputs, output.clone(), false, false);
