@@ -12,7 +12,7 @@ DIRNAME="$PWD"
 
 # Run bindings generation on the host
 cd "$DIRNAME/backend"
-cargo run --bin=bindings --locked
+cargo run --bin=bindings --locked "$@"
 
 # Build the frontend on the host
 cd "$DIRNAME/frontend"
@@ -28,7 +28,7 @@ for TARGET in "${TARGETS[@]}"; do
     export CARGO_TARGET_DIR=target/build/"$TARGET"
 
     echo "Building for target: $TARGET"
-    cross build --bin=radcam-manager --release --locked --target "$TARGET"
+    cross build --bin=radcam-manager --release --locked --target "$TARGET" "$@"
 done
 
 echo "All builds completed successfully!"
