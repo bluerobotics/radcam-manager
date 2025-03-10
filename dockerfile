@@ -8,9 +8,9 @@ COPY target/build /tmp/target/build
 RUN echo "TARGETARCH: ${TARGETARCH}" && \
     if [ "${TARGETARCH}" = "amd64" ]; then \
         export TARGET="x86_64-unknown-linux-musl" ; \
-    elif [ "${TARGETARCH}" = "arm" ]; then \
-        export TARGET="aarch64-unknown-linux-musl" ; \
     elif [ "${TARGETARCH}" = "arm64" ]; then \
+        export TARGET="aarch64-unknown-linux-musl" ; \
+    elif [ "${TARGETARCH}" = "arm" ]; then \
         export TARGET="armv7-unknown-linux-musleabihf" ; \
     else \
         echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; \
