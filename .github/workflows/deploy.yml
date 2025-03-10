@@ -8,7 +8,7 @@ on:
   #  -> may be worth scheduling for every 6 days
 
 jobs:
-  deploy-docker-image:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -38,6 +38,57 @@ jobs:
 
       - name: Cross-build
         run: ./build_cross.sh --verbose
+
+      - name: Upload aarch64 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: radcam-manager-aarch64
+          path: target/build/aarch64-unknown-linux-musl/aarch64-unknown-linux-musl/release/radcam-manager
+
+      - name: Upload armv7 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: radcam-manager-armv7
+          path: target/build/armv7-unknown-linux-musleabihf/armv7-unknown-linux-musleabihf/release/radcam-manager
+
+      - name: Upload x86_64 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: radcam-manager-x86_64
+          path: target/build/x86_64-unknown-linux-musl/x86_64-unknown-linux-musl/release/radcam-manager
+
+      - name: Upload aarch64 to release
+        uses: svenstaro/upload-release-action@v2
+        if: ${{ github.event_name == 'push' }}
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/build/aarch64-unknown-linux-musl/aarch64-unknown-linux-musl/release/radcam-manager
+          asset_name: radcam-manager-aarch64
+          tag: ${{ github.ref }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          overwrite: true
+
+      - name: Upload armv7 to release
+        uses: svenstaro/upload-release-action@v2
+        if: ${{ github.event_name == 'push' }}
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/build/armv7-unknown-linux-musleabihf/armv7-unknown-linux-musleabihf/release/radcam-manager
+          asset_name: radcam-manager-armv7
+          tag: ${{ github.ref }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          overwrite: true
+
+      - name: Upload x86_64 to release
+        uses: svenstaro/upload-release-action@v2
+        if: ${{ github.event_name == 'push' }}
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/build/x86_64-unknown-linux-musl/x86_64-unknown-linux-musl/release/radcam-manager
+          asset_name: radcam-manager-x86_64
+          tag: ${{ github.ref }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          overwrite: true
 
       - name: Deploy BlueOS Extension
         uses: joaoantoniocardoso/Deploy-BlueOS-Extension@allow-dirty
