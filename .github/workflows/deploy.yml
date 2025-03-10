@@ -37,7 +37,7 @@ jobs:
           cache: 'npm'
 
       - name: Cross-build
-        run: ./build_cross.sh
+        run: ./build_cross.sh --verbose
 
       - name: Deploy BlueOS Extension
         uses: joaoantoniocardoso/Deploy-BlueOS-Extension@allow-dirty
