@@ -28,10 +28,7 @@
           <v-tab value="image">
             Image
           </v-tab>
-          <v-tab
-            value="streams"
-            :disabled="true"
-          >
+          <v-tab value="streams">
             Streams
           </v-tab>
           <v-tab
@@ -43,11 +40,20 @@
         </v-tabs>
 
         <v-tabs-window v-model="tab">
-          <ImageTab
-            :backend-api="backendAPI"
-            :selected-camera-uuid="selectedCameraUUID"
-            :disabled="selectedCameraUUID == null"
-          />
+          <v-tabs-window-item value="image">
+            <ImageTab
+              :backend-api="backendAPI"
+              :selected-camera-uuid="selectedCameraUUID"
+              :disabled="selectedCameraUUID == null"
+            />
+          </v-tabs-window-item>
+          <v-tabs-window-item value="streams">
+            <StreamsTab
+              :backend-api="backendAPI"
+              :selected-camera-uuid="selectedCameraUUID"
+              :disabled="selectedCameraUUID == null"
+            />
+          </v-tabs-window-item>
         </v-tabs-window>
       </v-container>
     </v-main>
