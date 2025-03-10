@@ -39,11 +39,11 @@ jobs:
       - name: Cross-build
         run: ./build_cross.sh
 
-      # - name: Deploy BlueOS Extension
-      #   uses: joaoantoniocardoso/Deploy-BlueOS-Extension@allow-dirty
-      #   with:
-      #     docker-username: ${{ secrets.DOCKER_USERNAME }}
-      #     docker-password: ${{ secrets.DOCKER_PASSWORD }}
-      #     github-token: ${{ secrets.GITHUB_TOKEN }}
-      #     image-name: 'radcam-manager'
-      #     checkout-clean: false
+      - name: Deploy BlueOS Extension
+        uses: joaoantoniocardoso/Deploy-BlueOS-Extension@allow-dirty
+        with:
+          docker-username: ${{ secrets.DOCKER_USERNAME }}
+          docker-password: ${{ secrets.DOCKER_PASSWORD }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          image-name: 'radcam-manager'
+          checkout-clean: false
