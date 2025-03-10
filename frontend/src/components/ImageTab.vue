@@ -53,7 +53,8 @@
 </template>
 
 <script setup lang="ts">
-import type { AdvancedParameterSetting, BaseParameterSetting, CameraControl } from '@/bindings/camera_control'
+
+import type { BaseParameterSetting, CameraControl, AdvancedParameterSetting } from '@/bindings/radcam'
 import axios from 'axios'
 import { onMounted, ref, watch } from 'vue'
 

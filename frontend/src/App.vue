@@ -62,7 +62,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue"
-import type { Camera } from '@/bindings/camera'
+import type { Camera } from '@/bindings/mcm_client'
 import axios from 'axios'
 import { useRoute } from "vue-router"
 
