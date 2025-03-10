@@ -19,22 +19,6 @@ pub struct Extras {
     pub cockpit: &'static str,
 }
 
-#[derive(Debug, Serialize)]
-pub struct CockpitExtras {
-    pub target_system: String,
-    pub target_cockpit_api_version: String,
-    pub widgets: Vec<CockpitWidget>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CockpitWidget {
-    pub name: String,
-    pub config_iframe_url: Option<String>,
-    pub iframe_url: String,
-    pub iframe_icon: String,
-    pub version: String,
-}
-
 impl Default for ServerMetadata {
     fn default() -> Self {
         Self {
@@ -51,45 +35,6 @@ impl Default for ServerMetadata {
             },
         }
     }
-}
-
-pub async fn cockpit_extras() -> impl IntoResponse {
-    let cameras = mcm_client::cameras().await;
-
-    let version = option_env!("CARGO_PKG_VERSION")
-        .unwrap_or("0.0.0")
-        .to_string();
-
-    let mut widgets = cameras
-        .into_iter()
-        .filter_map(|(camera_uuid, camera)| {
-            Some(CockpitWidget {
-                name: format!("RadCam ({})", camera.hostname),
-                config_iframe_url: None,
-                iframe_url: format!("/?uuid={camera_uuid}"),
-                iframe_icon: "/assets/logo.svg".to_string(),
-                version: version.clone(),
-            })
-        })
-        .collect::<Vec<CockpitWidget>>();
-
-    widgets.push(CockpitWidget {
-        name: "RadCam (any)".to_string(),
-        config_iframe_url: None,
-        iframe_url: "".to_string(),
-        iframe_icon: "/assets/logo.svg".to_string(),
-        version: version.clone(),
-    });
-
-    let cockpit_extras = CockpitExtras {
-        target_system: "Cockpit".to_string(),
-        target_cockpit_api_version: "1.0.0".to_string(),
-        widgets,
-    };
-
-    let json = serde_json::to_string_pretty(&cockpit_extras).unwrap();
-
-    json.into_response()
 }
 
 /// The "register_service" route is used by BlueOS extensions manager

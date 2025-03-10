@@ -4,6 +4,7 @@ use tracing::*;
 
 pub mod blueos;
 pub mod camera;
+pub mod cockpit;
 pub mod info;
 pub mod log;
 
@@ -14,7 +15,7 @@ pub fn router() -> Router {
         .nest("/log", log::router())
         .nest("/info", info::router())
         .route("/register_service", get(blueos::server_metadata))
-        .route("/cockpit_extras.json", get(blueos::cockpit_extras))
+        .route("/cockpit_extras.json", get(cockpit::cockpit_extras))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
 }
