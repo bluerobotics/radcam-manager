@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -e
 
-TARGETS=(
+DEFAULT_TARGETS=(
     "x86_64-unknown-linux-musl"
     "aarch64-unknown-linux-musl"
     "armv7-unknown-linux-musleabihf"
 )
+if [[ -n "$TARGETS" ]]; then
+    TARGETS=($TARGETS)
+else
+    TARGETS=("${DEFAULT_TARGETS[@]}")
+fi
 
 cd "$(dirname "$0")"
 DIRNAME="$PWD"
