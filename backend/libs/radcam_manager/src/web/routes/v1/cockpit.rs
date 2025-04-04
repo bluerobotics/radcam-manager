@@ -1,5 +1,8 @@
 use axum::response::IntoResponse;
 use mcm_client::Cameras;
+use radcam_commands::{
+    protocol::display::advanced_display::AdvancedParameterSetting, CameraControl,
+};
 use serde::Serialize;
 use serde_json::json;
 
@@ -37,11 +40,12 @@ pub enum CockpitActionType {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequestAction {
-    method: HttpRequestMethod,
+    name: String,
     url: String,
+    method: HttpRequestMethod,
     headers: serde_json::Value,
     url_params: serde_json::Value,
-    body: serde_json::Value,
+    body: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,24 +102,35 @@ fn widgets(cameras: &Cameras) -> Vec<CockpitWidget> {
 fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
     let actions = cameras
         .iter()
-        .map(|(camera_uuid, _camera)| {
-            CockpitAction {
+        .map(|(camera_uuid, camera)| {
+            let name: String = format!("RadCam White Balance ({})", camera.hostname);
+
+            vec![CockpitAction {
                 id: format!("radcam-white-balance-{camera_uuid}"),
-                name: format!("RadCam White Balance"),
+                name: name.clone(),
                 action_type: CockpitActionType::HttpRequest(HttpRequestAction {
-                    method: HttpRequestMethod::POST,
-                    url: "http://{{ vehicle-address }}/extensionv2/radcam-manager/v1/camera/auto_white_balance"
+                    name,
+                    url: "http://{{ vehicle-address }}/extensionv2/radcammanager/v1/camera/control"
                         .to_string(),
+                    method: HttpRequestMethod::POST,
                     headers: json!({
                         "Content-Type": "application/json",
                     }),
-                    url_params: json!({
-                        "camera_uuid": camera_uuid,
-                    }),
-                    body: json!(""),
+                    url_params: json!({}),
+                    body: json!(CameraControl {
+                        camera_uuid: *camera_uuid,
+                        action: radcam_commands::Action::SetImageAdjustmentEx(
+                            AdvancedParameterSetting {
+                                once_awb: Some(1),
+                                ..Default::default()
+                            }
+                        ),
+                    })
+                    .to_string(),
                 }),
-            }
+            }]
         })
+        .flatten()
         .collect::<Vec<CockpitAction>>();
     actions
 }
