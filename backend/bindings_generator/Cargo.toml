@@ -12,7 +12,7 @@ bench = false
 radcam_commands = { path="../libs/radcam_commands" }
 mcm_client = { path = "../libs/mcm_client" }
 
-anyhow = "1.0.97"
+anyhow = "1.0.98"
 ts-rs = { version = "10.1.0", features = ["serde_json", "no-serde-warnings"] }
 tsync = { git = "https://github.com/AnthonyMichaelTDM/tsync.git", rev = "01f56be" }
 regex = "1.11.1"
