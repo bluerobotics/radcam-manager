@@ -13,19 +13,19 @@ web_client = { path = "../web_client" }
 mcm_client = { path = "../mcm_client" }
 utils = { path = "../utils" }
 
-anyhow = "1.0.97"
-axum = { version = "0.8.1", features = ["ws"] }
+anyhow = "1.0.98"
+axum = { version = "0.8.3", features = ["ws"] }
 base16ct = { version = "0.2.0", features = ["alloc"] }
 md-5 = "0.10.6"
-reqwest = { version = "0.12.12", default-features = false, features = ["http2", "json", "rustls-tls"] }
+reqwest = { version = "0.12.15", default-features = false, features = ["http2", "json", "rustls-tls"] }
 serde = "1.0.219"
 serde_derive = "1.0.219"
 serde_repr = "0.1.20"
 serde_json = "1.0.140"
 serde_with = "3.12.0"
 tracing = "0.1.41"
-tokio = { version = "1", default-features = false, features = ["time"] }
+tokio = { version = "1.44.2", default-features = false, features = ["time"] }
 url = { version = "2.5.4", features = ["serde"] }
-uuid = { version = "1.15.1", features = ["v5", "serde"] }
+uuid = { version = "1.16.0", features = ["v5", "serde"] }
 ts-rs = { version = "10.1.0", features = ["serde_json", "no-serde-warnings"] }
 tsync = { git = "https://github.com/AnthonyMichaelTDM/tsync.git", rev = "01f56be" }
