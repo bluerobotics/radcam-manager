@@ -4,8 +4,13 @@ use anyhow::Result;
 use regex::Regex;
 use ts_rs::TS;
 
-use mcm_client::{mcm_types, Camera, Credentials, Stream};
-use radcam_commands::{Action, CameraControl};
+use mcm_client::{Camera, Credentials, Stream, mcm_types};
+use radcam_commands::{
+    Action, CameraControl,
+    protocol::display::{
+        advanced_display::AdvancedParameterSetting, base_display::BaseParameterSetting,
+    },
+};
 
 fn main() -> Result<()> {
     if let Err(error) = generate_typescript_bindings_for_mcm_client() {
@@ -117,6 +122,8 @@ fn generate_typescript_bindings_for_radcam() -> Result<()> {
         let bindings = [
             CameraControl::export_to_string()?,
             Action::export_to_string()?,
+            BaseParameterSetting::export_to_string()?,
+            AdvancedParameterSetting::export_to_string()?,
         ]
         .join("\n\n");
 
