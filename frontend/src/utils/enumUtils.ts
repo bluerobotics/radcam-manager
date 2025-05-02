@@ -14,9 +14,12 @@ export function enumToOptions<E extends Record<string, number | string>>(enumObj
 
 export function formatEnumValue(value: string): string {
     return value
-        .replace(/([A-Z])/g, " $1")
-        .trim()
-        .toLowerCase()
-        .replace("bit rate", "bitrate")
-        .replace(/^./, (match) => match.toUpperCase())
+        .replace(/_/g, ' ') // Replace all underscores with spaces
+        .replace(/([a-z])([A-Z])/g, '$1 $2') // Split camelCase
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2') // Split acronym followed by camelCase
+        .split(/\s+/) // Split into words by any whitespace
+        .map(word => /^[A-Z]+$/.test(word) ? word : word.toLowerCase()) // Lowercase non-acronym words
+        .join(' ')
+        .replace(/bit rate/g, 'bitrate') // Replace all occurrences of "bit rate"
+        .replace(/(^\s*| )(\S)/g, (_, space, char) => space + char.toUpperCase()) // Capitalize first letter of each word
 }
