@@ -1,6 +1,6 @@
 use axum::{
-    routing::{get, post},
     Router,
+    routing::{get, post},
 };
 use radcam_commands;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};

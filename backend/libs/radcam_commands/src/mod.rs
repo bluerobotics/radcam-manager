@@ -1,8 +1,8 @@
 use std::{future::Future, pin::Pin};
 
 use anyhow::{Context, Result};
-use axum::{http::StatusCode, response::IntoResponse, Json};
-use mcm_client::{get_camera, Camera};
+use axum::{Json, http::StatusCode, response::IntoResponse};
+use mcm_client::{Camera, get_camera};
 use protocol::{
     display::{advanced_display::AdvancedParameterSetting, base_display::BaseParameterSetting},
     video::video_parameters::VideoParameterSettings,
