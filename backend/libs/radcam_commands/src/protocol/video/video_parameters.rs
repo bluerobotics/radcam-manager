@@ -10,11 +10,11 @@ use super::*;
 #[tsync]
 pub struct VideoParameterSettings {
     /// Video stream flow channel.
-    pub channel: Option<ChannelValue>,
+    pub channel: Option<VideoChannelValue>,
     /// Encoding scheme.
-    pub encode_profile: Option<EncodingProfileValue>,
+    pub encode_profile: Option<VideoEncodingProfileValue>,
     /// Video Coding.
-    pub encode_type: Option<EncodeTypeValue>,
+    pub encode_type: Option<VideoEncodeTypeValue>,
     /// Supported video pixel resolution.
     pub pixel_list: Option<Vec<VideoResolutionValue>>,
     /// Video width resolution, from pixel_list.
@@ -22,7 +22,7 @@ pub struct VideoParameterSettings {
     /// Video height resolution, from pixel_list.
     pub pic_height: Option<u16>,
     /// Bitrate type.
-    pub rc_mode: Option<RcModeValue>,
+    pub rc_mode: Option<VideoRcModeValue>,
     /// Video bitrate.
     pub bitrate: Option<u16>,
     /// Supported maximum vidoe frame rate.
@@ -43,7 +43,7 @@ pub struct VideoResolutionValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[repr(u8)]
 #[tsync]
-pub enum ChannelValue {
+pub enum VideoChannelValue {
     #[default]
     MainStream = 0,
     AuxiliaryStream = 1,
@@ -53,7 +53,7 @@ pub enum ChannelValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[repr(u8)]
 #[tsync]
-pub enum EncodingProfileValue {
+pub enum VideoEncodingProfileValue {
     #[default]
     Baseline = 0,
     MainProfile = 1,
@@ -63,7 +63,7 @@ pub enum EncodingProfileValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[repr(u8)]
 #[tsync]
-pub enum EncodeTypeValue {
+pub enum VideoEncodeTypeValue {
     #[default]
     H264 = 1,
     H265 = 5,
@@ -72,7 +72,7 @@ pub enum EncodeTypeValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[repr(u8)]
 #[tsync]
-pub enum RcModeValue {
+pub enum VideoRcModeValue {
     #[default]
     VariableBitRate = 0,
     ConstantBitRate = 1,
@@ -117,15 +117,15 @@ mod tes {
 
         let expected_params = VideoParameterSettings {
             bitrate: Some(6144),
-            channel: Some(ChannelValue::MainStream),
-            encode_profile: Some(EncodingProfileValue::MainProfile),
-            encode_type: Some(EncodeTypeValue::H264),
+            channel: Some(VideoChannelValue::MainStream),
+            encode_profile: Some(VideoEncodingProfileValue::MainProfile),
+            encode_type: Some(VideoEncodeTypeValue::H264),
             frame_rate: Some(25),
             gop: Some(50),
             max_framerate: Some(25),
             pic_height: Some(1440),
             pic_width: Some(2560),
-            rc_mode: Some(RcModeValue::VariableBitRate),
+            rc_mode: Some(VideoRcModeValue::VariableBitRate),
             pixel_list: Some(vec![
                 VideoResolutionValue {
                     width: 2560,

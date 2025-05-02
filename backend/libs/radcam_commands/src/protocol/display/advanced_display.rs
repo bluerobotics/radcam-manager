@@ -7,7 +7,7 @@ use tsync::tsync;
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum MirrorValue {
+pub enum AdvancedDisplayMirrorValue {
     #[default]
     Open = 0,
     Close = 1,
@@ -16,7 +16,7 @@ pub enum MirrorValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum FlipValue {
+pub enum AdvancedDisplayFlipValue {
     #[default]
     Open = 0,
     Close = 1,
@@ -25,7 +25,7 @@ pub enum FlipValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum PowerFreqValue {
+pub enum AdvancedDisplayPowerFreqValue {
     #[default]
     NTSC = 0,
     PAL = 1,
@@ -34,7 +34,7 @@ pub enum PowerFreqValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum ColorBlackValue {
+pub enum AdvancedDisplayColorBlackValue {
     #[default]
     Color = 0,
     Auto = 1,
@@ -43,7 +43,7 @@ pub enum ColorBlackValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum InfrDetectModeValue {
+pub enum AdvancedDisplayInfrDetectModeValue {
     #[default]
     VideoDetection = 0,
     TimeControl = 1,
@@ -53,7 +53,7 @@ pub enum InfrDetectModeValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum LensCorrectionValue {
+pub enum AdvancedDisplayLensCorrectionValue {
     #[default]
     Open = 0,
     Close = 1,
@@ -62,7 +62,7 @@ pub enum LensCorrectionValue {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum IRCUTLevel {
+pub enum AdvancedDisplayIRCUTLevelValue {
     #[default]
     LowLevel = 0,
     HighLevel = 1,
@@ -71,7 +71,7 @@ pub enum IRCUTLevel {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum LDRLevel {
+pub enum AdvancedDisplayLDRLevelValue {
     #[default]
     LowLevel = 0,
     HighLevel = 1,
@@ -80,7 +80,7 @@ pub enum LDRLevel {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum Antiflicker {
+pub enum AdvancedDisplayAntiflickerValue {
     #[default]
     Close = 0,
     Auto = 1,
@@ -91,7 +91,7 @@ pub enum Antiflicker {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum Scenemode {
+pub enum AdvancedDisplaySceneModeValue {
     #[default]
     IPC = 0,
     FaceCapture = 1,
@@ -101,7 +101,7 @@ pub enum Scenemode {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum Hlcenable {
+pub enum AdvancedDisplayHlcEnableValue {
     #[default]
     Close = 0,
     Open = 1,
@@ -110,7 +110,7 @@ pub enum Hlcenable {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum Lowfarmerate {
+pub enum AdvancedDisplayLowFramerateValue {
     #[default]
     Close = 0,
     Open = 1,
@@ -119,7 +119,7 @@ pub enum Lowfarmerate {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum _2dNrLevel {
+pub enum AdvancedDisplay2dNrLevelValue {
     #[default]
     Low = 0,
     Middle = 1,
@@ -129,7 +129,7 @@ pub enum _2dNrLevel {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum WDRSensor {
+pub enum AdvancedDisplayWDRSensorValue {
     #[default]
     Close = 0,
     Open = 1,
@@ -138,7 +138,7 @@ pub enum WDRSensor {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum NoiseReduction {
+pub enum AdvancedDisplayNoiseReductionValue {
     #[default]
     Close = 0,
     Low = 1,
@@ -149,7 +149,7 @@ pub enum NoiseReduction {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum AutoIris {
+pub enum AdvancedDisplayAutoIrisValue {
     #[default]
     Open = 0,
     Close = 1,
@@ -159,7 +159,7 @@ pub enum AutoIris {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum LedControl {
+pub enum AdvancedDisplayLedControlValue {
     #[default]
     Auto = 0,
     Open = 1,
@@ -169,7 +169,7 @@ pub enum LedControl {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum LedControlAvail {
+pub enum AdvancedDisplayLedControlAvailValue {
     #[default]
     LowLevel = 0,
     HighLevel = 1,
@@ -178,7 +178,7 @@ pub enum LedControlAvail {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum LightControlMode {
+pub enum AdvancedDisplayLightControlModeValue {
     #[default]
     ElectricalLevel = 0,
     PWM = 1,
@@ -187,7 +187,7 @@ pub enum LightControlMode {
 #[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
 #[tsync]
 #[repr(u8)]
-pub enum LampType {
+pub enum AdvancedDisplayLampTypeValue {
     #[default]
     InfraredLamp = 0,
     WhiteLight = 1,
@@ -196,18 +196,17 @@ pub enum LampType {
 
 #[skip_serializing_none]
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[tsync]
 pub struct AdvancedParameterSetting {
     /// Mirror.
-    pub mirror: Option<MirrorValue>,
+    pub mirror: Option<AdvancedDisplayMirrorValue>,
     /// Flip.
-    pub flip: Option<FlipValue>,
+    pub flip: Option<AdvancedDisplayFlipValue>,
     /// Video Format.
-    pub power_freq: Option<PowerFreqValue>,
+    pub power_freq: Option<AdvancedDisplayPowerFreqValue>,
     /// Color Turned Black.
-    pub color_black: Option<ColorBlackValue>,
+    pub color_black: Option<AdvancedDisplayColorBlackValue>,
     /// Video Detection Mode. Only support when `color_black` is `1`.
-    pub infr_detect_mode: Option<InfrDetectModeValue>,
+    pub infr_detect_mode: Option<AdvancedDisplayInfrDetectModeValue>,
     /// Color To Black Sensitivity. Only support when `infr_detect_mode` is `0`. Range: [0..=255].
     pub sens_day_to_night: Option<u8>,
     /// Black To Color Sensitivity. Only support when `infr_detect_mode` is `0`. Range: [0..=255].
@@ -221,50 +220,54 @@ pub struct AdvancedParameterSetting {
     /// Color Turned (Time Control) End Time Min. Only support when `infr_detect_mode` is `1`. Range: [0..=59].
     pub infr_night_m: Option<u8>,
     /// Lens Correction. Range: [0..=255].
-    pub lens_correction: Option<LensCorrectionValue>,
+    pub lens_correction: Option<AdvancedDisplayLensCorrectionValue>,
     /// Wide Dynamic Strength. Range: [0..=255].
     pub wdr_level: Option<u8>,
     /// IRCUT Level.
-    pub ircut_level: Option<IRCUTLevel>,
+    pub ircut_level: Option<AdvancedDisplayIRCUTLevelValue>,
     /// Photosensitive Level.
-    pub ldr_level: Option<LDRLevel>,
+    pub ldr_level: Option<AdvancedDisplayLDRLevelValue>,
     /// Light Pattern.
-    pub led_control_mode: Option<LightControlMode>,
+    pub led_control_mode: Option<AdvancedDisplayLightControlModeValue>,
     // Light Type.
-    pub lamp_type: Option<LampType>,
+    pub lamp_type: Option<AdvancedDisplayLampTypeValue>,
     /// Light Enable Level. Only support when `led_control_mode` is `0`.
-    pub led_control_avail: Option<LedControlAvail>,
+    pub led_control_avail: Option<AdvancedDisplayLedControlAvailValue>,
     /// Infrared Lamp Brightness. Only support when `led_control_mode` is `1`. Range: [0..=255].
     pub ir_level: Option<u8>,
     /// White Light Brightness. Only support when `lamp_type` is `1` and `led_control_mode` is `1`. Range: [0..=255].
     pub led_level: Option<u8>,
     /// IR Control.
-    pub led_control: Option<LedControl>,
+    pub led_control: Option<AdvancedDisplayLedControlValue>,
     /// Aperture mode.
-    pub auto_iris: Option<AutoIris>,
+    pub auto_iris: Option<AdvancedDisplayAutoIrisValue>,
     /// Control the duty cycle of aperture PWM. Only support when `auto_iris` is `2`. Range: [0..=255]. Not Settable.
     #[serde(rename = "irisLevel")]
+    #[serde(alias = "iris_level")]
     pub iris_level: Option<u8>,
     /// 3D Noise Reduction.
     #[serde(rename = "noiseReduction")]
-    pub noise_reduction: Option<NoiseReduction>,
+    #[serde(alias = "noise_reduction")]
+    pub noise_reduction: Option<AdvancedDisplayNoiseReductionValue>,
     /// WDR Enable.
-    pub wdr_sensor: Option<WDRSensor>,
+    pub wdr_sensor: Option<AdvancedDisplayWDRSensorValue>,
     /// WDR Strength. Range: [0..=255].
     pub wdr_level_sensor: Option<u8>,
     /// HLC.
-    pub hlc_enable: Option<Hlcenable>,
+    pub hlc_enable: Option<AdvancedDisplayHlcEnableValue>,
     /// Slow Shutter.
-    pub low_farme_rate: Option<Lowfarmerate>,
+    pub low_farme_rate: Option<AdvancedDisplayLowFramerateValue>,
     /// 2D NR.
     #[serde(rename = "_2DNR_level")]
-    pub _2d_nr_level: Option<_2dNrLevel>,
+    #[serde(alias = "_2d_nr_level")]
+    pub _2d_nr_level: Option<AdvancedDisplay2dNrLevelValue>,
     /// Anti Flicker
-    pub anti_flicker: Option<Antiflicker>,
+    pub anti_flicker: Option<AdvancedDisplayAntiflickerValue>,
     /// Scene Mode
-    pub scene_mode: Option<Scenemode>,
+    pub scene_mode: Option<AdvancedDisplaySceneModeValue>,
     /// [Custom] Automatic White Balance trigger. Range: [0..=1].
     #[serde(rename = "onceAWB")]
+    #[serde(alias = "once_awb")]
     pub once_awb: Option<u8>,
     /// Restores all AdvancedParameterSetting parameters when `1`
     pub set_default: Option<u8>,
@@ -351,14 +354,14 @@ mod tests {
         let params = deserialize::<AdvancedParameterSetting>(&json).expect("Failed deserializing");
 
         let expected_params = AdvancedParameterSetting {
-            mirror: Some(MirrorValue::Open),
-            flip: Some(FlipValue::Open),
-            power_freq: Some(PowerFreqValue::PAL),
-            color_black: Some(ColorBlackValue::Auto),
-            lens_correction: Some(LensCorrectionValue::Open),
+            mirror: Some(AdvancedDisplayMirrorValue::Open),
+            flip: Some(AdvancedDisplayFlipValue::Open),
+            power_freq: Some(AdvancedDisplayPowerFreqValue::PAL),
+            color_black: Some(AdvancedDisplayColorBlackValue::Auto),
+            lens_correction: Some(AdvancedDisplayLensCorrectionValue::Open),
             wdr_level: Some(128),
-            ircut_level: Some(IRCUTLevel::LowLevel),
-            ldr_level: Some(LDRLevel::HighLevel),
+            ircut_level: Some(AdvancedDisplayIRCUTLevelValue::LowLevel),
+            ldr_level: Some(AdvancedDisplayLDRLevelValue::HighLevel),
             ..Default::default()
         };
 
