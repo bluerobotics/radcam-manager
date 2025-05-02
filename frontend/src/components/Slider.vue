@@ -32,7 +32,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, onBeforeUnmount, watch } from 'vue'
 
 const props = withDefaults(defineProps<{
   current: number,
@@ -54,6 +54,10 @@ const emit = defineEmits<{
 }>()
 let sliderInterval: number | null = null
 let isSliding = false
+
+watch(() => props.current, (newVal) => {
+  current.value = newVal;
+});
 
 onBeforeUnmount(() => {
   if (sliderInterval) {
