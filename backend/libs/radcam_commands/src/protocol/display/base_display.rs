@@ -6,7 +6,6 @@ use super::*;
 
 #[skip_serializing_none]
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[tsync]
 pub struct BaseParameterSetting {
     /// Tonal. Range: [0..=255]
     pub hue: Option<u8>,
@@ -20,10 +19,229 @@ pub struct BaseParameterSetting {
     pub saturation: Option<u8>,
     /// Gamma. Range: [0..=255]
     pub gamma: Option<u8>,
+    /// Backlight Compensation. Range: [0..=255]
+    pub blc_level: Option<u8>,
     /// Exposure Time.
-    pub max_exposure: Option<MaxExposureValue>,
+    pub max_exposure: Option<BaseMaxExposureValue>,
     /// Restores all BaseParameterSetting parameters when `1`
     pub set_default: Option<u8>,
+    /// Dehaze
+    #[serde(rename = "antiFog")]
+    #[serde(alias = "anti_fog")]
+    pub anti_fog: Option<BaseAntiFogValue>,
+    /// Frame Turbo.
+    #[serde(rename = "frameTurbo_pro")]
+    #[serde(alias = "frameTurbo")]
+    #[serde(alias = "frame_turbo")]
+    pub frame_turbo_pro: Option<BaseFrameTurboValue>,
+    /// Scene Mode. Note: this is not working, use the `AdvanceParameterSetting::sene_mode` instead
+    #[serde(rename = "sceneMode")]
+    #[serde(alias = "scene_mode")]
+    pub scene_mode: Option<BaseSceneModeValue>,
+    /// Exposure Strategy Mode.
+    #[serde(rename = "AE_strategy_mode")]
+    #[serde(alias = "auto_exposure_strategy_mode")]
+    pub auto_exposure_strategy_mode: Option<BaseAutoExposureStrategyModeValue>,
+    /// Exposure Mode.
+    #[serde(rename = "auto_exposureEx")]
+    #[serde(alias = "auto_exposure_ex")]
+    pub auto_exposure_ex: Option<BaseExposureModeValue>,
+    /// Manual Exposure Time. This is the 'x' value in T = 1/x.
+    pub exposure_time: Option<BaseExposureTimeValue>,
+    /// White Balance Mode.
+    pub auto_awb: Option<BaseAutoWhiteBalanceModeValue>,
+    /// Manual White Balance Red. Range: [0..=255]
+    pub awb_red: Option<u8>,
+    /// Manual White Balance Green. Range: [0..=255]
+    pub awb_green: Option<u8>,
+    /// Manual White Balance Blue. Range: [0..=255]
+    pub awb_blue: Option<u8>,
+    /// White Balance Scene.
+    pub awb_auto_mode: Option<BaseAutoWhiteBalanceSceneValue>,
+    /// Manual White Balance Style Red. Range: [0..=255]
+    pub awb_style_red: Option<u8>,
+    /// Manual White Balance Style Green. Range: [0..=255]
+    pub awb_style_green: Option<u8>,
+    /// Manual White Balance Style Blue. Range: [0..=255]
+    pub awb_style_blue: Option<u8>,
+    /// Automatic Gain Mode.
+    pub auto_gain_mode: Option<BaseAutoGainModeValue>,
+    /// Automatic Maximum D Gain. Range: [0..=255]
+    #[serde(rename = "auto_DGain_max")]
+    #[serde(alias = "auto_d_gain_max")]
+    pub auto_d_gain_max: Option<u8>,
+    /// Automatic Maximum A Gain. Range: [0..=255]
+    #[serde(rename = "auto_AGain_max")]
+    #[serde(alias = "auto_a_gain_max")]
+    pub auto_a_gain_max: Option<u8>,
+    /// Max Sys Gain. Range: [0..=255]
+    pub max_sys_gain: Option<u8>,
+    /// Enable Manual A Gain.
+    #[serde(rename = "manual_AGain_enable")]
+    #[serde(alias = "manual_a_gain_enable")]
+    pub manual_a_gain_enable: Option<BaseManualAGainEnableValue>,
+    /// Manual A Gain. Range: [0..=255]
+    #[serde(rename = "manual_AGain")]
+    #[serde(alias = "manual_a_gain")]
+    pub manual_a_gain: Option<u8>,
+    /// Enable Manual D Gain.
+    #[serde(rename = "manual_DGain_enable")]
+    #[serde(alias = "manual_d_gain_enable")]
+    pub manual_d_gain_enable: Option<BaseManualDGainEnableValue>,
+    /// Manual D Gain. Range: [0..=255]
+    #[serde(rename = "manual_DGain")]
+    #[serde(alias = "manual_d_gain")]
+    pub manual_d_gain: Option<u8>,
+    /// Image Rotation
+    pub rotate: Option<BaseRotateValue>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u32)]
+pub enum BaseMaxExposureValue {
+    _12 = 12,
+    _25 = 25,
+    #[default]
+    _30 = 30,
+    _50 = 50,
+    _60 = 60,
+    _100 = 100,
+    _200 = 200,
+    _400 = 400,
+    _800 = 800,
+    _1000 = 1000,
+    _2000 = 2000,
+    _4000 = 4000,
+    _8000 = 8000,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseAntiFogValue {
+    #[default]
+    Close = 0,
+    Open = 1,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseFrameTurboValue {
+    #[default]
+    Close = 0,
+    HighFrameRates = 1,
+    UltraHighFrameRates = 2,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseSceneModeValue {
+    #[default]
+    FaceCapture = 1,
+    LicensePlateCapture = 2,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseAutoExposureStrategyModeValue {
+    #[default]
+    HighLightPriority = 0,
+    LowLightPriority = 1,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseExposureModeValue {
+    #[default]
+    Auto = 0,
+    Manual = 1,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u32)]
+pub enum BaseExposureTimeValue {
+    _12 = 12,
+    _25 = 25,
+    _30 = 30,
+    _50 = 50,
+    #[default]
+    _60 = 60,
+    _100 = 100,
+    _200 = 200,
+    _400 = 400,
+    _800 = 800,
+    _1000 = 1000,
+    _2000 = 2000,
+    _4000 = 4000,
+    _8000 = 8000,
+    _10000 = 10000,
+    _34464 = 34464,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseAutoWhiteBalanceModeValue {
+    #[default]
+    Auto = 0,
+    Manual = 1,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseAutoWhiteBalanceSceneValue {
+    #[default]
+    Scene0 = 0,
+    Scene1 = 1,
+    Scene2 = 2,
+    Scene3 = 3,
+    Scene4 = 4,
+    Scene5 = 5,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseAutoGainModeValue {
+    #[default]
+    Auto = 0,
+    Manual = 1,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseManualAGainEnableValue {
+    #[default]
+    Close = 0,
+    Open = 1,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseManualDGainEnableValue {
+    #[default]
+    Close = 0,
+    Open = 1,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize_repr, Deserialize_repr, TS)]
+#[tsync]
+#[repr(u8)]
+pub enum BaseRotateValue {
+    #[default]
+    _0 = 0,
+    _90 = 1,
+    _180 = 2,
+    _270 = 3,
 }
 
 #[cfg(test)]
