@@ -112,10 +112,10 @@ import axios from "axios"
 import { computed, onMounted, ref, watch } from "vue"
 import { enumToOptions } from "@/utils/enumUtils"
 import {
-  ChannelValue,
-  EncodeTypeValue,
-  EncodingProfileValue,
-  RcModeValue,
+  VideoChannelValue,
+  VideoEncodeTypeValue,
+  VideoEncodingProfileValue,
+  VideoRcModeValue,
   type VideoParameterSettings,
   type VideoResolutionValue,
 } from "@/bindings/radcam"
@@ -128,10 +128,10 @@ const props = defineProps<{
 
 const processingUpdate = ref<boolean>(false)
 
-const channelOptions = enumToOptions(ChannelValue)
-const encodeProfileOptions = enumToOptions(EncodingProfileValue)
-const encodeTypeOptions = enumToOptions(EncodeTypeValue)
-const rcModeOptions = enumToOptions(RcModeValue)
+const channelOptions = enumToOptions(VideoChannelValue)
+const encodeProfileOptions = enumToOptions(VideoEncodingProfileValue)
+const encodeTypeOptions = enumToOptions(VideoEncodeTypeValue)
+const rcModeOptions = enumToOptions(VideoRcModeValue)
 const resolutionOptions = computed(() => {
   return downloadedVideoParameters.value.pixel_list?.map(
     (res: VideoResolutionValue) => ({
@@ -206,8 +206,8 @@ onMounted(() => {
 const adjustedBitrate = computed({
   get: () => selectedVideoParameters.value.bitrate,
   set: (newValue: number) => {
-    const rounded = Math.round(newValue / 1024) * 1024;
-    selectedVideoParameters.value.bitrate = rounded;
+    const rounded = Math.round(newValue / 1024) * 1024
+    selectedVideoParameters.value.bitrate = rounded
   }
 })
 
@@ -289,7 +289,7 @@ const getVideoParameters = (update: boolean) => {
   }
 
   const video_parameter_settings = {
-    channel: selectedVideoParameters.value.channel ?? ChannelValue.MainStream,
+    channel: selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream,
   }
 
   const payload = {
