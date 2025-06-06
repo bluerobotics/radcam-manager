@@ -39,6 +39,10 @@ pub struct Args {
     /// Sets the Mavlink Camera Manager address.
     #[arg(long, default_value = "127.0.0.1:6020")]
     mcm_address: String,
+
+    /// Sets the path to save the autopilot lua script to control zoom and focus
+    #[arg(long, default_value = "./scripts")]
+    autopilot_scripts_path: Option<String>,
 }
 
 /// Constructs our manager, Should be done inside main
@@ -104,6 +108,18 @@ pub async fn mcm_address() -> std::net::SocketAddr {
     let address = &args().mcm_address;
 
     resolve_address(address).await.unwrap()
+}
+
+#[instrument(level = "debug")]
+pub fn autopilot_scripts_path() -> String {
+    let autopilot_scripts_path = args()
+        .autopilot_scripts_path
+        .clone()
+        .expect("Clap arg \"log-path\" should always be \"Some(_)\" because of the default value.");
+
+    shellexpand::full(&autopilot_scripts_path)
+        .expect("Failed to expand path")
+        .to_string()
 }
 
 #[instrument(level = "debug")]
