@@ -17,9 +17,11 @@ pub mod mcm_types;
 
 static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 
+#[derive(Debug)]
 struct Manager {
     cameras: Cameras,
-    _task_handler: JoinHandle<()>,
+    _authentication_task_handler: JoinHandle<()>,
+    _start_radcams_task_handler: JoinHandle<()>,
 }
 
 pub type Cameras = IndexMap<Uuid, Camera>;
@@ -51,15 +53,28 @@ pub struct Stream {
 #[instrument(level = "debug")]
 pub async fn init(mcm_address: SocketAddr) {
     let cameras = IndexMap::new();
-    let _task_handler = tokio::spawn(async move { authenticate_radcams(&mcm_address).await });
-    let _task_handler = tokio::spawn(async move { start_radcams_streams(&mcm_address).await });
+    let _authentication_task_handler =
+        tokio::spawn(async move { authenticate_radcams(&mcm_address).await });
+    let _start_radcams_task_handler =
+        tokio::spawn(async move { start_radcams_streams(&mcm_address).await });
 
     MANAGER.get_or_init(|| {
         RwLock::new(Manager {
             cameras,
-            _task_handler,
+            _authentication_task_handler,
+            _start_radcams_task_handler,
         })
     });
+}
+
+impl Drop for Manager {
+    #[instrument(level = "debug")]
+    fn drop(&mut self) {
+        debug!("Finishing tasks...");
+
+        self._authentication_task_handler.abort();
+        self._start_radcams_task_handler.abort();
+    }
 }
 
 #[instrument(level = "debug")]
