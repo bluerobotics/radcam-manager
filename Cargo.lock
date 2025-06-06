@@ -154,6 +154,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
+name = "autopilot"
+version = "0.1.4"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_derive",
+ "tokio",
+ "tracing",
+ "ts-rs",
+ "tsync",
+ "url",
+ "utils",
+ "web_client",
+]
+
+[[package]]
 name = "axum"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
