@@ -40,9 +40,9 @@ pub struct Args {
     #[arg(long, default_value = "127.0.0.1:6020")]
     mcm_address: String,
 
-    /// Sets the path to save the autopilot lua script to control zoom and focus
-    #[arg(long, default_value = "./scripts")]
-    autopilot_scripts_path: Option<String>,
+    /// Sets the file path for the autopilot lua script to control zoom and focus
+    #[arg(long, default_value = "./scripts/radcam.lua")]
+    autopilot_scripts_file: Option<String>,
 }
 
 /// Constructs our manager, Should be done inside main
@@ -111,13 +111,17 @@ pub async fn mcm_address() -> std::net::SocketAddr {
 }
 
 #[instrument(level = "debug")]
-pub fn autopilot_scripts_path() -> String {
-    let autopilot_scripts_path = args()
-        .autopilot_scripts_path
+pub fn autopilot_scripts_file() -> String {
+    let autopilot_scripts_file = args()
+        .autopilot_scripts_file
         .clone()
-        .expect("Clap arg \"log-path\" should always be \"Some(_)\" because of the default value.");
+        .expect("Clap arg \"autopilot-scripts-file\" should always be \"Some(_)\" because of the default value.");
 
-    shellexpand::full(&autopilot_scripts_path)
+    if !autopilot_scripts_file.ends_with(".lua") {
+        panic!("Clap arg \"autopilot-scripts-file\" Should always end with \".lua\"");
+    }
+
+    shellexpand::full(&autopilot_scripts_file)
         .expect("Failed to expand path")
         .to_string()
 }
