@@ -77,7 +77,7 @@ fn widgets(cameras: &Cameras) -> Vec<CockpitWidget> {
         .unwrap_or("0.0.0")
         .to_string();
 
-    let mut widgets = cameras
+    let widgets = cameras
         .iter()
         .map(|(camera_uuid, camera)| CockpitWidget {
             name: format!("RadCam ({})", camera.hostname),
@@ -87,14 +87,6 @@ fn widgets(cameras: &Cameras) -> Vec<CockpitWidget> {
             version: version.clone(),
         })
         .collect::<Vec<CockpitWidget>>();
-
-    widgets.push(CockpitWidget {
-        name: "RadCam (any)".to_string(),
-        config_iframe_url: None,
-        iframe_url: "".to_string(),
-        iframe_icon: "/assets/logo.svg".to_string(),
-        version: version.clone(),
-    });
 
     widgets
 }
