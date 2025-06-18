@@ -11,6 +11,7 @@ pub struct ServerMetadata {
     pub new_page: bool,
     pub webpage: &'static str,
     pub api: &'static str,
+    pub works_in_relative_paths: bool,
     pub extras: Extras,
 }
 
@@ -30,6 +31,7 @@ impl Default for ServerMetadata {
             new_page: false,
             webpage: "https://github.com/BluerRobotics/radcam-manager",
             api: "/docs",
+            works_in_relative_paths: true,
             extras: Extras {
                 cockpit: "/cockpit_extras.json",
             },
