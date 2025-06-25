@@ -23,6 +23,10 @@
           density="compact"
           type="number"
           width="90px"
+          :min="min"
+          :max="max"
+          :step="step"
+          :disabled="disabled"
           hide-details
           single-line
         />

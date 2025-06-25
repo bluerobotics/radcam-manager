@@ -14,6 +14,7 @@ pub fn router() -> Router {
         .nest("/camera", camera::router())
         .nest("/log", log::router())
         .nest("/info", info::router())
+        .nest("/autopilot", autopilot::router())
         .route("/register_service", get(blueos::server_metadata))
         .route("/cockpit_extras.json", get(cockpit::cockpit_extras))
         .layer(TraceLayer::new_for_http())

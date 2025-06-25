@@ -1,6 +1,7 @@
 use anyhow::Result;
 use tracing::*;
 
+use autopilot;
 use radcam_manager::{logger, web};
 
 pub mod cli;
@@ -26,6 +27,17 @@ async fn main() -> Result<()> {
     debug!("Command line input struct call: {}", cli::command_line());
 
     mcm_client::init(cli::mcm_address().await).await;
+
+    autopilot::init(
+        cli::settings_file(),
+        cli::autopilot_scripts_file(),
+        None,
+        cli::mavlink_connection_string(),
+        cli::mavlink_system_id(),
+        cli::mavlink_component_id(),
+    )
+    .await
+    .unwrap();
 
     web::run(cli::web_server().await, cli::default_api_version()).await;
 

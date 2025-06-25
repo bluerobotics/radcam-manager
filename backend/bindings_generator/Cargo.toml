@@ -9,6 +9,7 @@ path = "src/main.rs"
 bench = false
 
 [dependencies]
+autopilot = { path="../libs/autopilot" }
 radcam_commands = { path="../libs/radcam_commands" }
 mcm_client = { path = "../libs/mcm_client" }
 

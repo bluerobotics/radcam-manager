@@ -682,6 +682,7 @@
         </div>
       </v-expansion-panel-text>
     </v-expansion-panel>
+
   </v-expansion-panels>
 </template>
 

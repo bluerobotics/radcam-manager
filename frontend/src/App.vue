@@ -31,6 +31,9 @@
           <v-tab value="streams">
             Streams
           </v-tab>
+          <v-tab value="autopilot">
+            Zoom & Focus
+          </v-tab>
           <v-tab
             value="configs"
             :disabled="true"
@@ -42,16 +45,23 @@
         <v-tabs-window v-model="tab">
           <v-tabs-window-item value="image">
             <ImageTab
-              :backend-api="backendAPI"
+              :backend-api="`${backendAPI}/camera`"
               :selected-camera-uuid="selectedCameraUUID"
               :disabled="selectedCameraUUID == null"
             />
           </v-tabs-window-item>
           <v-tabs-window-item value="streams">
             <StreamsTab
-              :backend-api="backendAPI"
+              :backend-api="`${backendAPI}/camera`"
               :selected-camera-uuid="selectedCameraUUID"
               :disabled="selectedCameraUUID == null"
+            />
+          </v-tabs-window-item>
+          <v-tabs-window-item value="autopilot">
+            <AutopilotTab
+              :backend-api="`${backendAPI}/autopilot`"
+              :selected-camera-uuid="selectedCameraUUID"
+              :disabled="false"
             />
           </v-tabs-window-item>
         </v-tabs-window>
@@ -65,10 +75,11 @@ import { onMounted, onUnmounted, ref } from "vue"
 import type { Camera } from '@/bindings/mcm_client'
 import axios from 'axios'
 import { useRoute } from "vue-router"
+import AutopilotTab from "./components/AutopilotTab.vue"
 
 const tab = ref(null)
 const backendAddress = window.location.host.toString()
-const backendAPI = ref(`http://${backendAddress}/v1/camera`)
+const backendAPI = ref(`http://${backendAddress}/v1`)
 const cameras = ref<Camera[]>([])
 const selectedCameraUUID = ref<string | null>(null)
 
@@ -77,7 +88,7 @@ const desiredCameraUuid = ref<string | null>(null)
 
 const getCameras = async () => {
   try {
-    const response = await axios.get(`${backendAPI.value}/list`)
+    const response = await axios.get(`${backendAPI.value}/camera/list`)
     const camerasData = validateCameras(response.data)
     cameras.value = camerasData
 
