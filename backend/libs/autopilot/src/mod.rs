@@ -5,15 +5,9 @@ pub mod routes;
 mod script;
 mod settings;
 
-use ::mavlink::{
-    MessageData,
-    ardupilotmega::{
-        AUTOPILOT_VERSION_DATA, MavMessage, MavProtocolCapability, PARAM_SET_DATA, PARAM_VALUE_DATA,
-    },
-};
 pub use routes::{ApiConfig, router};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, task::JoinHandle};
@@ -205,61 +199,21 @@ impl Manager {
     }
 
     pub async fn send_params(&mut self) -> Result<()> {
-        let target_system = self.mavlink.system_id().await;
-        let target_component = ::mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
-        let encoding = self.mavlink.encoding().await.into();
+        let encoding = self.mavlink.encoding().await.into(); // FIX THIS
 
-        for param in self.parameters.make_params() {
-            let param_id = param.param_id();
-            let param_type = param.param_type();
-            let param_value = param.param_value(encoding);
-
-            self.mavlink
-                .send(
-                    None,
-                    &MavMessage::PARAM_SET(PARAM_SET_DATA {
-                        target_system,
-                        target_component,
-                        param_id,
-                        param_value,
-                        param_type,
-                    }),
-                )
-                .await;
-
-            // loop {
-            //     let (_header, message) = self
-            //         .mavlink
-            //         .recv(
-            //             target_system,
-            //             self.mavlink.component_id().await,
-            //             PARAM_VALUE_DATA::ID,
-            //         )
-            //         .await;
-
-            //     let MavMessage::PARAM_VALUE(data) = message else {
-            //         continue;
-            //     };
-
-            //     if data.param_id != param_id || data.param_type != param_type {
-            //         continue;
-            //     }
-
-            //     if param_value != param_value {
-            //         return Err(anyhow!(
-            //             "Failed setting parameter {:?} to value {:?}",
-            //             param.name,
-            //             param.value
-            //         ));
-            //     }
-
-            //     break;
-            // }
-
-            // debug!(
-            //     "Parameter {:?}, sucessifully set to {:?}",
-            //     param.name, param.value
-            // );
+        for parameter in self.parameters.make_params() {
+            match self.mavlink.set_param(parameter).await {
+                Ok(parameter) => {
+                    debug!(
+                        "Parameter {:?}, sucessifully set to {:?}",
+                        parameter.name,
+                        parameter.param_value(encoding)
+                    );
+                }
+                Err(error) => {
+                    warn!("Failed setting parameter: {error:?}");
+                }
+            }
         }
 
         Ok(())

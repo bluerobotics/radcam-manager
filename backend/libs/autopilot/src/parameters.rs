@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use mavlink::ardupilotmega::{MavParamType, PARAM_VALUE_DATA};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -7,7 +8,7 @@ use crate::mavlink::ParamEncodingType;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Parameter {
     pub name: String,
-    value: ParamType,
+    pub value: ParamType,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -25,10 +26,10 @@ pub enum ParamType {
 }
 
 impl ParamType {
-    pub fn encode(&self, encoding: ParamEncodingType) -> f32 {
+    pub fn encode(&self, encoding: ParamEncodingType) -> Result<f32> {
         use ParamEncodingType::*;
 
-        match (self, encoding) {
+        let value = match (self, encoding) {
             // C_CAST
             (ParamType::UINT8(v), CCast) => *v as f32,
             (ParamType::INT8(v), CCast) => *v as f32,
@@ -55,15 +56,17 @@ impl ParamType {
             }
 
             // Unsupported
-            (_, Unsupported) => panic!("Unsupported encoding"),
-        }
+            (_, Unsupported) => return Err(anyhow!("Unsupported encoding")),
+        };
+
+        Ok(value)
     }
 
-    fn decode(data: &PARAM_VALUE_DATA, encoding: ParamEncodingType) -> Self {
+    fn decode(data: &PARAM_VALUE_DATA, encoding: ParamEncodingType) -> Result<Self> {
         use MavParamType::*;
         use ParamEncodingType::*;
 
-        match (data.param_type, encoding) {
+        let param = match (data.param_type, encoding) {
             // C_CAST
             (MAV_PARAM_TYPE_UINT8, CCast) => ParamType::UINT8(data.param_value as u8),
             (MAV_PARAM_TYPE_INT8, CCast) => ParamType::INT8(data.param_value as i8),
@@ -95,20 +98,22 @@ impl ParamType {
                 panic!("Use PARAM_EXT_* for 64-bit values")
             }
 
-            (_, Unsupported) => panic!("Unsupported encoding"),
-        }
+            (_, Unsupported) => return Err(anyhow!("Unsupported encoding")),
+        };
+
+        Ok(param)
     }
 }
 
 impl Parameter {
-    pub fn new(data: &PARAM_VALUE_DATA, encoding: ParamEncodingType) -> Self {
-        Self {
+    pub fn try_new(data: &PARAM_VALUE_DATA, encoding: ParamEncodingType) -> Result<Self> {
+        Ok(Self {
             name: Self::param_id_to_name(data.param_id),
-            value: ParamType::decode(data, encoding),
-        }
+            value: ParamType::decode(data, encoding)?,
+        })
     }
 
-    pub fn param_value(&self, encoding: ParamEncodingType) -> f32 {
+    pub fn param_value(&self, encoding: ParamEncodingType) -> Result<f32> {
         self.value.encode(encoding)
     }
 
