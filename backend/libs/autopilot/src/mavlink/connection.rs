@@ -8,7 +8,13 @@ use tracing::*;
 pub struct Connection {
     address: String,
     inner: Option<Box<dyn AsyncMavConnection<MavMessage> + Sync + Send>>,
-    sender: broadcast::Sender<(MavHeader, MavMessage)>,
+    sender: broadcast::Sender<Message>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    Received((MavHeader, MavMessage)),
+    ToBeSent((MavHeader, MavMessage)),
 }
 
 impl Connection {
@@ -16,7 +22,7 @@ impl Connection {
     pub async fn new(address: String) -> Self {
         let inner = Some(Self::connect(&address).await);
 
-        let (sender, _receiver) = broadcast::channel::<(MavHeader, MavMessage)>(2048);
+        let (sender, _receiver) = broadcast::channel::<Message>(10000);
 
         Self {
             address,
@@ -115,11 +121,11 @@ impl Connection {
         self.inner.replace(Connection::connect(&self.address).await);
     }
 
-    pub fn get_sender(&self) -> broadcast::Sender<(MavHeader, MavMessage)> {
+    pub fn get_sender(&self) -> broadcast::Sender<Message> {
         self.sender.clone()
     }
 
-    pub fn get_receiver(&self) -> broadcast::Receiver<(MavHeader, MavMessage)> {
+    pub fn get_receiver(&self) -> broadcast::Receiver<Message> {
         self.sender.subscribe()
     }
 }

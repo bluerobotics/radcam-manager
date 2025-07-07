@@ -10,7 +10,10 @@ use mavlink::{
 use tokio::sync::{RwLock, broadcast};
 use tracing::*;
 
-use crate::{mavlink::connection::Connection, parameters::Parameter};
+use crate::{
+    mavlink::connection::{Connection, Message},
+    parameters::Parameter,
+};
 
 #[derive(Debug)]
 pub struct MavlinkComponent {
@@ -64,21 +67,19 @@ impl MavlinkComponent {
 
     #[instrument(level = "debug", skip(inner))]
     async fn sender_task(inner: Arc<RwLock<ComponentInner>>) {
-        let component_id;
-        let system_id;
         let mut receiver;
         let timeout = std::time::Duration::from_secs(10);
 
         {
             let inner_guard = inner.read().await;
-            component_id = inner_guard.component_id;
-            system_id = inner_guard.system_id;
             receiver = inner_guard.get_receiver().await;
         }
 
         loop {
+            // Receive messages from the local components
             let (header, message) = match receiver.recv().await {
-                Ok(inner) => inner,
+                Ok(Message::ToBeSent(inner)) => inner,
+                Ok(Message::Received(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => {
                     unreachable!(
                         "Closed channel: This should never happen, this channel is owned by ComponentInner!"
@@ -93,10 +94,7 @@ impl MavlinkComponent {
                 }
             };
 
-            if header.component_id != component_id || header.system_id != system_id {
-                continue; // Skip loopback
-            }
-
+            // Send the response from the local components to the Mavlink network
             if let Err(error) = inner
                 .write()
                 .await
@@ -122,6 +120,7 @@ impl MavlinkComponent {
         }
 
         loop {
+            // Receive from the Mavlink network
             let (header, message) = match inner.write().await.connection.recv(timeout).await {
                 Ok(inner) => inner,
                 Err(error) => {
@@ -130,7 +129,8 @@ impl MavlinkComponent {
                 }
             };
 
-            if let Err(error) = sender.send((header, message)) {
+            // Send the received message to the components
+            if let Err(error) = sender.send(Message::Received((header, message))) {
                 warn!("Failed receiving mavlink message: {error:?}");
 
                 continue;
@@ -170,7 +170,7 @@ impl MavlinkComponent {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-            if let Err(error) = sender.send((header, message.clone())) {
+            if let Err(error) = sender.send(Message::ToBeSent((header, message.clone()))) {
                 warn!("Failed sending message: {error:?}");
                 continue;
             }
@@ -215,7 +215,7 @@ impl MavlinkComponent {
         let encoding = loop {
             debug!("Requesting Autopilot Version...");
 
-            if let Err(error) = sender.send((header, message.clone())) {
+            if let Err(error) = sender.send(Message::ToBeSent((header, message.clone()))) {
                 warn!("Failed requesting parameter: {error:?}");
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -224,18 +224,15 @@ impl MavlinkComponent {
 
             let receive = async {
                 loop {
-                    let (header, message) = match receiver.recv().await {
-                        Ok(inner) => inner,
+                    let (_header, message) = match receiver.recv().await {
+                        Ok(Message::Received(inner)) => inner,
+                        Ok(Message::ToBeSent(_)) => continue,
                         Err(error) => {
                             error!("Failed receiving requested paramter: {error:?}");
 
                             continue;
                         }
                     };
-
-                    if header.component_id == this_component && header.system_id == this_system {
-                        continue; // skip loopback
-                    }
 
                     let MavMessage::AUTOPILOT_VERSION(data) = message else {
                         continue;
@@ -329,7 +326,7 @@ impl MavlinkComponent {
 
             debug!("Requesting parameter list...");
 
-            if let Err(error) = sender.send((header, message.clone())) {
+            if let Err(error) = sender.send(Message::ToBeSent((header, message.clone()))) {
                 warn!("Failed requesting parameter: {error:?}");
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -337,18 +334,15 @@ impl MavlinkComponent {
             }
 
             loop {
-                let (header, message) = match receiver.recv().await {
-                    Ok(inner) => inner,
+                let (_header, message) = match receiver.recv().await {
+                    Ok(Message::Received(inner)) => inner,
+                    Ok(Message::ToBeSent(_)) => continue,
                     Err(error) => {
                         error!("Failed receiving requested parameter: {error:?}");
 
                         continue;
                     }
                 };
-
-                if header.component_id == this_component && header.system_id == this_system {
-                    continue; // skip loopback
-                }
 
                 let MavMessage::PARAM_VALUE(data) = message else {
                     continue;
@@ -405,31 +399,24 @@ impl MavlinkComponent {
     #[instrument(level = "debug", skip(inner))]
     async fn params_sync_task(inner: Arc<RwLock<ComponentInner>>) {
         let mut receiver;
-        let system_id;
-        let component_id;
         let encoding;
 
         {
             let inner_guard = inner.read().await;
 
             receiver = inner_guard.get_receiver().await;
-            system_id = inner_guard.system_id;
-            component_id = inner_guard.component_id;
             encoding = inner_guard.encoding;
         }
 
         loop {
-            let (header, message) = match receiver.recv().await {
-                Ok(inner) => inner,
+            let (_header, message) = match receiver.recv().await {
+                Ok(Message::Received(inner)) => inner,
+                Ok(Message::ToBeSent(_)) => continue,
                 Err(error) => {
                     warn!("Failed receiving message: {error:?}");
                     continue;
                 }
             };
-
-            if header.component_id == component_id && header.system_id == system_id {
-                continue; // skip loopback
-            }
 
             let MavMessage::PARAM_VALUE(data) = message else {
                 continue;
@@ -487,6 +474,7 @@ impl MavlinkComponent {
 
             if !skip_cache {
                 if let Some(parameter) = inner_guard.parameters.get(param_name) {
+                    debug!("Got parameter from cache!");
                     return Ok(parameter.clone());
                 }
             }
@@ -512,53 +500,52 @@ impl MavlinkComponent {
                 param_id: Parameter::param_name_to_id(param_name),
             });
 
-        loop {
-            if let Err(error) = sender.send((header, message.clone())) {
+        'sender: loop {
+            if let Err(error) = sender.send(Message::ToBeSent((header, message.clone()))) {
                 warn!("Failed requesting parameter: {error:?}");
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 continue;
             }
 
-            let (header, message) = match receiver.recv().await {
-                Ok(inner) => inner,
-                Err(error) => {
-                    warn!("Failed receiving requested parameter: {error:?}");
+            loop {
+                let (_header, message) = match receiver.recv().await {
+                    Ok(Message::Received(inner)) => inner,
+                    Ok(Message::ToBeSent(_)) => continue,
+                    Err(error) => {
+                        warn!("Failed receiving requested parameter: {error:?}");
 
+                        continue 'sender;
+                    }
+                };
+
+                let MavMessage::PARAM_VALUE(data) = message else {
                     continue;
-                }
-            };
+                };
 
-            if header.component_id == this_component && header.system_id == this_system {
-                continue; // skip loopback
+                let parameter = match Parameter::try_new(&data, encoding) {
+                    Ok(parameter) => parameter,
+                    Err(error) => {
+                        warn!("Failed creating parameter from {data:?}: {error:?}");
+
+                        continue;
+                    }
+                };
+
+                debug!(
+                    "Received param [{}/{}] {parameter:?}...",
+                    data.param_index.saturating_add(1),
+                    data.param_count
+                );
+
+                inner
+                    .write()
+                    .await
+                    .parameters
+                    .insert(param_name.to_string(), parameter.clone());
+
+                return Ok(parameter);
             }
-
-            let MavMessage::PARAM_VALUE(data) = message else {
-                continue;
-            };
-
-            let parameter = match Parameter::try_new(&data, encoding) {
-                Ok(parameter) => parameter,
-                Err(error) => {
-                    warn!("Failed creating parameter from {data:?}: {error:?}");
-
-                    continue;
-                }
-            };
-
-            debug!(
-                "Received param [{}/{}] {parameter:?}...",
-                data.param_index + 1,
-                data.param_count
-            );
-
-            inner
-                .write()
-                .await
-                .parameters
-                .insert(param_name.to_string(), parameter.clone());
-
-            return Ok(parameter);
         }
     }
 
@@ -582,10 +569,6 @@ impl MavlinkComponent {
         {
             let inner_guard = inner.read().await;
 
-            if let Some(parameter) = inner_guard.parameters.get(&parameter.name) {
-                return Ok(parameter.clone());
-            }
-
             target_system = inner_guard.system_id;
             this_system = inner_guard.system_id;
             this_component = inner_guard.component_id;
@@ -607,7 +590,7 @@ impl MavlinkComponent {
         });
 
         loop {
-            if let Err(error) = sender.send((header, message.clone())) {
+            if let Err(error) = sender.send(Message::ToBeSent((header, message.clone()))) {
                 warn!("Failed requesting parameter: {error:?}");
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -628,6 +611,8 @@ impl MavlinkComponent {
                 recv_parameter.param_value(encoding),
                 parameter.param_value(encoding),
             ) else {
+                warn!("Failed checking param!");
+
                 continue;
             };
 
@@ -686,12 +671,12 @@ impl ComponentInner {
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub async fn get_sender(&self) -> broadcast::Sender<(MavHeader, MavMessage)> {
+    pub async fn get_sender(&self) -> broadcast::Sender<Message> {
         self.connection.get_sender()
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub async fn get_receiver(&self) -> broadcast::Receiver<(MavHeader, MavMessage)> {
+    pub async fn get_receiver(&self) -> broadcast::Receiver<Message> {
         self.connection.get_receiver()
     }
 }

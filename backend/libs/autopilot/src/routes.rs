@@ -7,7 +7,7 @@ use ts_rs::TS;
 
 use crate::{FocusZoomPoints, ZoomAndFocusConfig};
 
-#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
 pub struct ApiConfig {
     pub k_focus: Option<u32>,
     pub k_zoom: Option<u32>,

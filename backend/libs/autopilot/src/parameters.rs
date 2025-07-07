@@ -103,6 +103,44 @@ impl ParamType {
 
         Ok(param)
     }
+
+    pub fn set_value(&mut self, new_value: ParamType, encoding: ParamEncodingType) -> Result<()> {
+        let encoded_value = new_value.encode(encoding)?;
+
+        use ParamEncodingType::*;
+        use ParamType::*;
+
+        match (self, encoding) {
+            // C_CAST
+            (UINT8(value), CCast) => *value = encoded_value as u8,
+            (INT8(value), CCast) => *value = encoded_value as i8,
+            (UINT16(value), CCast) => *value = encoded_value as u16,
+            (INT16(value), CCast) => *value = encoded_value as i16,
+            (UINT32(value), CCast) => *value = encoded_value as u32,
+            (INT32(value), CCast) => *value = encoded_value as i32,
+            (UINT64(value), CCast) => *value = encoded_value as u64,
+            (INT64(value), CCast) => *value = encoded_value as i64,
+            (REAL32(value), CCast) => *value = encoded_value,
+            (REAL64(value), CCast) => *value = encoded_value as f64,
+
+            // ByteWise
+            (UINT8(value), ByteWise) => *value = encoded_value.to_bits() as u8,
+            (INT8(value), ByteWise) => *value = encoded_value.to_bits() as i8,
+            (UINT16(value), ByteWise) => *value = encoded_value.to_bits() as u16,
+            (INT16(value), ByteWise) => *value = encoded_value.to_bits() as i16,
+            (UINT32(value), ByteWise) => *value = encoded_value.to_bits() as u32,
+            (INT32(value), ByteWise) => *value = encoded_value.to_bits() as i32,
+            (UINT64(value), ByteWise) => *value = encoded_value.to_bits() as u64,
+            (INT64(value), ByteWise) => *value = encoded_value.to_bits() as i64,
+            (REAL32(value), ByteWise) => *value = encoded_value,
+            (REAL64(value), ByteWise) => *value = encoded_value.to_bits() as f64,
+
+            //
+            (_, Unsupported) => return Err(anyhow!("Unsupported encoding")),
+        }
+
+        Ok(())
+    }
 }
 
 impl Parameter {
