@@ -7,6 +7,12 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BlueButtonGroup: typeof import('./src/components/BlueButtonGroup.vue')['default']
+    BlueSelect: typeof import('./src/components/BlueSelect.vue')['default']
+    BlueSlider: typeof import('./src/components/BlueSlider.vue')['default']
+    BlueSwitch: typeof import('./src/components/BlueSwitch.vue')['default']
+    ExpansibleOptions: typeof import('./src/components/ExpansibleOptions.vue')['default']
+    ExpansiblePanel: typeof import('./src/components/ExpansiblePanel.vue')['default']
     ImageTab: typeof import('./src/components/ImageTab.vue')['default']
     OperationError: typeof import('./src/components/common/OperationError.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
