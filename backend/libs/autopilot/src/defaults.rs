@@ -1,34 +1,55 @@
-use crate::{FocusZoomPoint, FocusZoomPoints, ZoomAndFocusConfig};
+use crate::{
+    FocusZoomPoint, FocusZoomPoints, ZoomAndFocusConfig,
+    parameters::{
+        FocusAndZoomParameters, MountType, ScriptFunction, ServoChannel, TiltChannelFunction,
+    },
+};
 
 impl Default for ZoomAndFocusConfig {
     fn default() -> Self {
         Self {
-            k_focus: K_FOCUS,
-            k_zoom: K_ZOOM,
-            k_scripting1: K_SCRIPTING1,
-            margin_gain: MARGIN_GAIN,
+            parameters: FocusAndZoomParameters::default(),
             closest_points: FocusZoomPoints(CLOSEST_POINTS.to_vec()),
             furthest_points: FocusZoomPoints(FURTHEST_POINTS.to_vec()),
-            focus_channel: FOCUS_CHANNEL,
-            zoom_channel: ZOOM_CHANNEL,
-            custom1_channel: CUSTOM1_CHANNEL,
-            zoom_output_pwm: ZOOM_OUTPUT_PWM,
-            zoom_range: ZOOM_RANGE,
-            zoom_scaled: ZOOM_SCALED,
         }
     }
 }
 
-pub const K_FOCUS: u32 = 92;
-pub const K_ZOOM: u32 = 180;
-pub const K_SCRIPTING1: u32 = 94;
-pub const MARGIN_GAIN: f32 = 1.05;
-pub const FOCUS_CHANNEL: u32 = 92;
-pub const ZOOM_CHANNEL: u32 = 180;
-pub const CUSTOM1_CHANNEL: u32 = 10;
-pub const ZOOM_OUTPUT_PWM: u32 = 1000;
-pub const ZOOM_RANGE: u32 = 1000;
-pub const ZOOM_SCALED: u32 = 0;
+impl Default for FocusAndZoomParameters {
+    fn default() -> Self {
+        Self {
+            // Focus, controlled by the user
+            focus_channel: ServoChannel::SERVO10,
+            focus_channel_min: 870,
+            focus_channel_trim: 1500,
+            focus_channel_max: 2130,
+            focus_margin_gain: 1.0,
+
+            // TODO: figure out how to configure this correclty
+            // script_channel: ServoChannel::SERVO10,
+            focus_script_function: ScriptFunction::SCRIPT1,
+            enable_focus_and_zoom_correlation: true,
+
+            // Zoom, controlled by the user
+            zoom_channel: ServoChannel::SERVO11,
+            zoom_channel_min: 935,
+            zoom_channel_trim: 1500,
+            zoom_channel_max: 1850,
+
+            // Tilt
+            tilt_channel: ServoChannel::SERVO16,
+            tilt_channel_min: 2250,
+            tilt_channel_trim: 1500,
+            tilt_channel_max: 750,
+            tilt_channel_reversed: false,
+
+            // Mount
+            tilt_mnt_type: MountType::BrushlessPWM,
+            tilt_mnt_pitch_min: -90,
+            tilt_mnt_pitch_max: 90,
+        }
+    }
+}
 
 pub const CLOSEST_POINTS: &'static [FocusZoomPoint] = &[
     FocusZoomPoint {

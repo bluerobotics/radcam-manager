@@ -2,6 +2,7 @@ use anyhow::{Result, anyhow};
 use mavlink::ardupilotmega::{MavParamType, PARAM_VALUE_DATA};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use ts_rs::TS;
 
 use crate::mavlink::ParamEncodingType;
 
@@ -191,78 +192,78 @@ impl Parameter {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FocusAndZoomParameters {
     // Focus channel parameters
-    focus_channel: ServoChannel,
-    focus_channel_function: u8,
-    focus_channel_min: u16,
-    focus_channel_trim: u16,
-    focus_channel_max: u16,
+    pub focus_channel: ServoChannel,
+    pub focus_channel_min: u16,
+    pub focus_channel_trim: u16,
+    pub focus_channel_max: u16,
+    pub focus_margin_gain: f32,
+    pub focus_script_function: ScriptFunction,
+    pub enable_focus_and_zoom_correlation: bool,
 
     // Zoom channel parameters
-    zoom_channel: ServoChannel,
-    zoom_channel_function: u8,
-    zoom_channel_min: u16,
-    zoom_channel_trim: u16,
-    zoom_channel_max: u16,
+    pub zoom_channel: ServoChannel,
+    pub zoom_channel_min: u16,
+    pub zoom_channel_trim: u16,
+    pub zoom_channel_max: u16,
 
     // Tilt channel parameters
-    tilt_channel: ServoChannel,
-    tilt_channel_function: TiltChannelFunction,
-    tilt_channel_min: u16,
-    tilt_channel_trim: u16,
-    tilt_channel_max: u16,
-    tilt_channel_reversed: bool,
+    pub tilt_channel: ServoChannel,
+    pub tilt_channel_min: u16,
+    pub tilt_channel_trim: u16,
+    pub tilt_channel_max: u16,
+    pub tilt_channel_reversed: bool,
 
     // Mount (MNTx) parameters
-    tilt_mnt_type: u8,
-    tilt_mnt_pitch_min: i32,
-    tilt_mnt_pitch_max: i32,
+    pub tilt_mnt_type: MountType,
+    pub tilt_mnt_pitch_min: i32,
+    pub tilt_mnt_pitch_max: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
 pub struct FocusAndZoomParametersQuery {
     // Focus channel parameters
-    focus_channel: Option<ServoChannel>,
-    focus_channel_function: Option<u8>,
-    focus_channel_min: Option<u16>,
-    focus_channel_trim: Option<u16>,
-    focus_channel_max: Option<u16>,
+    pub focus_channel: Option<ServoChannel>,
+    pub focus_channel_min: Option<u16>,
+    pub focus_channel_trim: Option<u16>,
+    pub focus_channel_max: Option<u16>,
+    pub focus_margin_gain: Option<f32>,
+    pub script_function: Option<ScriptFunction>,
+    pub enable_focus_and_zoom_correlation: Option<bool>,
 
     // Zoom channel parameters
-    zoom_channel: Option<ServoChannel>,
-    zoom_channel_function: Option<u8>,
-    zoom_channel_min: Option<u16>,
-    zoom_channel_trim: Option<u16>,
-    zoom_channel_max: Option<u16>,
+    pub zoom_channel: Option<ServoChannel>,
+    pub zoom_channel_min: Option<u16>,
+    pub zoom_channel_trim: Option<u16>,
+    pub zoom_channel_max: Option<u16>,
 
     // Tilt channel parameters
-    tilt_channel: Option<ServoChannel>,
-    tilt_channel_function: Option<TiltChannelFunction>,
-    tilt_channel_min: Option<u16>,
-    tilt_channel_trim: Option<u16>,
-    tilt_channel_max: Option<u16>,
-    tilt_channel_reversed: Option<bool>,
+    pub tilt_channel: Option<ServoChannel>,
+    pub tilt_channel_min: Option<u16>,
+    pub tilt_channel_trim: Option<u16>,
+    pub tilt_channel_max: Option<u16>,
+    pub tilt_channel_reversed: Option<bool>,
 
     // Mount (MNTx) parameters
-    tilt_mnt_type: Option<u8>,
-    tilt_mnt_pitch_min: Option<i32>,
-    tilt_mnt_pitch_max: Option<i32>,
+    pub tilt_mnt_type: Option<MountType>,
+    pub tilt_mnt_pitch_min: Option<i32>,
+    pub tilt_mnt_pitch_max: Option<i32>,
 }
 
 impl From<FocusAndZoomParameters> for FocusAndZoomParametersQuery {
     fn from(value: FocusAndZoomParameters) -> Self {
         Self {
             focus_channel: Some(value.focus_channel),
-            focus_channel_function: Some(value.focus_channel_function),
             focus_channel_min: Some(value.focus_channel_min),
             focus_channel_trim: Some(value.focus_channel_trim),
             focus_channel_max: Some(value.focus_channel_max),
+            focus_margin_gain: Some(value.focus_margin_gain),
+            script_function: Some(value.focus_script_function),
+            enable_focus_and_zoom_correlation: Some(value.enable_focus_and_zoom_correlation),
             zoom_channel: Some(value.zoom_channel),
-            zoom_channel_function: Some(value.zoom_channel_function),
             zoom_channel_min: Some(value.zoom_channel_min),
             zoom_channel_trim: Some(value.zoom_channel_trim),
             zoom_channel_max: Some(value.zoom_channel_max),
             tilt_channel: Some(value.tilt_channel),
-            tilt_channel_function: Some(value.tilt_channel_function),
             tilt_channel_min: Some(value.tilt_channel_min),
             tilt_channel_trim: Some(value.tilt_channel_trim),
             tilt_channel_max: Some(value.tilt_channel_max),
@@ -274,47 +275,64 @@ impl From<FocusAndZoomParameters> for FocusAndZoomParametersQuery {
     }
 }
 
-impl Default for FocusAndZoomParameters {
-    fn default() -> Self {
+impl From<FocusAndZoomParametersQuery> for FocusAndZoomParameters {
+    fn from(value: FocusAndZoomParametersQuery) -> Self {
+        let default = Self::default();
         Self {
-            // Focus
-            focus_channel: ServoChannel::SERVO10,
-            focus_channel_function: 92,
-            focus_channel_min: 870,
-            focus_channel_trim: 1500,
-            focus_channel_max: 2130,
-
-            // Zoom
-            zoom_channel: ServoChannel::SERVO11,
-            zoom_channel_function: 180,
-            zoom_channel_min: 935,
-            zoom_channel_trim: 1500,
-            zoom_channel_max: 1850,
-
-            // Tilt
-            tilt_channel: ServoChannel::SERVO16,
-            tilt_channel_function: TiltChannelFunction::MNT1,
-            tilt_channel_min: 750,
-            tilt_channel_trim: 1500,
-            tilt_channel_max: 2250,
-            tilt_channel_reversed: false,
-
-            // Mount
-            tilt_mnt_type: 7,
-            tilt_mnt_pitch_min: -90,
-            tilt_mnt_pitch_max: 90,
+            focus_channel: value.focus_channel.unwrap_or(default.focus_channel),
+            focus_channel_min: value.focus_channel_min.unwrap_or(default.focus_channel_min),
+            focus_channel_trim: value
+                .focus_channel_trim
+                .unwrap_or(default.focus_channel_trim),
+            focus_channel_max: value.focus_channel_max.unwrap_or(default.focus_channel_max),
+            focus_margin_gain: value.focus_margin_gain.unwrap_or(default.focus_margin_gain),
+            focus_script_function: value
+                .script_function
+                .unwrap_or(default.focus_script_function),
+            zoom_channel: value.zoom_channel.unwrap_or(default.zoom_channel),
+            zoom_channel_min: value.zoom_channel_min.unwrap_or(default.zoom_channel_min),
+            zoom_channel_trim: value.zoom_channel_trim.unwrap_or(default.zoom_channel_trim),
+            zoom_channel_max: value.zoom_channel_max.unwrap_or(default.zoom_channel_max),
+            enable_focus_and_zoom_correlation: value
+                .enable_focus_and_zoom_correlation
+                .unwrap_or(default.enable_focus_and_zoom_correlation),
+            tilt_channel: value.tilt_channel.unwrap_or(default.tilt_channel),
+            tilt_channel_min: value.tilt_channel_min.unwrap_or(default.tilt_channel_min),
+            tilt_channel_trim: value.tilt_channel_trim.unwrap_or(default.tilt_channel_trim),
+            tilt_channel_max: value.tilt_channel_max.unwrap_or(default.tilt_channel_max),
+            tilt_channel_reversed: value
+                .tilt_channel_reversed
+                .unwrap_or(default.tilt_channel_reversed),
+            tilt_mnt_type: value.tilt_mnt_type.unwrap_or(default.tilt_mnt_type),
+            tilt_mnt_pitch_min: value
+                .tilt_mnt_pitch_min
+                .unwrap_or(default.tilt_mnt_pitch_min),
+            tilt_mnt_pitch_max: value
+                .tilt_mnt_pitch_max
+                .unwrap_or(default.tilt_mnt_pitch_max),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr, TS)]
 #[repr(u8)]
 pub enum TiltChannelFunction {
+    #[default]
+    /// Mount1Pitch
     MNT1 = 7,
+    /// Mount2Pitch
     MNT2 = 13,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr, TS)]
+#[repr(u8)]
+pub enum MountType {
+    Servo = 1,
+    #[default]
+    BrushlessPWM = 7,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr, TS)]
 #[repr(u8)]
 pub enum ServoChannel {
     SERVO1 = 1,
@@ -351,91 +369,33 @@ pub enum ServoChannel {
     SERVO32 = 32,
 }
 
-impl FocusAndZoomParameters {
-    pub fn make_params(&self) -> Vec<Parameter> {
-        // let focus_settings = [
-        //     Parameter {
-        //         name: format!("SERVO{}_FUNCTION", self.focus_channel as u8),
-        //         value: self.focus_channel_function,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_MIN", self.focus_channel as u8),
-        //         value: self.focus_channel_min,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_TRIM", self.focus_channel as u8),
-        //         value: self.focus_channel_trim,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_MAX", self.focus_channel as u8),
-        //         value: self.focus_channel_max,
-        //     },
-        // ];
-
-        // let zoom_settings = [
-        //     Parameter {
-        //         name: format!("SERVO{}_FUNCTION", self.zoom_channel as u8),
-        //         value: self.zoom_channel_function,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_MIN", self.zoom_channel as u8),
-        //         value: self.zoom_channel_min,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_TRIM", self.zoom_channel as u8),
-        //         value: self.zoom_channel_trim,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_MAX", self.zoom_channel as u8),
-        //         value: self.zoom_channel_max,
-        //     },
-        // ];
-
-        // let tilt_settings = [
-        //     Parameter {
-        //         name: format!("SERVO{}_FUNCTION", self.tilt_channel as u8),
-        //         value: self.tilt_channel_function,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_MIN", self.tilt_channel as u8),
-        //         value: self.tilt_channel_min,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_TRIM", self.tilt_channel as u8),
-        //         value: self.tilt_channel_trim,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_MAX", self.tilt_channel as u8),
-        //         value: self.tilt_channel_max,
-        //     },
-        //     Parameter {
-        //         name: format!("SERVO{}_REVERSED", self.tilt_channel as u8),
-        //         value: self.tilt_channel_reversed,
-        //     },
-        // ];
-
-        // let mnt1_settings = [
-        //     Parameter {
-        //         name: format!("MNT{}_TYPE", self.tilt_channel_function as u8),
-        //         value: self.tilt_mnt_type,
-        //     },
-        //     Parameter {
-        //         name: format!("MNT{}_PITCH_MIN", self.tilt_channel_function as u8),
-        //         value: self.tilt_mnt_pitch_min,
-        //     },
-        //     Parameter {
-        //         name: format!("MNT{}_PITCH_MAX", self.tilt_channel_function as u8),
-        //         value: self.tilt_mnt_pitch_max,
-        //     },
-        // ];
-
-        // let mut parameters = Vec::new();
-        // parameters.extend(focus_settings);
-        // parameters.extend(zoom_settings);
-        // parameters.extend(tilt_settings);
-        // parameters.extend(mnt1_settings);
-
-        // parameters
-        todo!()
-    }
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr, TS)]
+#[repr(u8)]
+pub enum ScriptFunction {
+    #[default]
+    SCRIPT1 = 94,
+    SCRIPT2 = 95,
+    SCRIPT3 = 96,
+    SCRIPT4 = 97,
+    SCRIPT5 = 98,
+    SCRIPT6 = 99,
+    SCRIPT7 = 100,
+    SCRIPT8 = 101,
+    SCRIPT9 = 102,
+    SCRIPT10 = 103,
+    SCRIPT11 = 104,
+    SCRIPT12 = 105,
+    SCRIPT13 = 106,
+    SCRIPT14 = 107,
+    SCRIPT15 = 108,
+    SCRIPT16 = 109,
 }
+
+/// 92 is CameraFocus
+pub const FOCUS_CHANNEL_FUNCTION: u8 = 92;
+
+/// 180 is some custom value
+pub const ZOOM_CHANNEL_FUNCTION: u8 = 180;
+
+///
+pub const TILT_CHANNEL_FUNCTION: TiltChannelFunction = TiltChannelFunction::MNT1;

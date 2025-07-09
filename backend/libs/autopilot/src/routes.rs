@@ -5,39 +5,21 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::*;
 use ts_rs::TS;
 
-use crate::{FocusZoomPoints, ZoomAndFocusConfig};
+use crate::{FocusZoomPoints, ZoomAndFocusConfig, parameters::FocusAndZoomParametersQuery};
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
-pub struct ApiConfig {
-    pub k_focus: Option<u32>,
-    pub k_zoom: Option<u32>,
-    pub k_scripting1: Option<u32>,
-    pub margin_gain: Option<f32>,
+pub struct ZoomAndFocusConfigQuery {
+    pub parameters: Option<FocusAndZoomParametersQuery>,
     pub closest_points: Option<FocusZoomPoints>,
     pub furthest_points: Option<FocusZoomPoints>,
-    pub focus_channel: Option<u32>,
-    pub zoom_channel: Option<u32>,
-    pub custom1_channel: Option<u32>,
-    pub zoom_output_pwm: Option<u32>,
-    pub zoom_range: Option<u32>,
-    pub zoom_scaled: Option<u32>,
 }
 
-impl From<ZoomAndFocusConfig> for ApiConfig {
+impl From<ZoomAndFocusConfig> for ZoomAndFocusConfigQuery {
     fn from(value: ZoomAndFocusConfig) -> Self {
         Self {
-            k_focus: Some(value.k_focus),
-            k_zoom: Some(value.k_zoom),
-            k_scripting1: Some(value.k_scripting1),
-            margin_gain: Some(value.margin_gain),
+            parameters: Some(value.parameters.into()),
             closest_points: Some(value.closest_points),
             furthest_points: Some(value.furthest_points),
-            focus_channel: Some(value.focus_channel),
-            zoom_channel: Some(value.zoom_channel),
-            custom1_channel: Some(value.custom1_channel),
-            zoom_output_pwm: Some(value.zoom_output_pwm),
-            zoom_range: Some(value.zoom_range),
-            zoom_scaled: Some(value.zoom_scaled),
         }
     }
 }
@@ -53,12 +35,12 @@ pub fn router() -> Router {
 }
 
 #[instrument(level = "trace")]
-async fn get_config() -> Json<ApiConfig> {
+async fn get_config() -> Json<ZoomAndFocusConfigQuery> {
     Json(crate::get_config().await.into())
 }
 
 #[instrument(level = "trace")]
-async fn set_config(new_config: Json<ApiConfig>) -> impl IntoResponse {
+async fn set_config(new_config: Json<ZoomAndFocusConfigQuery>) -> impl IntoResponse {
     let res = match crate::set_config(&new_config).await {
         Ok(res) => res,
         Err(error) => {

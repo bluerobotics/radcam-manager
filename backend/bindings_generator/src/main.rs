@@ -129,7 +129,10 @@ fn generate_typescript_bindings_for_autopilot() -> Result<()> {
     let ts_rs_bindings = {
         // Generate all typescript bindings and join them into a single String
         let bindings = [
-            autopilot::ApiConfig::export_to_string()?,
+            autopilot::ZoomAndFocusConfigQuery::export_to_string()?,
+            autopilot::parameters::FocusAndZoomParametersQuery::export_to_string()?,
+            autopilot::parameters::ServoChannel::export_to_string()?,
+            autopilot::parameters::ScriptFunction::export_to_string()?,
             autopilot::FocusZoomPoints::export_to_string()?,
             autopilot::FocusZoomPoint::export_to_string()?,
         ]
