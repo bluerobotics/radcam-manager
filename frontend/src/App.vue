@@ -57,13 +57,6 @@
               :disabled="selectedCameraUUID == null"
             />
           </v-tabs-window-item>
-          <v-tabs-window-item value="autopilot">
-            <AutopilotTab
-              :backend-api="`${backendAPI}/autopilot`"
-              :selected-camera-uuid="selectedCameraUUID"
-              :disabled="false"
-            />
-          </v-tabs-window-item>
         </v-tabs-window>
       </v-container>
     </v-main>
@@ -75,10 +68,10 @@ import { onMounted, onUnmounted, ref } from "vue"
 import type { Camera } from '@/bindings/mcm_client'
 import axios from 'axios'
 import { useRoute } from "vue-router"
-import AutopilotTab from "./components/AutopilotTab.vue"
 
 const tab = ref(null)
-const backendAddress = window.location.host.toString()
+// const backendAddress = window.location.host.toString()
+const backendAddress = "192.168.2.2:32769"
 const backendAPI = ref(`http://${backendAddress}/v1`)
 const cameras = ref<Camera[]>([])
 const selectedCameraUUID = ref<string | null>(null)

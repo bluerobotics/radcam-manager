@@ -2,7 +2,6 @@ mod defaults;
 mod mavlink;
 pub mod parameters;
 pub mod routes;
-mod script;
 mod settings;
 
 pub use routes::{ZoomAndFocusConfigQuery, router};
@@ -20,7 +19,6 @@ use crate::{
         FocusAndZoomParameters, FocusAndZoomParametersQuery, ParamType, TILT_CHANNEL_FUNCTION,
         TiltChannelFunction,
     },
-    script::{generate_lua_script, validate_lua},
     settings::{read_settings, write_settings},
 };
 
@@ -31,7 +29,6 @@ struct Manager {
     config: ZoomAndFocusConfig,
     mavlink: MavlinkComponent,
     settings_file: String,
-    autopilot_scripts_file: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -65,7 +62,6 @@ pub struct FocusZoomPoint {
 #[instrument(level = "debug")]
 pub async fn init(
     settings_file: String,
-    autopilot_scripts_file: String,
     config: Option<ZoomAndFocusConfig>,
     mavlink_address: String,
     mavlink_system_id: u8,
@@ -73,7 +69,6 @@ pub async fn init(
 ) -> Result<()> {
     let config = read_settings(&settings_file).unwrap_or_default();
     write_settings(&settings_file, &config)?;
-    export_script(&autopilot_scripts_file, &config)?;
 
     let mavlink =
         MavlinkComponent::new(mavlink_address, mavlink_system_id, mavlink_component_id).await;
@@ -110,31 +105,8 @@ pub async fn init(
             config,
             mavlink,
             settings_file,
-            autopilot_scripts_file,
         })
     });
-
-    Ok(())
-}
-
-#[instrument(level = "debug")]
-pub fn export_script(path: &str, config: &ZoomAndFocusConfig) -> Result<()> {
-    let contents = generate_lua_script(config)?;
-    validate_lua(&contents)?;
-
-    let path_obj = std::path::Path::new(path);
-    if let Some(parent_dir) = path_obj.parent() {
-        std::fs::create_dir_all(parent_dir)?;
-    }
-
-    trace!("Saving Lua script to {path:?}. Lua script content: {contents:#?}");
-
-    std::fs::write(path_obj, contents).map_err(|error| {
-        error!(?error, ?path, "Failed writing autopilot lua script");
-        anyhow::Error::msg(error)
-    })?;
-
-    info!("Wrote new lua script to {path:?}");
 
     Ok(())
 }
