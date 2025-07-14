@@ -4,17 +4,47 @@ use serde::{Deserialize, Serialize};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::*;
 use ts_rs::TS;
+use uuid::Uuid;
 
-use crate::{FocusZoomPoints, ZoomAndFocusConfig, parameters::FocusAndZoomParametersQuery};
+use crate::{FocusZoomPoints, ZoomAndFocusConfig, parameters::FocusAndZoomParametersConfig};
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+// #[tsync] // FIXME: Disabled for now, see https://github.com/Wulf/tsync/issues/58
+pub struct ZoomAndFocusControl {
+    #[ts(as = "String")]
+    pub camera_uuid: Uuid,
+    #[serde(flatten)]
+    pub action: Action,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "action", content = "json")]
+// #[tsync] // FIXME: Disabled for now, see https://github.com/Wulf/tsync/issues/58
+pub enum Action {
+    #[serde(rename = "getZoomAndFocus")]
+    GetZoomAndFocus,
+    #[serde(rename = "setZoomAndFocus")]
+    SetZoomAndFocus(SetZoomAndFocus),
+    #[serde(rename = "getZoomAndFocusConfig")]
+    GetZoomAndFocusConfig,
+    #[serde(rename = "setZoomAndFocusConfig")]
+    SetZoomAndFocusConfig(SetZoomAndFocusConfig),
+}
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
-pub struct ZoomAndFocusConfigQuery {
-    pub parameters: Option<FocusAndZoomParametersQuery>,
+pub struct SetZoomAndFocus {
+    pub focus: Option<u16>,
+    pub zoom: Option<u16>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
+pub struct SetZoomAndFocusConfig {
+    pub parameters: Option<FocusAndZoomParametersConfig>,
     pub closest_points: Option<FocusZoomPoints>,
     pub furthest_points: Option<FocusZoomPoints>,
 }
 
-impl From<ZoomAndFocusConfig> for ZoomAndFocusConfigQuery {
+impl From<ZoomAndFocusConfig> for SetZoomAndFocusConfig {
     fn from(value: ZoomAndFocusConfig) -> Self {
         Self {
             parameters: Some(value.parameters.into()),
@@ -35,12 +65,12 @@ pub fn router() -> Router {
 }
 
 #[instrument(level = "trace")]
-async fn get_config() -> Json<ZoomAndFocusConfigQuery> {
+async fn get_config() -> Json<SetZoomAndFocusConfig> {
     Json(crate::get_config().await.into())
 }
 
 #[instrument(level = "trace")]
-async fn set_config(new_config: Json<ZoomAndFocusConfigQuery>) -> impl IntoResponse {
+async fn set_config(new_config: Json<SetZoomAndFocusConfig>) -> impl IntoResponse {
     let res = match crate::set_config(&new_config).await {
         Ok(res) => res,
         Err(error) => {

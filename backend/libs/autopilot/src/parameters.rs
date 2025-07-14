@@ -220,7 +220,7 @@ pub struct FocusAndZoomParameters {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
-pub struct FocusAndZoomParametersQuery {
+pub struct FocusAndZoomParametersConfig {
     // Focus channel parameters
     pub focus_channel: Option<ServoChannel>,
     pub focus_channel_min: Option<u16>,
@@ -249,7 +249,7 @@ pub struct FocusAndZoomParametersQuery {
     pub tilt_mnt_pitch_max: Option<i32>,
 }
 
-impl From<FocusAndZoomParameters> for FocusAndZoomParametersQuery {
+impl From<FocusAndZoomParameters> for FocusAndZoomParametersConfig {
     fn from(value: FocusAndZoomParameters) -> Self {
         Self {
             focus_channel: Some(value.focus_channel),
@@ -275,8 +275,8 @@ impl From<FocusAndZoomParameters> for FocusAndZoomParametersQuery {
     }
 }
 
-impl From<FocusAndZoomParametersQuery> for FocusAndZoomParameters {
-    fn from(value: FocusAndZoomParametersQuery) -> Self {
+impl From<FocusAndZoomParametersConfig> for FocusAndZoomParameters {
+    fn from(value: FocusAndZoomParametersConfig) -> Self {
         let default = Self::default();
         Self {
             focus_channel: value.focus_channel.unwrap_or(default.focus_channel),

@@ -29,3 +29,4 @@ tower-http = { version = "0.6", features = ["normalize-path", "trace", "cors"] }
 tracing = "0.1.41"
 ts-rs = { version = "10.1.0", features = ["serde_json", "no-serde-warnings"] }
 tsync = { git = "https://github.com/AnthonyMichaelTDM/tsync.git", rev = "01f56be" }
+uuid = { version = "1.16.0", features = ["v5", "serde"] }

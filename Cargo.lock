@@ -186,6 +186,7 @@ dependencies = [
  "ts-rs",
  "tsync",
  "utils",
+ "uuid",
  "web_client",
 ]
 

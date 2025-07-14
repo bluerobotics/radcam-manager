@@ -4,7 +4,7 @@ pub mod parameters;
 pub mod routes;
 mod settings;
 
-pub use routes::{ZoomAndFocusConfigQuery, router};
+pub use routes::{SetZoomAndFocusConfig, router};
 
 use anyhow::Result;
 use once_cell::sync::OnceCell;
@@ -16,7 +16,7 @@ use ts_rs::TS;
 use crate::{
     mavlink::MavlinkComponent,
     parameters::{
-        FocusAndZoomParameters, FocusAndZoomParametersQuery, ParamType, TILT_CHANNEL_FUNCTION,
+        FocusAndZoomParameters, FocusAndZoomParametersConfig, ParamType, TILT_CHANNEL_FUNCTION,
         TiltChannelFunction,
     },
     settings::{read_settings, write_settings},
@@ -86,8 +86,8 @@ pub async fn init(
             debug!("SETTING focus_channel TO SERVO10!");
 
             manager
-                .update_config(&ZoomAndFocusConfigQuery {
-                    parameters: Some(FocusAndZoomParametersQuery {
+                .update_config(&SetZoomAndFocusConfig {
+                    parameters: Some(FocusAndZoomParametersConfig {
                         focus_channel: Some(parameters::ServoChannel::SERVO10),
                         ..Default::default()
                     }),
@@ -117,7 +117,7 @@ pub async fn get_config() -> ZoomAndFocusConfig {
 }
 
 #[instrument(level = "debug")]
-pub async fn set_config(new_config: &ZoomAndFocusConfigQuery) -> Result<ZoomAndFocusConfig> {
+pub async fn set_config(new_config: &SetZoomAndFocusConfig) -> Result<ZoomAndFocusConfig> {
     let mut manager = MANAGER.get().unwrap().write().await;
 
     manager.update_config(new_config).await?;
@@ -243,7 +243,7 @@ macro_rules! generate_update_mount_param_function {
 
 impl Manager {
     #[instrument(level = "debug", skip(self))]
-    pub async fn update_config(&mut self, new_config: &ZoomAndFocusConfigQuery) -> Result<()> {
+    pub async fn update_config(&mut self, new_config: &SetZoomAndFocusConfig) -> Result<()> {
         // Parameters update
         if let Some(parameters) = &new_config.parameters {
             self.update_focus_parameters(parameters).await?;
@@ -270,7 +270,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_focus_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersQuery,
+        parameters: &FocusAndZoomParametersConfig,
     ) -> Result<()> {
         if let Some(new_value) = &parameters.focus_channel {
             let encoding = self.mavlink.encoding().await;
@@ -310,7 +310,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_focus_channel_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersQuery,
+        parameters: &FocusAndZoomParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
         // self.update_focus_channel(parameters, force_apply).await?;
@@ -357,7 +357,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_zoom_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersQuery,
+        parameters: &FocusAndZoomParametersConfig,
     ) -> Result<()> {
         if let Some(new_value) = &parameters.zoom_channel {
             let encoding = self.mavlink.encoding().await;
@@ -397,7 +397,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_zoom_channel_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersQuery,
+        parameters: &FocusAndZoomParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
         self.update_zoom_channel_min(parameters, force_apply)
@@ -443,7 +443,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_tilt_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersQuery,
+        parameters: &FocusAndZoomParametersConfig,
     ) -> Result<()> {
         if let Some(new_value) = &parameters.tilt_channel {
             let encoding = self.mavlink.encoding().await;
@@ -482,7 +482,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_tilt_channel_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersQuery,
+        parameters: &FocusAndZoomParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
         self.update_tilt_channel_min(parameters, force_apply)
@@ -544,7 +544,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     pub async fn update_tilt_mnt_type(
         &mut self,
-        parameters: &FocusAndZoomParametersQuery,
+        parameters: &FocusAndZoomParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
         let encoding = self.mavlink.encoding().await;
