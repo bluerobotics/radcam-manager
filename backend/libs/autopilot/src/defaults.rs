@@ -1,21 +1,19 @@
 use crate::{
-    FocusZoomPoint, FocusZoomPoints, ZoomAndFocusConfig,
-    parameters::{
-        FocusAndZoomParameters, MountType, ScriptFunction, ServoChannel, TiltChannelFunction,
-    },
+    Config, FocusZoomPoint, FocusZoomPoints,
+    parameters::{ActuatorsParameters, MountType, ScriptFunction, ServoChannel},
 };
 
-impl Default for ZoomAndFocusConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
-            parameters: FocusAndZoomParameters::default(),
+            parameters: ActuatorsParameters::default(),
             closest_points: FocusZoomPoints(CLOSEST_POINTS.to_vec()),
             furthest_points: FocusZoomPoints(FURTHEST_POINTS.to_vec()),
         }
     }
 }
 
-impl Default for FocusAndZoomParameters {
+impl Default for ActuatorsParameters {
     fn default() -> Self {
         Self {
             // Focus, controlled by the user

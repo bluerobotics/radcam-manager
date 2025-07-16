@@ -1,3 +1,5 @@
+pub mod protocol;
+
 use std::{future::Future, pin::Pin};
 
 use anyhow::{Context, Result};
@@ -13,8 +15,6 @@ use ts_rs::TS;
 use url::Url;
 use uuid::Uuid;
 use web_client::send_request;
-
-pub mod protocol;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 // #[tsync] // FIXME: Disabled for now, see https://github.com/Wulf/tsync/issues/58

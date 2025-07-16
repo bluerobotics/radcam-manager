@@ -3,15 +3,15 @@ use chrono::Utc;
 use std::{fs, path::Path};
 use tracing::*;
 
-use crate::ZoomAndFocusConfig;
+use crate::Config;
 
-pub fn read_settings(settings_file: &str) -> Result<ZoomAndFocusConfig> {
+pub fn read_settings(settings_file: &str) -> Result<Config> {
     let path = Path::new(settings_file);
 
     if path.exists() {
         let contents = fs::read_to_string(path)
             .with_context(|| format!("Failed to read settings file: {settings_file:?}"))?;
-        let config: ZoomAndFocusConfig = serde_json::from_str(&contents)
+        let config: Config = serde_json::from_str(&contents)
             .with_context(|| format!("Failed to parse JSON from: {settings_file:?}"))?;
 
         debug!("Loaded settings from {settings_file:?}");
@@ -42,7 +42,7 @@ pub fn read_settings(settings_file: &str) -> Result<ZoomAndFocusConfig> {
     {
         let contents = fs::read_to_string(latest_backup.path())
             .with_context(|| format!("Failed to read backup file: {:?}", latest_backup.path()))?;
-        let config: ZoomAndFocusConfig = serde_json::from_str(&contents).with_context(|| {
+        let config: Config = serde_json::from_str(&contents).with_context(|| {
             format!(
                 "Failed to parse JSON from backup: {:?}",
                 latest_backup.path()
@@ -58,10 +58,10 @@ pub fn read_settings(settings_file: &str) -> Result<ZoomAndFocusConfig> {
     }
 
     warn!("No settings file or backup found. Using default configuration.");
-    Ok(ZoomAndFocusConfig::default())
+    Ok(Config::default())
 }
 
-pub fn write_settings(settings_file: &str, config: &ZoomAndFocusConfig) -> Result<()> {
+pub fn write_settings(settings_file: &str, config: &Config) -> Result<()> {
     let path = Path::new(settings_file);
 
     // Serialize the new config to JSON now

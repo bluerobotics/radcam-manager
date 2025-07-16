@@ -190,7 +190,7 @@ impl Parameter {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FocusAndZoomParameters {
+pub struct ActuatorsParameters {
     // Focus channel parameters
     pub focus_channel: ServoChannel,
     pub focus_channel_min: u16,
@@ -220,7 +220,7 @@ pub struct FocusAndZoomParameters {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
-pub struct FocusAndZoomParametersConfig {
+pub struct ActuatorsParametersConfig {
     // Focus channel parameters
     pub focus_channel: Option<ServoChannel>,
     pub focus_channel_min: Option<u16>,
@@ -249,8 +249,8 @@ pub struct FocusAndZoomParametersConfig {
     pub tilt_mnt_pitch_max: Option<i32>,
 }
 
-impl From<FocusAndZoomParameters> for FocusAndZoomParametersConfig {
-    fn from(value: FocusAndZoomParameters) -> Self {
+impl From<ActuatorsParameters> for ActuatorsParametersConfig {
+    fn from(value: ActuatorsParameters) -> Self {
         Self {
             focus_channel: Some(value.focus_channel),
             focus_channel_min: Some(value.focus_channel_min),
@@ -275,8 +275,8 @@ impl From<FocusAndZoomParameters> for FocusAndZoomParametersConfig {
     }
 }
 
-impl From<FocusAndZoomParametersConfig> for FocusAndZoomParameters {
-    fn from(value: FocusAndZoomParametersConfig) -> Self {
+impl From<ActuatorsParametersConfig> for ActuatorsParameters {
+    fn from(value: ActuatorsParametersConfig) -> Self {
         let default = Self::default();
         Self {
             focus_channel: value.focus_channel.unwrap_or(default.focus_channel),

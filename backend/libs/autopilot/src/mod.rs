@@ -4,36 +4,36 @@ pub mod parameters;
 pub mod routes;
 mod settings;
 
-pub use routes::{SetZoomAndFocusConfig, router};
-
 use anyhow::Result;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::*;
 use ts_rs::TS;
+use uuid::Uuid;
 
 use crate::{
     mavlink::MavlinkComponent,
     parameters::{
-        FocusAndZoomParameters, FocusAndZoomParametersConfig, ParamType, TILT_CHANNEL_FUNCTION,
-        TiltChannelFunction,
+        ActuatorsParameters, ActuatorsParametersConfig, ParamType, TILT_CHANNEL_FUNCTION,
     },
     settings::{read_settings, write_settings},
 };
+
+pub use routes::router;
 
 static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 
 #[derive(Debug)]
 struct Manager {
-    config: ZoomAndFocusConfig,
+    config: Config,
     mavlink: MavlinkComponent,
     settings_file: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ZoomAndFocusConfig {
-    pub parameters: FocusAndZoomParameters,
+pub struct Config {
+    pub parameters: ActuatorsParameters,
     pub closest_points: FocusZoomPoints,
     pub furthest_points: FocusZoomPoints,
 }
@@ -58,11 +58,56 @@ pub struct FocusZoomPoint {
     focus: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ActuatorsControl {
+    #[ts(as = "String")]
+    pub camera_uuid: Uuid,
+    #[serde(flatten)]
+    pub action: Action,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "action", content = "json")]
+pub enum Action {
+    #[serde(rename = "getActuatorsState")]
+    GetActuatorsState,
+    #[serde(rename = "setActuatorsState")]
+    SetActuatorsState(ActuatorsState),
+    #[serde(rename = "getActuatorsConfig")]
+    GetActuatorsConfig,
+    #[serde(rename = "setActuatorsConfig")]
+    SetActuatorsConfig(ActuatorsConfig),
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
+pub struct ActuatorsState {
+    pub focus: Option<u16>,
+    pub zoom: Option<u16>,
+    pub tilt: Option<f32>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, TS)]
+pub struct ActuatorsConfig {
+    pub parameters: Option<ActuatorsParametersConfig>,
+    pub closest_points: Option<FocusZoomPoints>,
+    pub furthest_points: Option<FocusZoomPoints>,
+}
+
+impl From<Config> for ActuatorsConfig {
+    fn from(value: Config) -> Self {
+        Self {
+            parameters: Some(value.parameters.into()),
+            closest_points: Some(value.closest_points),
+            furthest_points: Some(value.furthest_points),
+        }
+    }
+}
+
 /// Constructs our manager, Should be done inside main
 #[instrument(level = "debug")]
 pub async fn init(
     settings_file: String,
-    config: Option<ZoomAndFocusConfig>,
+    config: Option<Config>,
     mavlink_address: String,
     mavlink_system_id: u8,
     mavlink_component_id: u8,
@@ -86,8 +131,8 @@ pub async fn init(
             debug!("SETTING focus_channel TO SERVO10!");
 
             manager
-                .update_config(&SetZoomAndFocusConfig {
-                    parameters: Some(FocusAndZoomParametersConfig {
+                .update_config(&ActuatorsConfig {
+                    parameters: Some(ActuatorsParametersConfig {
                         focus_channel: Some(parameters::ServoChannel::SERVO10),
                         ..Default::default()
                     }),
@@ -112,12 +157,12 @@ pub async fn init(
 }
 
 #[instrument(level = "debug")]
-pub async fn get_config() -> ZoomAndFocusConfig {
+pub async fn get_config() -> Config {
     MANAGER.get().unwrap().read().await.config.clone()
 }
 
 #[instrument(level = "debug")]
-pub async fn set_config(new_config: &SetZoomAndFocusConfig) -> Result<ZoomAndFocusConfig> {
+pub async fn set_config(new_config: &ActuatorsConfig) -> Result<Config> {
     let mut manager = MANAGER.get().unwrap().write().await;
 
     manager.update_config(new_config).await?;
@@ -129,8 +174,8 @@ pub async fn set_config(new_config: &SetZoomAndFocusConfig) -> Result<ZoomAndFoc
 }
 
 #[instrument(level = "debug")]
-pub async fn reset() -> Result<ZoomAndFocusConfig> {
-    let config = set_config(&ZoomAndFocusConfig::default().into()).await?;
+pub async fn reset() -> Result<Config> {
+    let config = set_config(&Config::default().into()).await?;
 
     debug!("Settings resetted to default");
 
@@ -149,7 +194,7 @@ macro_rules! generate_update_channel_param_function {
         #[instrument(level = "debug", skip(self))]
         async fn $fn_name(
             &mut self,
-            parameters: &FocusAndZoomParametersQuery,
+            parameters: &ActuatorsParametersConfig,
             force_apply: bool,
         ) -> Result<()> {
             let encoding = self.mavlink.encoding().await;
@@ -202,7 +247,7 @@ macro_rules! generate_update_mount_param_function {
         #[instrument(level = "debug", skip(self))]
         pub async fn $fn_name(
             &mut self,
-            parameters: &FocusAndZoomParametersQuery,
+            parameters: &ActuatorsParametersConfig,
             force_apply: bool,
         ) -> Result<()> {
             let encoding = self.mavlink.encoding().await;
@@ -243,7 +288,7 @@ macro_rules! generate_update_mount_param_function {
 
 impl Manager {
     #[instrument(level = "debug", skip(self))]
-    pub async fn update_config(&mut self, new_config: &SetZoomAndFocusConfig) -> Result<()> {
+    pub async fn update_config(&mut self, new_config: &ActuatorsConfig) -> Result<()> {
         // Parameters update
         if let Some(parameters) = &new_config.parameters {
             self.update_focus_parameters(parameters).await?;
@@ -270,7 +315,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_focus_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersConfig,
+        parameters: &ActuatorsParametersConfig,
     ) -> Result<()> {
         if let Some(new_value) = &parameters.focus_channel {
             let encoding = self.mavlink.encoding().await;
@@ -310,7 +355,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_focus_channel_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersConfig,
+        parameters: &ActuatorsParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
         // self.update_focus_channel(parameters, force_apply).await?;
@@ -357,7 +402,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_zoom_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersConfig,
+        parameters: &ActuatorsParametersConfig,
     ) -> Result<()> {
         if let Some(new_value) = &parameters.zoom_channel {
             let encoding = self.mavlink.encoding().await;
@@ -397,7 +442,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_zoom_channel_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersConfig,
+        parameters: &ActuatorsParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
         self.update_zoom_channel_min(parameters, force_apply)
@@ -443,7 +488,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_tilt_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersConfig,
+        parameters: &ActuatorsParametersConfig,
     ) -> Result<()> {
         if let Some(new_value) = &parameters.tilt_channel {
             let encoding = self.mavlink.encoding().await;
@@ -482,7 +527,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     async fn update_tilt_channel_parameters(
         &mut self,
-        parameters: &FocusAndZoomParametersConfig,
+        parameters: &ActuatorsParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
         self.update_tilt_channel_min(parameters, force_apply)
@@ -544,7 +589,7 @@ impl Manager {
     #[instrument(level = "debug", skip(self))]
     pub async fn update_tilt_mnt_type(
         &mut self,
-        parameters: &FocusAndZoomParametersConfig,
+        parameters: &ActuatorsParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
         let encoding = self.mavlink.encoding().await;
