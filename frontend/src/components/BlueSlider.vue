@@ -1,7 +1,10 @@
 <template>
   <div class="flex w-full justify-between items-center">
     <div v-if="label">
-      <label class="text-start mr-6" :class="theme === 'dark' ? 'text-white' : 'text-black'">{{ label }}</label>
+      <label
+        class="text-start mr-6"
+        :class="theme === 'dark' ? 'text-white' : 'text-black'"
+      >{{ label }}</label>
     </div>
     <div class="flex justify-between items-center">
       <div
@@ -36,7 +39,10 @@
           }"
         >
           <div v-if="!isEditingCurrentSliderValue">
-            <p class="font-bold select-none" draggable="false">
+            <p
+              class="font-bold select-none"
+              draggable="false"
+            >
               {{ step && step < 1 ? currentSliderValue?.toFixed(1) || 0 : currentSliderValue }}
             </p>
           </div>
@@ -53,7 +59,7 @@
               @input="currentSliderValue = Math.min(Math.max(currentSliderValue || 0, min), max)"
               @keydown="handleValueChange"
               @blur="isEditingCurrentSliderValue = false"
-            />
+            >
           </div>
         </div>
         <input
@@ -68,7 +74,7 @@
           :disabled="disabled || isEditingCurrentSliderValue"
           @input="onSliderInput"
           @dblclick="isEditingCurrentSliderValue = true"
-        />
+        >
         <p
           class="absolute min-w-[30px] ml-[10px] mt-1 text-[15px] text-center z-10 pointer-events-none"
           :class="theme === 'dark' ? 'text-[#ffffff44]' : 'text-[#00000066]'"

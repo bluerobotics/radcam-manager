@@ -1,7 +1,10 @@
 <template>
   <div class="flex w-full justify-between items-center">
     <div v-if="label">
-      <label class="text-start mr-6" :class="theme === 'dark' ? 'text-white' : 'text-black'">{{ label }}</label>
+      <label
+        class="text-start mr-6"
+        :class="theme === 'dark' ? 'text-white' : 'text-black'"
+      >{{ label }}</label>
     </div>
     <div
       name="switch-track"

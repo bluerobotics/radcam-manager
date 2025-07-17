@@ -5,13 +5,18 @@
       @click="togglePanel"
     >
       <div class="flex-1 flex items-center">
-        <div class="flex-1 h-px" :class="props.theme === 'dark' ? 'bg-[#ffffff22]' : 'bg-[#00000033]'" />
+        <div
+          class="flex-1 h-px"
+          :class="props.theme === 'dark' ? 'bg-[#ffffff22]' : 'bg-[#00000033]'"
+        />
         <span
           class="mx-3 text-sm font-medium opacity-60"
           :class="props.theme === 'dark' ? 'text-white' : 'text-black'"
-          >{{ title }}</span
-        >
-        <div class="flex-1 h-px" :class="props.theme === 'dark' ? 'bg-[#ffffff11]' : 'bg-[#00000033]'" />
+        >{{ title }}</span>
+        <div
+          class="flex-1 h-px"
+          :class="props.theme === 'dark' ? 'bg-[#ffffff11]' : 'bg-[#00000033]'"
+        />
       </div>
       <v-icon
         :class="['ml-3 transition-transform', props.theme === 'dark' ? 'text-white' : 'text-black']"
@@ -21,7 +26,11 @@
       </v-icon>
     </div>
     <transition name="expand">
-      <div v-show="isOpen" class="px-8 my-6 pb-2" :class="props.theme === 'dark' ? 'border-[#555555]' : 'border-[#dddddd]'">
+      <div
+        v-show="isOpen"
+        class="px-8 my-6 pb-2"
+        :class="props.theme === 'dark' ? 'border-[#555555]' : 'border-[#dddddd]'"
+      >
         <slot />
       </div>
     </transition>

@@ -1,6 +1,10 @@
 <template>
   <div class="px-6 py-4 gap-y-6">
-    <ExpansiblePanel title="Image" expanded theme="dark">
+    <ExpansiblePanel
+      title="Image"
+      expanded
+      theme="dark"
+    >
       <BlueButtonGroup
         label="Water environment for OPWB"
         :button-items="[
@@ -30,10 +34,10 @@
       >
         <div class="flex flex-col justify-end items-end">
           <BlueSlider
+            v-model="currentRGBSetpointValue[0]"
             name="awb_red"
             label="WB Red"
             color="red"
-            v-model="currentRGBSetpointValue[0]"
             :min="0"
             :max="255"
             :step="1"
@@ -43,10 +47,10 @@
             @update:model-value="applyRGBSetpointColor('red', $event ?? 0)"
           />
           <BlueSlider
+            v-model="currentRGBSetpointValue[1]"
             name="green-setpoint"
             label="WB Green"
             color="green"
-            v-model="currentRGBSetpointValue[1]"
             :min="0"
             :max="255"
             :step="1"
@@ -56,10 +60,10 @@
             @update:model-value="applyRGBSetpointColor('green', $event ?? 0)"
           />
           <BlueSlider
+            v-model="currentRGBSetpointValue[2]"
             name="blue-setpoint"
             label="WB Blue"
             color="#0B5087"
-            v-model="currentRGBSetpointValue[2]"
             :min="0"
             :max="255"
             :step="1"
@@ -72,9 +76,9 @@
       </ExpansibleOptions>
 
       <BlueSlider
+        v-model="focusAndZoomParams.focus_margin_gain"
         name="focus-speed"
         label="Focus speed"
-        v-model="focusAndZoomParams.focus_margin_gain"
         :min="0"
         :max="10"
         :step="0.1"
@@ -83,11 +87,11 @@
         width="400px"
         theme="dark"
         class="mt-6"
-        @update:modelValue="updateZoomAndFocusParameter('focus_margin_gain', $event)"
+        @update:model-value="updateZoomAndFocusParameter('focus_margin_gain', $event)"
       />
       <BlueSlider
-        name="zoom-speed"
         v-model="focusAndZoomParams.zoom_channel_trim"
+        name="zoom-speed"
         label="Zoom speed"
         :min="0"
         :max="10"
@@ -97,7 +101,7 @@
         width="400px"
         theme="dark"
         class="mt-6"
-        @update:modelValue="updateZoomAndFocusParameter('zoom_channel_trim', $event)"
+        @update:model-value="updateZoomAndFocusParameter('zoom_channel_trim', $event)"
       />
       <BlueSwitch
         v-model="focusAndZoomParams.zoom_focus_correlation"
@@ -105,11 +109,11 @@
         label="Focus and zoom correlation"
         theme="dark"
         class="mt-5"
-        @update:modelValue="updateZoomAndFocusParameter('zoom_focus_correlation', $event)"
+        @update:model-value="updateZoomAndFocusParameter('zoom_focus_correlation', $event)"
       />
       <BlueSlider
-        name="focus-offset"
         v-model="focusAndZoomParams.focus_channel_trim"
+        name="focus-offset"
         label="Focus offset"
         :min="0"
         :max="10"
@@ -117,19 +121,26 @@
         width="400px"
         theme="dark"
         class="mt-5"
-        @update:modelValue="updateZoomAndFocusParameter('focus_channel_trim', $event)"
+        @update:model-value="updateZoomAndFocusParameter('focus_channel_trim', $event)"
       />
     </ExpansiblePanel>
-    <ExpansiblePanel title="Video" expanded theme="dark">
+    <ExpansiblePanel
+      title="Video"
+      expanded
+      theme="dark"
+    >
       <BlueSelect
         v-model="selectedVideoResolution"
         label="Cockpit display"
         :items="resolutionOptions"
         theme="dark"
-        
       />
     </ExpansiblePanel>
-    <ExpansiblePanel title="Hardware setup" expanded theme="dark">
+    <ExpansiblePanel
+      title="Hardware setup"
+      expanded
+      theme="dark"
+    >
       <BlueSelect
         v-model="focusAndZoomParams.focus_channel"
         label="Focus PWM output"
@@ -165,14 +176,19 @@
           label="Tilt channel reversed"
           theme="dark"
           class="scale-90 origin-right"
-          @update:modelValue="updateZoomAndFocusParameter('tilt_channel_reversed', $event)"
+          @update:model-value="updateZoomAndFocusParameter('tilt_channel_reversed', $event)"
         />
       </ExpansibleOptions>
     </ExpansiblePanel>
   </div>
-  <v-dialog v-model="openRGBSetpointForm" width="400px">
+  <v-dialog
+    v-model="openRGBSetpointForm"
+    width="400px"
+  >
     <v-card class="bg-[#363636] text-white">
-      <v-card-title class="text-h6 text-center py-4">RGB Setpoint Profile</v-card-title>
+      <v-card-title class="text-h6 text-center py-4">
+        RGB Setpoint Profile
+      </v-card-title>
       <v-card-text>
         <v-text-field
           v-model="newRGBSetpointProfileName"
@@ -184,25 +200,52 @@
         />
       </v-card-text>
       <v-card-actions class="px-4">
-        <v-btn text @click="openRGBSetpointForm = false" class="opacity-70">Cancel</v-btn>
+        <v-btn
+          variant="text"
+          class="opacity-70"
+          @click="openRGBSetpointForm = false"
+        >
+          Cancel
+        </v-btn>
         <v-spacer />
-        <v-btn color="white" @click="saveRGBSetpointProfile">Save</v-btn>
+        <v-btn
+          color="white"
+          @click="saveRGBSetpointProfile"
+        >
+          Save
+        </v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
-  <v-dialog v-model="openRGBSetpointDelete" width="400px">
+  <v-dialog
+    v-model="openRGBSetpointDelete"
+    width="400px"
+  >
     <v-card class="bg-[#363636] text-white">
-      <v-card-title class="text-h6 text-center py-4">Delete RGB Setpoint Profile</v-card-title>
+      <v-card-title class="text-h6 text-center py-4">
+        Delete RGB Setpoint Profile
+      </v-card-title>
       <v-card-text>
         Are you sure you want to delete the profile "{{ currentRGBSetpointProfile }}"?
       </v-card-text>
       <v-card-actions class="px-4">
-        <v-btn text @click="openRGBSetpointDelete = false" class="opacity-70">Cancel</v-btn>
+        <v-btn
+          variant="text"
+          class="opacity-70"
+          @click="openRGBSetpointDelete = false"
+        >
+          Cancel
+        </v-btn>
         <v-spacer />
-        <v-btn color="red" @click="() => {
-          RGBSetpointProfiles = RGBSetpointProfiles.filter(profile => profile.name !== currentRGBSetpointProfile)
-          openRGBSetpointDelete = false
-        }">Delete</v-btn>
+        <v-btn
+          color="red"
+          @click="() => {
+            RGBSetpointProfiles = RGBSetpointProfiles.filter(profile => profile.name !== currentRGBSetpointProfile)
+            openRGBSetpointDelete = false
+          }"
+        >
+          Delete
+        </v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -218,7 +261,7 @@ import BlueSelect from './BlueSelect.vue'
 import ExpansibleOptions from './ExpansibleOptions.vue'
 import type { BaseParameterSetting, VideoParameterSettings, VideoResolutionValue } from '@/bindings/radcam'
 import axios from 'axios'
-import type { FocusAndZoomParametersQuery, ServoChannel, ZoomAndFocusConfigQuery } from '@/bindings/autopilot'
+import type { FocusAndZoomParametersQuery, ServoChannel } from '@/bindings/autopilot'
 
 const props = defineProps<{
   selectedCameraUuid: string | null
@@ -441,6 +484,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
     })
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const updateZoomAndFocusParameter = (param: keyof FocusAndZoomParametersQuery, value: any) => {
   if (!props.selectedCameraUuid) {
     return

@@ -1,7 +1,10 @@
 <template>
   <div class="flex w-full justify-between items-center">
     <div v-if="label">
-      <label class="text-start mr-6" :class="theme === 'dark' ? 'text-white' : 'text-black'">{{ label }}</label>
+      <label
+        class="text-start mr-6"
+        :class="theme === 'dark' ? 'text-white' : 'text-black'"
+      >{{ label }}</label>
     </div>
     <div v-else />
     <slot name="insetElement" />
@@ -10,8 +13,14 @@
       :class="[theme === 'dark' ? 'bg-[#464646]' : 'bg-[#00000011]', disabled ? 'opacity-50 pointer-events-none' : '']"
       :style="{ height: height || '30px' }"
     >
-    <div id="border-releif" class="absolute left-[-20px] top-0 h-full w-[6px] bg-[#6699cc] z-[20] pointer-events-none" />
-    <template v-for="(btn, idx) in buttonItems" :key="btn.name">
+      <div
+        id="border-releif"
+        class="absolute left-[-20px] top-0 h-full w-[6px] bg-[#6699cc] z-[20] pointer-events-none"
+      />
+      <template
+        v-for="(btn, idx) in buttonItems"
+        :key="btn.name"
+      >
         <button
           :disabled="disabled || btn.disabled"
           class="flex items-center justify-center px-4 text-sm font-medium transition-colors duration-200"
@@ -35,10 +44,20 @@
             </div>
           </div>
         </button>
-        <div v-if="idx < buttonItems.length - 1" class="w-[1px] bg-[#FFFFFF22] my-2" />
+        <div
+          v-if="idx < buttonItems.length - 1"
+          class="w-[1px] bg-[#FFFFFF22] my-2"
+        />
       </template>
-      <div v-if="buttonsMenu?.length" class="w-[1px] bg-[#FFFFFF22] my-2 mr-[3px]" />
-      <div v-if="buttonsMenu?.length" v-click-outside="() => (menuOpen = false)" class="relative">
+      <div
+        v-if="buttonsMenu?.length"
+        class="w-[1px] bg-[#FFFFFF22] my-2 mr-[3px]"
+      />
+      <div
+        v-if="buttonsMenu?.length"
+        v-click-outside="() => (menuOpen = false)"
+        class="relative"
+      >
         <div
           class="px-0 flex items-center justify-center h-full cursor-pointer"
           :class="theme === 'dark' ? 'text-white' : 'text-black'"
@@ -53,9 +72,12 @@
           :style="flipX ? { top: menuY + 'px', right: menuRight + 'px' } : { top: menuY + 'px', left: menuX + 'px' }"
         >
           <ul>
-            <div v-for="(item, idx) in buttonsMenu" :key="item.name">
+            <div
+              v-for="(item, idx) in buttonsMenu"
+              :key="item.name"
+            >
               <button
-              :disabled="item.menuItemDisabled"
+                :disabled="item.menuItemDisabled"
                 class="block w-full text-left px-4 py-2 text-[14px]"
                 :class="[
                   idx < buttonsMenu.length - 1 ? 'border-b border-white' : '',
@@ -98,6 +120,7 @@ interface ButtonItem {
   /** Callback when the button is selected */
   onSelected?: () => void
   /** Custom options to handle button item press */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   options?: Record<string, any>
 }
 

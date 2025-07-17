@@ -1,14 +1,22 @@
 <template>
   <div class="flex w-full justify-between items-center">
     <div v-if="label">
-      <label class="text-start mr-6" :class="theme === 'dark' ? 'text-white' : 'text-black'">
+      <label
+        class="text-start mr-6"
+        :class="theme === 'dark' ? 'text-white' : 'text-black'"
+      >
         {{ label }}
       </label>
     </div>
     <div v-else />
     <slot name="insetElement" />
 
-    <v-menu offset-y :disabled="disabled" class="flex-1" :close-on-content-click="!multiSelect">
+    <v-menu
+      offset-y
+      :disabled="disabled"
+      class="flex-1"
+      :close-on-content-click="!multiSelect"
+    >
       <template #activator="{ props: menuProps }">
         <button
           v-bind="menuProps"
@@ -19,14 +27,22 @@
           ]"
           :style="{ height: height || '30px', width: width || 'auto' }"
         >
-          <span class="text-sm font-medium truncate mr-1 maxWidth-[100%] -mb-[1px]" :class="selectedTextClass">
+          <span
+            class="text-sm font-medium truncate mr-1 maxWidth-[100%] -mb-[1px]"
+            :class="selectedTextClass"
+          >
             {{ !multiSelect ? selectedItem.name : selectedValues.length > 0 ? selectedValues.join(', ') : 'Select...' }}
           </span>
-          <v-icon :class="['transition-transform', iconClass]"> mdi-menu-down </v-icon>
+          <v-icon :class="['transition-transform', iconClass]">
+            mdi-menu-down
+          </v-icon>
         </button>
       </template>
 
-      <v-list class="py-0" :theme="theme">
+      <v-list
+        class="py-0"
+        :theme="theme"
+      >
         <v-list-item
           v-for="(opt, idx) in items"
           :key="opt.name"
@@ -34,7 +50,12 @@
           @click="selectOption(idx)"
         >
           <div class="flex justify-between">
-            <v-icon v-if="selectedValues.includes(opt.value || opt.name)" class="mt-1 text-[16px]"> mdi-check </v-icon>
+            <v-icon
+              v-if="selectedValues.includes(opt.value || opt.name)"
+              class="mt-1 text-[16px]"
+            >
+              mdi-check
+            </v-icon>
             <div v-else />
             <v-list-item-title :class="itemTextClass(opt)">
               {{ opt.name }}
@@ -47,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 
 /**
  * Option in the select
@@ -60,6 +81,7 @@ interface OptionItem {
   /**
    * Value of the option, if not provided, name will be used
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   value?: any
   /**
    * Whether the option is disabled
@@ -87,6 +109,7 @@ const props = defineProps<{
   /** Multiple values selection */
   multiSelect?: boolean
   /** Model value for v-model */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   modelValue?: any
 }>()
 

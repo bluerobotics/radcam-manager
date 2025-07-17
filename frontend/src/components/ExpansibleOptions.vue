@@ -1,5 +1,8 @@
 <template>
-  <div class="flex flex-col" :class="buttonClass">
+  <div
+    class="flex flex-col"
+    :class="buttonClass"
+  >
     <div class="flex justify-start items-center">
       <button
         class="inline-flex items-center text-[12px] font-medium font-xs focus:outline-none opacity-75 hover:opacity-100"
@@ -8,7 +11,10 @@
       >
         <div class="flex items-center mr-2">
           {{ isOpen ? closeLabel : openLabel }}
-          <v-icon size="18" :class="['transition-transform', isOpen ? 'rotate-180' : 'rotate-0']">
+          <v-icon
+            size="18"
+            :class="['transition-transform', isOpen ? 'rotate-180' : 'rotate-0']"
+          >
             mdi-menu-down
           </v-icon>
         </div>

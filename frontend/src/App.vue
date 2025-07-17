@@ -21,7 +21,10 @@
               class="bg-[#232323] ml-3 -mb-[1px]"
             >
               <template #item="{ props, item }">
-                <v-list-item v-bind="props" :subtitle="item.raw.uuid" />
+                <v-list-item
+                  v-bind="props"
+                  :subtitle="item.raw.uuid"
+                />
               </template>
             </v-select>
           </div>
@@ -36,14 +39,31 @@
           />
         </div>
         <template v-if="configMode === 'basic'">
-          <BasicSettings :selected-camera-uuid="selectedCameraUUID" :backend-api="backendAPI" :disabled="false" />
+          <BasicSettings
+            :selected-camera-uuid="selectedCameraUUID"
+            :backend-api="backendAPI"
+            :disabled="false"
+          />
         </template>
 
         <template v-if="configMode === 'advanced'">
-          <v-tabs v-model="tab" align-tabs="center" class="mb-5">
-            <v-tab value="image"> Image </v-tab>
-            <v-tab value="streams"> Streams </v-tab>
-            <v-tab value="configs" :disabled="true"> Configs </v-tab>
+          <v-tabs
+            v-model="tab"
+            align-tabs="center"
+            class="mb-5"
+          >
+            <v-tab value="image">
+              Image
+            </v-tab>
+            <v-tab value="streams">
+              Streams
+            </v-tab>
+            <v-tab
+              value="configs"
+              :disabled="true"
+            >
+              Configs
+            </v-tab>
           </v-tabs>
 
           <v-tabs-window v-model="tab">
