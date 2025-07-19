@@ -1,0 +1,31 @@
+[package]
+name = "autopilot"
+version = "0.1.4"
+edition = "2024"
+
+[lib]
+name = "autopilot"
+path = "src/mod.rs"
+bench = false
+
+[dependencies]
+web_client = { path = "../web_client" }
+utils = { path = "../utils" }
+
+anyhow = "1.0.98"
+axum = { version = "0.8.3", features = ["ws"] }
+chrono = { version = "0.4", features = ["std", "serde"] }
+indexmap = { version = "2.9.0", features = ["serde"] }
+mavlink = { default-features = false, features = ["std", "tcp", "udp", "direct-serial", "ardupilotmega", "serde", "tokio-1", "format-generated-code", "emit-extensions"], git = "https://github.com/mavlink/rust-mavlink.git", rev = "57379ef" }
+once_cell = "1.21.3"
+reqwest = { version = "0.12.15", default-features = false, features = ["http2", "json", "rustls-tls"] }
+serde = "1.0.219"
+serde_derive = "1.0.219"
+serde_json = "1.0.140"
+serde_repr = "0.1.20"
+tokio = { version = "1.44.2", default-features = false, features = ["time"] }
+tower-http = { version = "0.6", features = ["normalize-path", "trace", "cors"] }
+tracing = "0.1.41"
+ts-rs = { version = "10.1.0", features = ["serde_json", "no-serde-warnings"] }
+tsync = { git = "https://github.com/AnthonyMichaelTDM/tsync.git", rev = "01f56be" }
+uuid = { version = "1.16.0", features = ["v5", "serde"] }

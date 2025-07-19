@@ -39,6 +39,26 @@ pub struct Args {
     /// Sets the Mavlink Camera Manager address.
     #[arg(long, default_value = "127.0.0.1:6020")]
     mcm_address: String,
+
+    /// Sets the file path for the autopilot lua script to control zoom and focus
+    #[arg(long, default_value = "./scripts/radcam.lua")]
+    autopilot_scripts_file: Option<String>,
+
+    /// Sets the mavlink connection string
+    #[arg(
+        long,
+        value_name = "<TYPE>:<IP/SERIAL>:<PORT/BAUDRATE>",
+        default_value = "tcpout:127.0.0.1:5777"
+    )]
+    mavlink: String,
+
+    /// Sets the MAVLink System ID.
+    #[arg(long, value_name = "SYSTEM_ID", default_value = "1")]
+    mavlink_system_id: u8,
+
+    /// Sets the MAVLink Component ID.
+    #[arg(long, value_name = "COMPONENT_ID", default_value = "56")]
+    mavlink_component_id: u8,
 }
 
 /// Constructs our manager, Should be done inside main
@@ -104,6 +124,37 @@ pub async fn mcm_address() -> std::net::SocketAddr {
     let address = &args().mcm_address;
 
     resolve_address(address).await.unwrap()
+}
+
+#[instrument(level = "debug")]
+pub fn mavlink_connection_string() -> String {
+    args().mavlink.clone()
+}
+
+#[instrument(level = "debug")]
+pub fn mavlink_system_id() -> u8 {
+    args().mavlink_system_id
+}
+
+#[instrument(level = "debug")]
+pub fn mavlink_component_id() -> u8 {
+    args().mavlink_component_id
+}
+
+#[instrument(level = "debug")]
+pub fn autopilot_scripts_file() -> String {
+    let autopilot_scripts_file = args()
+        .autopilot_scripts_file
+        .clone()
+        .expect("Clap arg \"autopilot-scripts-file\" should always be \"Some(_)\" because of the default value.");
+
+    if !autopilot_scripts_file.ends_with(".lua") {
+        panic!("Clap arg \"autopilot-scripts-file\" Should always end with \".lua\"");
+    }
+
+    shellexpand::full(&autopilot_scripts_file)
+        .expect("Failed to expand path")
+        .to_string()
 }
 
 #[instrument(level = "debug")]

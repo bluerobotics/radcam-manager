@@ -9,6 +9,7 @@ path = "src/mod.rs"
 bench = false
 
 [dependencies]
+autopilot = { path = "../autopilot" }
 web_client = { path = "../web_client" }
 mcm_client = { path = "../mcm_client" }
 radcam_commands = { path = "../radcam_commands" }

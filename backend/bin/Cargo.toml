@@ -6,6 +6,7 @@ license = "MIT"
 default-run = "radcam-manager"
 
 [dependencies]
+autopilot = { path="../libs/autopilot" }
 radcam_manager = { path="../libs/radcam_manager" }
 radcam_commands = { path="../libs/radcam_commands" }
 mcm_client = { path="../libs/mcm_client" }
