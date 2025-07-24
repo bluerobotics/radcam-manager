@@ -15,7 +15,8 @@ pub struct ActuatorsControl {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "action", content = "json")]
 pub enum Action {
-    // TODO: Action::ExportLuaScript
+    #[serde(rename = "exportLuaScript")]
+    ExportLuaScript,
     #[serde(rename = "getActuatorsState")]
     GetActuatorsState,
     #[serde(rename = "setActuatorsState")]
@@ -24,6 +25,8 @@ pub enum Action {
     GetActuatorsConfig,
     #[serde(rename = "setActuatorsConfig")]
     SetActuatorsConfig(ActuatorsConfig),
+    #[serde(rename = "resetActuatorsConfig")]
+    ResetActuatorsConfig,
 }
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize, Clone, Copy, TS)]

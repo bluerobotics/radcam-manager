@@ -188,6 +188,33 @@ impl Manager {
 
         Ok(())
     }
+
+    pub async fn export_script(&mut self) -> Result<bool> {
+        let mut autopilot_reboot_required = false;
+
+        autopilot_reboot_required |= export_script(&self.autopilot_scripts_file).await?;
+        autopilot_reboot_required |= self.mavlink.enable_lua_script().await?;
+
+        if autopilot_reboot_required {
+            self.mavlink.restart_autopilot().await?;
+        }
+
+        self.settings.save().await?;
+
+        Ok(autopilot_reboot_required)
+    }
+
+    #[instrument(level = "debug", skip(self))]
+    pub async fn reset_config(&mut self, camera_uuid: &Uuid) -> Result<()> {
+        let default_config = api::ActuatorsConfig::from(&CameraActuators::default());
+        debug!("Setting to default: {default_config:?}");
+
+        self.settings
+            .actuators
+            .insert(*camera_uuid, ActuatorsConfig)?;
+
+        self.update_config(camera_uuid, &default_config).await
+    }
 }
 
 /// Constructs our manager, Should be done inside main
