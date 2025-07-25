@@ -14,8 +14,9 @@ impl Manager {
         &mut self,
         camera_uuid: &Uuid,
         parameters: &api::ActuatorsParametersConfig,
+        overwrite: bool,
     ) -> Result<bool> {
-        let mut autopilot_reboot_required = false;
+        let mut autopilot_reboot_required = overwrite;
 
         if let Some(channel) = &parameters.script_channel {
             let current_parameters = &mut self
@@ -71,10 +72,10 @@ impl Manager {
                 )?;
                 let new_value = param.value;
 
-                if old_value != new_value {
+                if overwrite || old_value != new_value {
                     match self.mavlink.set_param(param).await {
                         Ok(_) => {
-                            if old_value != new_value {
+                            if overwrite || old_value != new_value {
                                 info!(
                                     "script_channel (SERVO{}) changed from {:?} to {new_value:?}",
                                     *channel as u8, old_value
@@ -146,7 +147,7 @@ impl Manager {
 }
 
 #[instrument(level = "debug")]
-pub async fn export_script(path: &str) -> Result<bool> {
+pub async fn export_script(path: &str, overwrite: bool) -> Result<bool> {
     let contents = generate_lua_script()?;
 
     let path_obj = std::path::Path::new(path);
@@ -155,10 +156,12 @@ pub async fn export_script(path: &str) -> Result<bool> {
     }
 
     if let Ok(existing_contents) = tokio::fs::read_to_string(path_obj).await {
-        if existing_contents == contents {
+        if !overwrite && existing_contents == contents {
             return Ok(false);
         }
     }
+
+    // TODO: SCRIPT RELOAD COMMAND
 
     trace!("Saving Lua script to {path:?}. Lua script content: {contents:#?}");
 

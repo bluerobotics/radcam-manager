@@ -26,6 +26,7 @@ impl From<&CameraActuators> for settings::CameraActuatorsSettings {
 impl From<&settings::ActuatorsParameters> for parameters::ActuatorsParameters {
     fn from(value: &settings::ActuatorsParameters) -> Self {
         Self {
+            camera_id: (&value.camera_id).into(),
             focus_channel: (&value.focus_channel).into(),
             focus_channel_min: value.focus_channel_min,
             focus_channel_trim: value.focus_channel_trim,
@@ -55,6 +56,7 @@ impl From<&settings::ActuatorsParameters> for parameters::ActuatorsParameters {
 impl From<&parameters::ActuatorsParameters> for settings::ActuatorsParameters {
     fn from(value: &parameters::ActuatorsParameters) -> Self {
         settings::ActuatorsParameters {
+            camera_id: (&value.camera_id).into(),
             focus_channel: (&value.focus_channel).into(),
             focus_channel_min: value.focus_channel_min,
             focus_channel_trim: value.focus_channel_trim,
@@ -200,6 +202,23 @@ impl From<&api::ScriptFunction> for settings::ScriptFunction {
             api::ScriptFunction::SCRIPT14 => Self::SCRIPT14,
             api::ScriptFunction::SCRIPT15 => Self::SCRIPT15,
             api::ScriptFunction::SCRIPT16 => Self::SCRIPT16,
+        }
+    }
+}
+
+impl From<&settings::CameraID> for api::CameraID {
+    fn from(value: &settings::CameraID) -> Self {
+        match value {
+            settings::CameraID::CAM1 => Self::CAM1,
+            settings::CameraID::CAM2 => Self::CAM2,
+        }
+    }
+}
+impl From<&api::CameraID> for settings::CameraID {
+    fn from(value: &api::CameraID) -> Self {
+        match value {
+            api::CameraID::CAM1 => Self::CAM1,
+            api::CameraID::CAM2 => Self::CAM2,
         }
     }
 }

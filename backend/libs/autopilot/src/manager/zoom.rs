@@ -14,8 +14,9 @@ impl Manager {
         &mut self,
         camera_uuid: &Uuid,
         parameters: &api::ActuatorsParametersConfig,
+        overwrite: bool,
     ) -> Result<bool> {
-        let mut autopilot_reboot_required = false;
+        let mut autopilot_reboot_required = overwrite;
 
         if let Some(channel) = &parameters.zoom_channel {
             let current_parameters = &mut self
@@ -44,7 +45,7 @@ impl Manager {
                             if old_value != new_value {
                                 info!(
                                     "zoom_channel (SERVO{}) changed from {:?} to {new_value:?}",
-                                    current_parameters.script_channel as u8, old_value
+                                    current_parameters.zoom_channel as u8, old_value
                                 );
                                 autopilot_reboot_required = true;
                             }
@@ -70,10 +71,10 @@ impl Manager {
                 )?;
                 let new_value = param.value;
 
-                if old_value != new_value {
+                if overwrite || old_value != new_value {
                     match self.mavlink.set_param(param).await {
                         Ok(_) => {
-                            if old_value != new_value {
+                            if overwrite || old_value != new_value {
                                 info!(
                                     "zoom_channel (SERVO{}) changed from {:?} to {new_value:?}",
                                     *channel as u8, old_value

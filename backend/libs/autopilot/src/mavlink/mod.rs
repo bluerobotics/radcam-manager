@@ -169,8 +169,8 @@ impl MavlinkComponent {
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub async fn enable_lua_script(&self) -> Result<bool> {
-        let mut autopilot_reboot_required = false;
+    pub async fn enable_lua_script(&self, overwrite: bool) -> Result<bool> {
+        let mut autopilot_reboot_required = overwrite;
 
         let encoding = self.encoding().await;
 
@@ -179,7 +179,7 @@ impl MavlinkComponent {
         param.value.set_value(ParamType::REAL32(1.0), encoding)?;
         let new_value = param.value;
 
-        if old_value != new_value {
+        if overwrite || old_value != new_value {
             self.set_param(param).await?;
             autopilot_reboot_required = true;
         }

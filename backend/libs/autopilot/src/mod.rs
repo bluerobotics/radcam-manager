@@ -47,6 +47,13 @@ pub(crate) async fn control_inner(
     debug!("Got control query: {actuators_control:#?}");
 
     let res = match &actuators_control.action {
+        Action::ExportLuaScript => {
+            let mut manager = MANAGER.get().unwrap().write().await;
+
+            manager.export_script().await?;
+
+            serde_json::to_value({})?
+        }
         Action::GetActuatorsState => {
             let manager = MANAGER.get().unwrap().read().await;
 
@@ -93,8 +100,22 @@ pub(crate) async fn control_inner(
             let mut manager = MANAGER.get().unwrap().write().await;
 
             manager
-                .update_config(&actuators_control.camera_uuid, new_config)
+                .update_config(&actuators_control.camera_uuid, new_config, false)
                 .await?;
+
+            let config: &api::ActuatorsConfig = &manager
+                .settings
+                .actuators
+                .get(&actuators_control.camera_uuid)
+                .context("Camera's actuators not configured")?
+                .into();
+
+            serde_json::to_value(config)?
+        }
+        Action::ResetActuatorsConfig => {
+            let mut manager = MANAGER.get().unwrap().write().await;
+
+            manager.reset_config(&actuators_control.camera_uuid).await?;
 
             let config: &api::ActuatorsConfig = &manager
                 .settings

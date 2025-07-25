@@ -25,6 +25,9 @@ pub struct Calibration {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActuatorsParameters {
+    // Camera parameters
+    pub camera_id: CameraID,
+
     // Focus channel parameters
     pub focus_channel: ServoChannel,
     pub focus_channel_min: u16,
@@ -57,6 +60,13 @@ pub struct ActuatorsParameters {
     pub tilt_mnt_type: MountType,
     pub tilt_mnt_pitch_min: i32,
     pub tilt_mnt_pitch_max: i32,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CameraID {
+    #[default]
+    CAM1 = 1,
+    CAM2 = 2,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

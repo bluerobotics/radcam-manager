@@ -15,7 +15,8 @@ pub struct ActuatorsControl {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "action", content = "json")]
 pub enum Action {
-    // TODO: Action::ExportLuaScript
+    #[serde(rename = "exportLuaScript")]
+    ExportLuaScript,
     #[serde(rename = "getActuatorsState")]
     GetActuatorsState,
     #[serde(rename = "setActuatorsState")]
@@ -24,6 +25,8 @@ pub enum Action {
     GetActuatorsConfig,
     #[serde(rename = "setActuatorsConfig")]
     SetActuatorsConfig(ActuatorsConfig),
+    #[serde(rename = "resetActuatorsConfig")]
+    ResetActuatorsConfig,
 }
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize, Clone, Copy, TS)]
@@ -52,6 +55,9 @@ impl From<&CameraActuators> for ActuatorsConfig {
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize, Clone, TS)]
 pub struct ActuatorsParametersConfig {
+    // Camera parameters
+    pub camera_id: Option<CameraID>,
+
     // Focus channel parameters
     pub focus_channel: Option<ServoChannel>,
     pub focus_channel_min: Option<u16>,
@@ -89,6 +95,7 @@ pub struct ActuatorsParametersConfig {
 impl From<&ActuatorsParameters> for ActuatorsParametersConfig {
     fn from(value: &ActuatorsParameters) -> Self {
         Self {
+            camera_id: Some(value.camera_id),
             focus_channel: Some(value.focus_channel),
             focus_channel_min: Some(value.focus_channel_min),
             focus_channel_trim: Some(value.focus_channel_trim),
@@ -114,6 +121,13 @@ impl From<&ActuatorsParameters> for ActuatorsParametersConfig {
             tilt_mnt_pitch_max: Some(value.tilt_mnt_pitch_max),
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum CameraID {
+    #[default]
+    CAM1 = 1,
+    CAM2 = 2,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
