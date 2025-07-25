@@ -11,6 +11,7 @@ impl Manager {
         &mut self,
         camera_uuid: &Uuid,
         _points: &api::FocusZoomPoints,
+        overwrite: bool,
     ) -> Result<bool> {
         let should_update_script = false;
 
@@ -24,6 +25,7 @@ impl Manager {
         &mut self,
         camera_uuid: &Uuid,
         _points: &api::FocusZoomPoints,
+        overwrite: bool,
     ) -> Result<bool> {
         let should_update_script = false;
 

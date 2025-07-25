@@ -192,6 +192,9 @@ impl Parameter {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ActuatorsParameters {
+    // Camera parameters
+    pub camera_id: api::CameraID,
+
     // Focus channel parameters
     pub focus_channel: api::ServoChannel,
     pub focus_channel_min: u16,
@@ -229,6 +232,9 @@ pub struct ActuatorsParameters {
 impl Default for ActuatorsParameters {
     fn default() -> Self {
         Self {
+            // Camera parameters
+            camera_id: api::CameraID::CAM1,
+
             // Focus - controlled by the user
             focus_channel: api::ServoChannel::SERVO10,
             focus_channel_min: 870,
@@ -269,6 +275,7 @@ impl From<ActuatorsParametersConfig> for ActuatorsParameters {
     fn from(value: ActuatorsParametersConfig) -> Self {
         let default = Self::default();
         Self {
+            camera_id: value.camera_id.unwrap_or(default.camera_id),
             focus_channel: value.focus_channel.unwrap_or(default.focus_channel),
             focus_channel_min: value.focus_channel_min.unwrap_or(default.focus_channel_min),
             focus_channel_trim: value
@@ -312,6 +319,11 @@ impl From<ActuatorsParametersConfig> for ActuatorsParameters {
         }
     }
 }
+
+/// 0 is "None"
+pub const DISABLED_CAMERA_TYPE: u8 = 0;
+/// 1 is "Servo"
+pub const SERVO_CAMERA_TYPE: u8 = 1;
 
 /// 92 is "CameraFocus"
 pub const FOCUS_CHANNEL_FUNCTION: u8 = 92;

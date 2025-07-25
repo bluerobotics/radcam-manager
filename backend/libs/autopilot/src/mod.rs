@@ -50,9 +50,9 @@ pub(crate) async fn control_inner(
         Action::ExportLuaScript => {
             let mut manager = MANAGER.get().unwrap().write().await;
 
-            let file_exported = manager.export_script().await?;
+            manager.export_script().await?;
 
-            serde_json::to_value(file_exported)?
+            serde_json::to_value({})?
         }
         Action::GetActuatorsState => {
             let manager = MANAGER.get().unwrap().read().await;
@@ -100,7 +100,7 @@ pub(crate) async fn control_inner(
             let mut manager = MANAGER.get().unwrap().write().await;
 
             manager
-                .update_config(&actuators_control.camera_uuid, new_config)
+                .update_config(&actuators_control.camera_uuid, new_config, false)
                 .await?;
 
             let config: &api::ActuatorsConfig = &manager
