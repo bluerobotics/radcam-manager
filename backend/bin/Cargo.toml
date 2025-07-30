@@ -1,6 +1,6 @@
 [package]
 name = "radcam-manager"
-version = "0.1.4"
+version = "0.2.0-beta.1"
 edition = "2024"
 license = "MIT"
 default-run = "radcam-manager"
