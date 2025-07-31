@@ -14,7 +14,8 @@
     <v-menu
       offset-y
       :disabled="disabled"
-      class="flex-1"
+      class="flex"
+      style="z-index: 999999"
       :close-on-content-click="!multiSelect"
     >
       <template #activator="{ props: menuProps }">
