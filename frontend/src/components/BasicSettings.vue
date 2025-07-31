@@ -79,7 +79,7 @@
         v-model="focusAndZoomParams.focus_margin_gain"
         name="focus-speed"
         label="Focus speed"
-        :min="0"
+        :min="1"
         :max="10"
         :step="0.1"
         label-min="Slow"
@@ -93,7 +93,7 @@
         v-model="focusAndZoomParams.zoom_channel_trim"
         name="zoom-speed"
         label="Zoom speed"
-        :min="0"
+        :min="1"
         :max="10"
         :step="0.1"
         label-min="Slow"
@@ -115,7 +115,7 @@
         v-model="focusAndZoomParams.focus_channel_trim"
         name="focus-offset"
         label="Focus offset"
-        :min="0"
+        :min="-10"
         :max="10"
         :step="0.1"
         width="400px"
@@ -132,7 +132,7 @@
       <BlueSelect
         v-model="selectedVideoResolution"
         label="Cockpit display"
-        :items="resolutionOptions"
+        :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
       />
     </ExpansiblePanel>
@@ -259,7 +259,7 @@ import BlueSwitch from './BlueSwitch.vue'
 import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
 import ExpansibleOptions from './ExpansibleOptions.vue'
-import type { BaseParameterSetting, VideoParameterSettings, VideoResolutionValue } from '@/bindings/radcam'
+import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue } from '@/bindings/radcam'
 import axios from 'axios'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, ServoChannel } from '@/bindings/autopilot'
 
@@ -269,7 +269,10 @@ const props = defineProps<{
   disabled: boolean
 }>()
 
-const servoChannelOptions = Array.from({ length: 32 }, (_, i) => ({ name: `${i + 1}`, value: `SERVO${i + 1}` as ServoChannel }));
+const servoChannelOptions = Array.from({ length: 16 }, (_, i) => ({
+  name: `Channel ${i + 1}`,
+  value: `SERVO${i + 1}`,
+}))
 
 const baseParams = ref<BaseParameterSetting>({
   hue: null,
@@ -333,17 +336,7 @@ const focusAndZoomParams = ref<ActuatorsParametersConfig>({
   tilt_mnt_pitch_max: null,
 })
 
-const mockVideoParameters = {
-  pixel_list: [
-    { width: 640, height: 480 },
-    { width: 1280, height: 720 },
-    { width: 1920, height: 1080 },
-    { width: 3840, height: 2160 },
-  ],
-}
-
 const OPWBMode = ref('green')
-const cockpitDisplay = ref(undefined)
 const openRGBSetpointOptions = ref(false)
 const openRGBSetpointForm = ref(false)
 const newRGBSetpointProfileName = ref('')
@@ -355,7 +348,9 @@ const currentRGBSetpointValue = ref<number[]>([
 const currentRGBSetpointProfile = ref<string | null>('Custom 2')
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
+const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const openRGBSetpointDelete = ref(false)
+const actuatorsState = ref<ActuatorsState | null>(null)
 
 const RGBSetpointProfiles = ref([
   {
@@ -373,7 +368,7 @@ const RGBSetpointProfiles = ref([
 ])
 
 const resolutionOptions = computed(() => {
-  return mockVideoParameters.pixel_list.map((res: VideoResolutionValue) => ({
+  return downloadedVideoParameters.value.pixel_list?.map((res: VideoResolutionValue) => ({
     name: `${res.width}x${res.height}`,
     value: res,
   }))
@@ -589,6 +584,46 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: any) => {
     })
 }
 
+
+const getVideoParameters = (update: boolean) => {
+  if (!props.selectedCameraUuid) {
+    return
+  }
+
+  const video_parameter_settings = {
+    channel: selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream,
+  }
+
+  const payload = {
+    camera_uuid: props.selectedCameraUuid,
+    action: 'getVencConf',
+    json: video_parameter_settings,
+  }
+
+  axios
+    .post(`${props.backendApi}/camera/control`, payload)
+    .then((response) => {
+      const settings: VideoParameterSettings = response.data as VideoParameterSettings
+
+      if (update) {
+        update_video_parameter_values(settings)
+      }
+    })
+    .catch((error) => console.error(`Error sending getVencConf request:`, error.message))
+}
+
+const update_video_parameter_values = (settings: VideoParameterSettings) => {
+  downloadedVideoParameters.value = { ...settings }
+
+  selectedVideoParameters.value = { ...settings }
+  selectedVideoParameters.value.pixel_list = undefined
+
+  selectedVideoResolution.value = {
+    width: settings.pic_width!,
+    height: settings.pic_height!,
+  } as VideoResolutionValue
+}
+
 onMounted(() => {
   getActuatorsConfig()
   getActuatorsState()
@@ -600,13 +635,10 @@ watch(
     if (newValue) {
       getActuatorsConfig()
       getActuatorsState()
+      getVideoParameters(true)
     }
   }
 )
-
-watch(cockpitDisplay, (newVal) => {
-  console.log('cockpitDisplay changed:', newVal)
-})
 
 watch(
   () => selectedVideoResolution.value,

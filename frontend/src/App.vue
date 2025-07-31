@@ -1,5 +1,5 @@
 <template>
-  <v-app class="bg-[#0F5892]">
+  <v-app class="bg-transparent">
     <v-main>
       <v-container
         no-gutters
