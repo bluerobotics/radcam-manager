@@ -74,35 +74,6 @@
           />
         </div>
       </ExpansibleOptions>
-
-      <BlueSlider
-        v-model="focusAndZoomParams.focus_margin_gain"
-        name="focus-speed"
-        label="Focus speed"
-        :min="1"
-        :max="10"
-        :step="0.1"
-        label-min="Slow"
-        label-max="Fast"
-        width="400px"
-        theme="dark"
-        class="mt-6"
-        @update:model-value="updateActuatorsConfig('focus_margin_gain', $event)"
-      />
-      <BlueSlider
-        v-model="focusAndZoomParams.zoom_channel_trim"
-        name="zoom-speed"
-        label="Zoom speed"
-        :min="1"
-        :max="10"
-        :step="0.1"
-        label-min="Slow"
-        label-max="Fast"
-        width="400px"
-        theme="dark"
-        class="mt-6"
-        @update:model-value="updateActuatorsConfig('zoom_channel_trim', $event)"
-      />
       <BlueSwitch
         v-model="focusAndZoomParams.enable_focus_and_zoom_correlation"
         name="focus-zoom-correlation"
@@ -134,6 +105,51 @@
         label="Cockpit display"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
+      />
+    </ExpansiblePanel>
+    <ExpansiblePanel
+      title="Actuators"
+      expanded
+      theme="dark"
+    >
+      <BlueSlider
+        v-if="actuatorsState"
+        v-model="actuatorsState.focus"
+        name="focus"
+        label="Focus"
+        :min="0"
+        :max="100"
+        :step="1"
+        width="400px"
+        theme="dark"
+        class="mt-5"
+        @update:model-value="updateActuatorsState('focus', $event as number)"
+      />
+      <BlueSlider
+        v-if="actuatorsState"
+        v-model="actuatorsState.zoom"
+        name="zoom"
+        label="Zoom"
+        :min="0"
+        :max="100"
+        :step="1"
+        width="400px"
+        theme="dark"
+        class="mt-5"
+        @update:model-value="updateActuatorsState('zoom', $event as number)"
+      />
+      <BlueSlider
+        v-if="actuatorsState"
+        v-model="actuatorsState.tilt"
+        name="tilt"
+        label="Tilt"
+        :min="0"
+        :max="100"
+        :step="1"
+        width="400px"
+        theme="dark"
+        class="mt-5"
+        @update:model-value="updateActuatorsState('tilt', $event as number)"
       />
     </ExpansiblePanel>
     <ExpansiblePanel
@@ -350,7 +366,11 @@ const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
 const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const openRGBSetpointDelete = ref(false)
-const actuatorsState = ref<ActuatorsState | null>(null)
+const actuatorsState = ref<ActuatorsState | null>({
+  focus: 0,
+  zoom: 0,
+  tilt: 0,
+})
 
 const RGBSetpointProfiles = ref([
   {
@@ -559,9 +579,7 @@ const getActuatorsState = () => {
     })
 }
 
-// TODO: integrate independent FOCUS / ZOOM / TILT contros using this API
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const updateActuatorsState = (param: keyof ActuatorsState, value: any) => {
+const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
   if (!props.selectedCameraUuid) return
 
   const payload: ActuatorsControl = {
@@ -575,8 +593,7 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: any) => {
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
     .then(response => {
-      // the return type is a ActuatorsState
-      // actuatorsState.value = { ...response.data }
+      actuatorsState.value = { ...response.data }
       console.log(response.data)
     })
     .catch(error => {
