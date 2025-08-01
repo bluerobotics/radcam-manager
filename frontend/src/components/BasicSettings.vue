@@ -105,6 +105,7 @@
         label="Cockpit display"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
+        @update:model-value="(value: any) => updateVideoResolution(value)"
       />
     </ExpansiblePanel>
     <ExpansiblePanel
@@ -265,6 +266,7 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
+  <Loading :is-loading="isLoading" />
 </template>
 
 <script setup lang="ts">
@@ -275,6 +277,7 @@ import BlueSwitch from './BlueSwitch.vue'
 import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
 import ExpansibleOptions from './ExpansibleOptions.vue'
+import Loading from './Loading.vue'
 import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue } from '@/bindings/radcam'
 import axios from 'axios'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, ServoChannel } from '@/bindings/autopilot'
@@ -371,6 +374,7 @@ const actuatorsState = ref<ActuatorsState | null>({
   zoom: 0,
   tilt: 0,
 })
+const isLoading = ref<boolean>(false)
 
 const RGBSetpointProfiles = ref([
   {
@@ -629,16 +633,84 @@ const getVideoParameters = (update: boolean) => {
     .catch((error) => console.error(`Error sending getVencConf request:`, error.message))
 }
 
+const updateVideoResolution = (newRes: VideoResolutionValue | null) => { 
+  if (!newRes || !props.selectedCameraUuid) return                      
+
+  selectedVideoParameters.value.pic_width  = newRes.width               
+  selectedVideoParameters.value.pic_height = newRes.height              
+
+  const video_parameter_settings = { 
+    pic_width: newRes.width,
+    pic_height: newRes.height,
+  } 
+
+  const payload = {
+    camera_uuid: props.selectedCameraUuid,
+    action: "setVencConf",
+    json: video_parameter_settings as VideoParameterSettings,
+  }
+  console.log(payload)
+
+  axios
+    .post(`${props.backendApi}/camera/control`, payload)
+     .then((response) => {
+       const settings: VideoParameterSettings =
+           response.data as VideoParameterSettings
+         update_video_parameter_values(settings)
+       
+    })
+    .catch((error) =>
+      console.error(
+        `Error sending ${video_parameter_settings}':`,
+        error.message
+      )
+    ).finally(() => {
+      doRestart()
+    })
+}
+
 const update_video_parameter_values = (settings: VideoParameterSettings) => {
   downloadedVideoParameters.value = { ...settings }
 
   selectedVideoParameters.value = { ...settings }
   selectedVideoParameters.value.pixel_list = undefined
 
-  selectedVideoResolution.value = {
+  const previousResolution = settings.pixel_list?.find(p => p.width === settings.pic_width && p.height === settings.pic_height)
+
+  selectedVideoResolution.value = previousResolution ?? {
     width: settings.pic_width!,
     height: settings.pic_height!,
   } as VideoResolutionValue
+}
+
+const doRestart = () => {
+  if (!props.selectedCameraUuid) {
+    return
+  }
+
+  console.log("Restarting...")
+
+  isLoading.value = true
+
+  const payload = {
+    camera_uuid: props.selectedCameraUuid,
+    action: "restart",
+  }
+
+  axios
+    .post(`${props.backendApi}/camera/control`, payload)
+    .then((response) => {
+      console.log("Got an answer from the restarting request", response.data)
+    })
+    .catch((error) =>
+      console.error(
+        `Error sending restart':`,
+        error.message
+      )
+    )
+    .finally(() => {
+      isLoading.value = false
+    })
 }
 
 onMounted(() => {
