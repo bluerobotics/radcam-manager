@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
 
     autopilot::init(
         cli::autopilot_scripts_file(),
-        cli::mavlink_connection_string(),
+        cli::mavlink_connection_string().await,
         cli::mavlink_system_id(),
         cli::mavlink_component_id(),
     )

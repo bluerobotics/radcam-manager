@@ -127,15 +127,17 @@ pub fn command_line() -> String {
 #[instrument(level = "debug")]
 pub async fn web_server() -> std::net::SocketAddr {
     let address = &args().web_server;
+    let address = shellexpand::full(&address).unwrap().to_string();
 
-    resolve_address(address).await.unwrap()
+    resolve_address(&address).await.unwrap()
 }
 
 #[instrument(level = "debug")]
 pub async fn mcm_address() -> std::net::SocketAddr {
     let address = &args().mcm_address;
+    let address = shellexpand::full(&address).unwrap().to_string();
 
-    resolve_address(address).await.unwrap()
+    resolve_address(&address).await.unwrap()
 }
 
 #[instrument(level = "debug")]
@@ -160,7 +162,7 @@ pub fn autopilot_scripts_file() -> String {
 pub fn settings_file() -> String {
     let settings_file = args().settings_file.clone();
 
-    shellexpand::full(&settings_file)
+    shellexpand::full(&*&settings_file)
         .expect("Failed to expand path")
         .to_string()
 }
@@ -171,8 +173,15 @@ pub fn is_reset() -> bool {
 }
 
 #[instrument(level = "debug")]
-pub fn mavlink_connection_string() -> String {
-    args().mavlink.clone()
+pub async fn mavlink_connection_string() -> String {
+    let mavlink = args().mavlink.clone();
+    let mavlink = shellexpand::full(&mavlink).unwrap();
+
+    let (kind, address) = mavlink.split_once(":").unwrap();
+
+    let address = resolve_address(address).await.unwrap();
+
+    format!("{kind}:{}", address.to_string())
 }
 
 #[instrument(level = "debug")]
