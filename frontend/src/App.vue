@@ -29,10 +29,7 @@
             </v-select>
           </div>
           <BlueButtonGroup
-            :button-items="[
-              { name: 'Basic', onSelected: () => (configMode = 'basic'), tooltip: 'Basic setup for the RadCam' },
-              { name: 'Advanced', onSelected: () => (configMode = 'advanced'), tooltip: 'Advanced camera settings' },
-            ]"
+            :button-items="configButtons"
             :theme="theme"
             class="mr-4"
             type="switch"
@@ -108,6 +105,20 @@ const desiredCameraUuid = ref<string | null>(null)
 
 const theme = ref<'light' | 'dark'>('dark')
 const configMode = ref<'basic' | 'advanced'>('basic')
+
+const configButtons = [
+  {
+    name: 'Basic',
+    tooltip: 'Basic setup for the RadCam',
+    onSelected: () => (configMode.value = 'basic'),
+    preSelected: true,
+  },
+  {
+    name: 'Advanced',
+    tooltip: 'Advanced camera settings',
+    onSelected: () => (configMode.value = 'advanced'),
+  },
+]
 
 const getCameras = async () => {
   try {
