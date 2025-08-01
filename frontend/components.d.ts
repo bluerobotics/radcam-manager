@@ -15,6 +15,7 @@ declare module 'vue' {
     ExpansibleOptions: typeof import('./src/components/ExpansibleOptions.vue')['default']
     ExpansiblePanel: typeof import('./src/components/ExpansiblePanel.vue')['default']
     ImageTab: typeof import('./src/components/ImageTab.vue')['default']
+    Loading: typeof import('./src/components/Loading.vue')['default']
     OperationError: typeof import('./src/components/common/OperationError.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
