@@ -20,12 +20,14 @@ chrono = { workspace = true }
 futures = { workspace = true }
 indexmap = { workspace = true }
 mavlink = { default-features = false, features = ["std", "tcp", "udp", "direct-serial", "ardupilotmega", "serde", "tokio-1", "format-generated-code", "emit-extensions"], git = "https://github.com/mavlink/rust-mavlink.git", rev = "57379ef" }
+mlua = { version = "0.11.1", default-features = false, features = ["lua54", "vendored", "error-send"] }
 num_enum = { version = "0.7.4" }
 once_cell = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 serde_json = { workspace = true }
+tera = { version = "1.20.0", default-features = false }
 tokio = { workspace = true, features = ["time", "fs", "io-util", "macros"] }
 tokio-stream = { workspace = true }
 tower-http = { workspace = true }
