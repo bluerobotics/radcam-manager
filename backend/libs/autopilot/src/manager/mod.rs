@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use settings::MANAGER as SETTINGS_MANAGER;
 
-use crate::{CameraActuators, api, manager::script::export_script, mavlink::MavlinkComponent};
+use crate::{CameraActuators, api, mavlink::MavlinkComponent};
 
 pub static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 
@@ -192,36 +192,28 @@ impl Manager {
                 .await?;
         }
 
+        let mut reload_script = overwrite;
+
         // Callibration update
         if let Some(points) = &new_config.closest_points {
-            autopilot_reboot_required |= self
+            reload_script |= self
                 .update_closest_points(camera_uuid, points, overwrite)
                 .await?;
         }
         if let Some(points) = &new_config.furthest_points {
-            autopilot_reboot_required |= self
+            reload_script |= self
                 .update_furthest_points(camera_uuid, points, overwrite)
                 .await?;
         }
 
-        autopilot_reboot_required |= export_script(&self.autopilot_scripts_file, overwrite).await?;
         autopilot_reboot_required |= self.mavlink.enable_lua_script(overwrite).await?;
-        self.mavlink.reload_lua_scripts(overwrite).await?;
 
-        if autopilot_reboot_required {
-            self.mavlink.reboot_autopilot().await?;
+        reload_script |= self.export_script(camera_uuid, overwrite).await?;
+
+        if reload_script {
+            self.mavlink.reload_lua_scripts(overwrite).await?;
         }
 
-        self.settings.save().await?;
-
-        Ok(())
-    }
-
-    pub async fn export_script(&mut self) -> Result<()> {
-        export_script(&self.autopilot_scripts_file, true).await?;
-        self.mavlink.reload_lua_scripts(true).await?;
-
-        let autopilot_reboot_required = self.mavlink.enable_lua_script(true).await?;
         if autopilot_reboot_required {
             self.mavlink.reboot_autopilot().await?;
         }

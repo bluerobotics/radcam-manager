@@ -50,7 +50,18 @@ pub(crate) async fn control_inner(
         Action::ExportLuaScript => {
             let mut manager = MANAGER.get().unwrap().write().await;
 
-            manager.export_script().await?;
+            let reload_script = manager
+                .export_script(&actuators_control.camera_uuid, true)
+                .await?;
+
+            if reload_script {
+                manager.mavlink.reload_lua_scripts(true).await?;
+            }
+
+            let autopilot_reboot_required = manager.mavlink.enable_lua_script(false).await?;
+            if autopilot_reboot_required {
+                manager.mavlink.reboot_autopilot().await?;
+            }
 
             serde_json::to_value({})?
         }
