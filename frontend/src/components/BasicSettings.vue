@@ -79,7 +79,7 @@
         name="focus-zoom-correlation"
         label="Focus and zoom correlation"
         theme="dark"
-        class="mt-5"
+        class="mt-7"
         @update:model-value="updateActuatorsConfig('enable_focus_and_zoom_correlation', $event)"
       />
       <BlueSlider
@@ -159,27 +159,35 @@
       theme="dark"
     >
       <BlueSelect
-        v-model="focusAndZoomParams.focus_channel"
+        v-model="tempChannelChanges.focus_channel"
         label="Focus PWM output"
         :items="servoChannelOptions"
         theme="dark"
-        @update:model-value="updateActuatorsConfig('focus_channel', $event)"
+        @update:model-value="handleChannelChanges('focus_channel', $event)"
       />
       <BlueSelect
-        v-model="focusAndZoomParams.zoom_channel"
+        v-model="tempChannelChanges.zoom_channel"
         label="Zoom PWM output"
         :items="servoChannelOptions"
         theme="dark"
         class="mt-6"
-        @update:model-value="updateActuatorsConfig('zoom_channel', $event)"
+        @update:model-value="handleChannelChanges('zoom_channel', $event)"
       />
       <BlueSelect
-        v-model="focusAndZoomParams.tilt_channel"
+        v-model="tempChannelChanges.script_channel"
+        label="Script PWM input"
+        :items="servoChannelOptions"
+        theme="dark"
+        class="mt-6"
+        @update:model-value="handleChannelChanges('script_channel', $event)"
+      />
+      <BlueSelect
+        v-model="tempChannelChanges.tilt_channel"
         label="Tilt PWM output"
         :items="servoChannelOptions"
         theme="dark"
         class="mt-6"
-        @update:model-value="updateActuatorsConfig('tilt_channel', $event)"
+        @update:model-value="handleChannelChanges('tilt_channel', $event)"
       />
       <ExpansibleOptions
         :is-open="openRGBSetpointOptions"
@@ -188,15 +196,26 @@
         :class="{ 'border-b-[1px] border-[#ffffff11] pb-2': openRGBSetpointOptions }"
       >
         <BlueSwitch
-          v-model="focusAndZoomParams.tilt_channel_reversed"
+          v-model="tempChannelChanges.tilt_channel_reversed"
           name="tilt-channel-reversed"
           label="Tilt channel reversed"
           theme="dark"
           class="scale-90 origin-right"
-          @update:model-value="updateActuatorsConfig('tilt_channel_reversed', $event)"
-        />
-      </ExpansibleOptions>
-    </ExpansiblePanel>
+          @update:model-value="handleChannelChanges('tilt_channel_reversed', $event)"
+          />
+        </ExpansibleOptions>
+      </ExpansiblePanel>
+      <div v-if="hasUnsavedChanges" class="flex justify-end mr-8">
+        <v-btn
+          class="py-1 px-3 rounded-md bg-[#0B5087] text-white hover:bg-[#0A3E6B]"
+          size="small"
+          variant="elevated"
+          @click="saveDataAndRestart"
+          :disabled="!hasUnsavedChanges"
+        >
+          SAVE AND RESTART CAMERA
+        </v-btn>
+      </div>
   </div>
   <v-dialog
     v-model="openRGBSetpointForm"
@@ -377,6 +396,20 @@ const actuatorsState = ref<ActuatorsState>({
   tilt: 0,
 })
 const isLoading = ref<boolean>(false)
+const hasUnsavedChanges = ref<boolean>(false)
+const tempChannelChanges = ref<{
+  focus_channel: string | null
+  zoom_channel: string | null
+  tilt_channel: string | null
+  tilt_channel_reversed: boolean | null
+  script_channel: string | null
+}>({
+  focus_channel: null,
+  zoom_channel: null,
+  tilt_channel: null,
+  tilt_channel_reversed: null,
+  script_channel: null,
+})
 
 const RGBSetpointProfiles = ref([
   {
@@ -508,8 +541,8 @@ const getActuatorsConfig = () => {
     camera_uuid: props.selectedCameraUuid,
     action: "getActuatorsConfig",
   }
-
-  console.log(payload)
+  
+  console.log('# - getActuatorsConfig payload:', payload)
 
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
@@ -517,10 +550,19 @@ const getActuatorsConfig = () => {
       const newParams = (response.data as ActuatorsConfig)?.parameters
       if (newParams) {
         focusAndZoomParams.value = { ...newParams }
+        tempChannelChanges.value = {
+          focus_channel: newParams.focus_channel,
+          zoom_channel: newParams.zoom_channel,
+          tilt_channel: newParams.tilt_channel,
+          tilt_channel_reversed: newParams.tilt_channel_reversed,
+          script_channel: newParams.script_channel,
+        }
+        hasUnsavedChanges.value = false
       } else {
         console.warn("Received null 'parameters' from response:", response.data)
       }
-      console.log(response.data)
+      console.log('# - getActuatorsConfig response:', response.data)
+
     })
     .catch(error => {
       console.error(`Error sending getActuatorsConfig request:`, error.message)
@@ -608,6 +650,19 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
     .catch(error => {
       console.error(`Error updating ${param}:`, error.message)
     })
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const handleChannelChanges = ( param: keyof typeof tempChannelChanges.value, value: any): void => {
+  if (!props.selectedCameraUuid) return
+
+  tempChannelChanges.value[param] = value                                 
+  hasUnsavedChanges.value = (
+    (focusAndZoomParams.value as any)[param] !== value                    
+  ) || Object.entries(tempChannelChanges.value).some(                    
+    ([k, v]) =>
+      (focusAndZoomParams.value as any)[k as keyof ActuatorsParametersConfig] !== v,
+  )
 }
 
 
@@ -716,6 +771,31 @@ const doRestart = () => {
     .finally(() => {
       isLoading.value = false
     })
+}
+
+const saveDataAndRestart = async (): Promise<void> => {
+  if (!props.selectedCameraUuid || !hasUnsavedChanges.value) return
+
+  const changed = Object.entries(tempChannelChanges.value).filter(
+    ([k, v]) =>
+      (focusAndZoomParams.value as any)[k as keyof ActuatorsParametersConfig] !== v,
+  ) as [keyof ActuatorsParametersConfig, unknown][]
+
+  if (changed.length === 0) {
+    hasUnsavedChanges.value = false
+    return
+  }
+
+  await Promise.all(
+    changed.map(([param, value]) => updateActuatorsConfig(param, value)),
+  )
+
+  changed.forEach(([param, value]) => {
+    (focusAndZoomParams.value as any)[param] = value
+  })
+
+  hasUnsavedChanges.value = false
+  doRestart()
 }
 
 onMounted(() => {

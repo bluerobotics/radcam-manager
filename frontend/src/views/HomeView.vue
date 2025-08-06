@@ -3,11 +3,24 @@
     no-gutters
     width="800px"
     class="text-white pa-0 mt-6 rounded-[8px] elevation-5"
-    :class="theme === 'dark' ? 'bg-[#363636]' : 'bg-[#f5f5f5]'"
+    :class="theme === 'dark' ? 'bg-[#363636]' : 'bg-[#F5F5F5]'"
   >
     <div class="flex items-center justify-between bg-[#2C2C2C] rounded-t-[8px]">
       <div class="flex items-center justify-around w-[400px] pl-5 border-b-[1px] border-[#ffffff66]">
-        <v-icon>mdi-camera-party-mode</v-icon>
+        <v-menu offset-y theme="dark" class="cursor-pointer">
+          <template #activator="{ props }">
+            <v-icon v-bind="props" class="mt-[3px]">mdi-camera-party-mode</v-icon>
+          </template>
+          <v-list class="pa-0 border-[1px] border-[#ffffff22] rounded-[4px]">
+            <v-list-item @click="updateLuaScript" >
+              <v-list-item-title class="flex ">Update Lua script</v-list-item-title>
+            </v-list-item>
+            <v-divider />
+            <v-list-item @click="resetCameraSettings" >
+              <v-list-item-title class="flex ">Reset camera settings</v-list-item-title>
+            </v-list-item>
+          </v-list>
+        </v-menu>
         <v-select
           v-model="selectedCameraUUID"
           :items="cameras"
@@ -80,6 +93,13 @@
       </v-tabs-window>
     </div>
   </v-container>
+  <v-snackbar
+      :timeout="3000"
+      color="green"
+      v-model="showSnackbar"
+    >
+      {{ snackbarMessage }}
+    </v-snackbar>
 </template>
 
 <script setup lang="ts">
@@ -92,7 +112,7 @@ import BasicSettings from '@/components/BasicSettings.vue'
 import BlueButtonGroup from '@/components/BlueButtonGroup.vue'
 
 const tab = ref(null)
-// const backendAPI = ref(`http://192.168.2.2:<radcam-extension-port>/v1`)  // For local frontend development:
+// const backendAPI = ref(`http://192.168.2.2:<radcam-extension-port>/v1`) // For local frontend development:
 const backendAPI = ref('v1')
 const cameras = ref<Camera[]>([])
 const selectedCameraUUID = ref<string | null>(null)
@@ -103,6 +123,9 @@ const desiredCameraUuid = ref<string | null>(null)
 
 const theme = ref<'light' | 'dark'>('dark')
 const configMode = ref<'basic' | 'advanced'>('basic')
+const cameraControls = ref<InstanceType<typeof BasicSettings> | null>(null)
+const showSnackbar = ref(false)
+const snackbarMessage = ref('')
 
 const configButtons = [
   {
@@ -169,10 +192,55 @@ const isCamera = (data: unknown): data is Omit<Camera, 'uuid'> => {
     isStreamsValid
   )
 }
+
 const refreshCameraStates = () => {
   cameraControls.value?.getInitialCameraStates()
 }
 
+const updateLuaScript = (): void => {
+  if (!selectedCameraUUID.value) return
+
+  const payload = {
+    camera_uuid: selectedCameraUUID.value,
+    action: "exportLuaScript",
+  }
+
+  console.log(payload)
+
+  axios
+    .post(`${backendAPI.value}/autopilot/control`, payload)
+    .then(response => {
+      console.log(`Lua script download initiated:`, response)
+      snackbarMessage.value = `Lua script updated.`
+      showSnackbar.value = true
+    })
+    .catch(error => {
+      console.error(`Error sending exportLuaScript request:`, error.message)
+    })
+}
+
+const resetCameraSettings = (): void => {
+  if (!selectedCameraUUID.value) return
+
+  const payload = {
+    camera_uuid: selectedCameraUUID.value,
+    action: "resetActuatorsConfig",
+  }
+
+  console.log(payload)
+
+  axios
+    .post(`${backendAPI.value}/autopilot/control`, payload)
+    .then(response => {
+      refreshCameraStates()
+      snackbarMessage.value = `Camera settings reset.`
+      showSnackbar.value = true
+      console.log(`Reset actuators config initiated:`, response)
+    })
+    .catch(error => {
+      console.error(`Error sending resetActuatorsConfig request:`, error.message)
+    })
+}
 
 
 onMounted(() => {
