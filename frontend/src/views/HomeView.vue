@@ -38,6 +38,7 @@
         :selected-camera-uuid="selectedCameraUUID"
         :backend-api="backendAPI"
         :disabled="false"
+        ref="cameraControls"
       />
     </div>
 
@@ -168,6 +169,11 @@ const isCamera = (data: unknown): data is Omit<Camera, 'uuid'> => {
     isStreamsValid
   )
 }
+const refreshCameraStates = () => {
+  cameraControls.value?.getInitialCameraStates()
+}
+
+
 
 onMounted(() => {
   desiredCameraUuid.value = route.query.uuid ? (route.query.uuid as string) : null

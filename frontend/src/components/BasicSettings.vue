@@ -723,13 +723,19 @@ onMounted(() => {
   getActuatorsState()
 })
 
+const getInitialCameraStates = () => {
+  getActuatorsConfig()
+  getActuatorsState()
+  getVideoParameters(true)
+}
+
+defineExpose({ getInitialCameraStates })
+
 watch(
   () => props.selectedCameraUuid,
   async (newValue) => {
     if (newValue) {
-      getActuatorsConfig()
-      getActuatorsState()
-      getVideoParameters(true)
+      getInitialCameraStates()
     }
   }
 )
