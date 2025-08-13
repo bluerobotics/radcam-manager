@@ -83,7 +83,7 @@
         @update:model-value="updateActuatorsConfig('enable_focus_and_zoom_correlation', $event)"
       />
       <BlueSlider
-        v-model="focusAndZoomParams.focus_channel_trim"
+        v-model="focusOffsetUI"
         name="focus-offset"
         label="Focus offset"
         :min="-10"
@@ -92,7 +92,7 @@
         width="400px"
         theme="dark"
         class="mt-5"
-        @update:model-value="updateActuatorsConfig('focus_channel_trim', $event)"
+        @update:model-value="onFocusOffsetChange($event ?? 0)"
       />
     </ExpansiblePanel>
     <ExpansiblePanel
@@ -533,6 +533,48 @@ const bitrateOptions = computed(() => {
     value: bitrate,
   }))
 })
+
+const mapFocusUiToRaw = (ui: number, min: number, max: number): number => {
+  if (max === min) return min
+  const ratio = (ui + 10) / 20 
+  return Math.round(min + ratio * (max - min))
+}
+
+const mapFocusRawToUi = (raw: number, min: number, max: number): number => {
+  if (max === min) return 0
+  const ratio = (raw - min) / (max - min)
+  return ratio * 20 - 10
+}
+
+// Convert focus_channel_trim (raw, user defined on BlueOS) to UI value (-10 to 10) and vice versa
+const focusOffsetUI = computed<number>({
+  get: () => {
+    const min = focusAndZoomParams.value.focus_channel_min
+    const max = focusAndZoomParams.value.focus_channel_max
+    let raw = focusAndZoomParams.value.focus_channel_trim
+    if (raw! < min! || raw! > max!) {
+      let averageRaw = Math.round((min! + max!) / 2)
+      raw = averageRaw
+    }
+    return mapFocusRawToUi(raw!, min!, max!)
+  },
+  set: (uiVal: number) => {
+    const min = focusAndZoomParams.value.focus_channel_min
+    const max = focusAndZoomParams.value.focus_channel_max
+    if (min == null || max == null) return
+    focusAndZoomParams.value.focus_channel_trim = mapFocusUiToRaw(uiVal, min, max)
+  },
+})
+
+const onFocusOffsetChange = (uiVal: number): void => {
+  const min = focusAndZoomParams.value.focus_channel_min
+  const max = focusAndZoomParams.value.focus_channel_max
+  if (min == null || max == null) {
+    return
+  }
+  const raw = mapFocusUiToRaw(uiVal, min, max)
+  updateActuatorsConfig('focus_channel_trim', raw)
+}
 
 const saveRGBSetpointProfile = () => {
   if (!newRGBSetpointProfileName.value) {
