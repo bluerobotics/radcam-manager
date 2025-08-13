@@ -105,8 +105,76 @@
         label="Cockpit display"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
-        @update:model-value="(value: any) => updateVideoResolution(value)"
+        @update:model-value="(value: any) => handleVideoChanges('resolution', value)"
       />
+      <BlueSelect
+        v-model="selectedVideoBitrate"
+        label="Bitrate"
+        :items="bitrateOptions || [{ name: 'No bitrates available', value: null }]"
+        theme="dark"
+        class="mt-5"
+        @update:model-value="(value: any) => handleVideoChanges('bitrate', value)"
+      >
+      <template #insetElement>
+        <v-menu offset-y transition="scale-transition" theme="dark">
+          <template #activator="{ props }">
+            <v-icon
+              v-bind="props"
+              class="ml-2 cursor-pointer text-[18px] relative right-[230px] mb-[2px]"
+            >
+              mdi-information-outline
+            </v-icon>
+          </template>
+          <v-card class="w-[550px] text-white pa-0 rounded-lg border-[1px] border-[#ffffff33]">
+            <div class="text-[sm] font-bold bg-[#4C4C4C22] text-center pa-1 pt-2">H.264 Bitrate Table</div>
+            <v-divider class="mb-2" />
+            <div class="pl-4 pr-1 pb-1">
+            <table class="border-collapse w-full text-[16px]">
+              <thead>
+                <tr>
+                  <th class="border-b border-gray-600 pb-1 text-left text-[14px]">Resolution</th>
+                  <th class="border-b border-gray-600 pb-1 text-center text-[14px]">High</th>
+                  <th class="border-b border-gray-600 pb-1 text-center text-[14px]">Medium</th>
+                  <th class="border-b border-gray-600 pb-1 text-center text-[14px]">Low</th>
+                </tr>
+              </thead>
+            <tbody>
+            <tr v-for="row in h264BitrateTable" :key="row.resolution" class="border-t-[1px] border-[#ffffff11]">
+              <td class="py-1 text-[16px] pt-1">{{ row.resolution }}<br />
+                <span class="opacity-70 text-[14px] align-center">Disk usage</span>
+              </td>
+              <td class="py-1 text-center">
+                {{ row.high.bitrate }} kbps<br />
+                <span class="opacity-70">{{ row.high.storage }} Gb/h</span>
+              </td>
+              <td class="py-1 text-center">
+                {{ row.medium.bitrate }} kbps<br />
+                <span class="opacity-70">{{ row.medium.storage }} Gb/h</span>
+              </td>
+              <td class="py-1 text-center">
+                {{ row.low.bitrate }} kbps<br />
+                <span class="opacity-70">{{ row.low.storage }} Gb/h</span>
+              </td>
+              
+            </tr>
+          </tbody>
+            </table>
+            </div>
+          </v-card>
+        </v-menu>
+      </template>
+      </BlueSelect>
+      <div v-if="hasUnsavedVideoChanges" class="flex justify-end mt-8 mb-[-20px]">
+        <v-btn
+          class="py-1 px-3 rounded-md bg-[#0B5087] text-white hover:bg-[#0A3E6B]"
+          :class="{ 'opacity-50 pointer-events-none': !hasUnsavedVideoChanges }"
+          size="small"
+          variant="elevated"
+          @click="saveDataAndRestart"
+        >
+          SAVE AND RESTART CAMERA
+        </v-btn>
+      </div>
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Actuators"
@@ -205,13 +273,13 @@
           />
         </ExpansibleOptions>
       </ExpansiblePanel>
-      <div v-if="hasUnsavedChanges" class="flex justify-end mr-8">
+      <div v-if="hasUnsavedChannelChanges" class="flex justify-end mr-8">
         <v-btn
           class="py-1 px-3 rounded-md bg-[#0B5087] text-white hover:bg-[#0A3E6B]"
           size="small"
           variant="elevated"
           @click="saveDataAndRestart"
-          :disabled="!hasUnsavedChanges"
+          :disabled="!hasUnsavedChannelChanges"
         >
           SAVE AND RESTART CAMERA
         </v-btn>
@@ -387,6 +455,7 @@ const currentRGBSetpointValue = ref<number[]>([
 ])
 const currentRGBSetpointProfile = ref<string | null>('Custom 2')
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
+const selectedVideoBitrate = ref<number | null>(null)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
 const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const openRGBSetpointDelete = ref(false)
@@ -396,7 +465,7 @@ const actuatorsState = ref<ActuatorsState>({
   tilt: 0,
 })
 const isLoading = ref<boolean>(false)
-const hasUnsavedChanges = ref<boolean>(false)
+const hasUnsavedChannelChanges = ref<boolean>(false)
 const tempChannelChanges = ref<{
   focus_channel: string | null
   zoom_channel: string | null
@@ -409,6 +478,16 @@ const tempChannelChanges = ref<{
   tilt_channel: null,
   tilt_channel_reversed: null,
   script_channel: null,
+})
+const hasUnsavedVideoChanges = ref<boolean>(false)
+const tempVideoChanges = ref<{
+  pic_width: number | null
+  pic_height: number | null
+  bitrate: number | null
+}>({
+  pic_width: null,
+  pic_height: null,
+  bitrate: null,
 })
 
 const RGBSetpointProfiles = ref([
@@ -426,10 +505,32 @@ const RGBSetpointProfiles = ref([
   },
 ])
 
-const resolutionOptions = computed(() => {
-  return downloadedVideoParameters.value.pixel_list?.map((res: VideoResolutionValue) => ({
-    name: `${res.width}x${res.height}`,
-    value: res,
+const resolutionOptions = ref([
+  { name: '3840x2160', value: { width: 3840, height: 2160 } },
+  { name: '1920x1080', value: { width: 1920, height: 1080 } },
+])
+
+const resolutionsToBitrate: Record<string, number[]> = {
+  '3840x2160': [16384, 8192, 4096],
+  '1920x1080': [8192, 4096, 2048],
+}
+
+const h264BitrateTable = [
+  { resolution: '3840x2160', high: { bitrate: 16384, storage: 7.2 }, medium: { bitrate: 8192, storage: 3.6 }, low: { bitrate: 4096, storage: 1.8 } },
+  { resolution: '1920x1080', high: { bitrate: 8192, storage: 3.6 }, medium: { bitrate: 4096, storage: 1.8 }, low: { bitrate: 2048, storage: 0.9 } }
+]
+
+const bitrateOptions = computed(() => {
+  const res = selectedVideoResolution.value
+  if (!res) return null
+
+  const key = `${res.width}x${res.height}`
+  const allowed = resolutionsToBitrate[key]
+  if (!allowed) return null
+
+  return allowed.map((bitrate) => ({
+    name: `${bitrate} kbps`,
+    value: bitrate,
   }))
 })
 
@@ -557,7 +658,7 @@ const getActuatorsConfig = () => {
           tilt_channel_reversed: newParams.tilt_channel_reversed,
           script_channel: newParams.script_channel,
         }
-        hasUnsavedChanges.value = false
+        hasUnsavedChannelChanges.value = false
       } else {
         console.warn("Received null 'parameters' from response:", response.data)
       }
@@ -657,7 +758,7 @@ const handleChannelChanges = ( param: keyof typeof tempChannelChanges.value, val
   if (!props.selectedCameraUuid) return
 
   tempChannelChanges.value[param] = value                                 
-  hasUnsavedChanges.value = (
+  hasUnsavedChannelChanges.value = (
     (focusAndZoomParams.value as any)[param] !== value                    
   ) || Object.entries(tempChannelChanges.value).some(                    
     ([k, v]) =>
@@ -688,46 +789,65 @@ const getVideoParameters = (update: boolean) => {
 
       if (update) {
         update_video_parameter_values(settings)
+        tempVideoChanges.value = {
+          pic_width: null,
+          pic_height: null,
+          bitrate: null,
+        }
       }
     })
     .catch((error) => console.error(`Error sending getVencConf request:`, error.message))
 }
 
-const updateVideoResolution = (newRes: VideoResolutionValue | null) => { 
-  if (!newRes || !props.selectedCameraUuid) return                      
-
-  selectedVideoParameters.value.pic_width  = newRes.width               
-  selectedVideoParameters.value.pic_height = newRes.height              
-
-  const video_parameter_settings = { 
-    pic_width: newRes.width,
-    pic_height: newRes.height,
-  } 
+const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void => {
+  if (!props.selectedCameraUuid) return
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
-    action: "setVencConf",
-    json: video_parameter_settings as VideoParameterSettings,
+    action: 'setVencConf',
+    json: partial as VideoParameterSettings,
   }
-  console.log(payload)
 
   axios
     .post(`${props.backendApi}/camera/control`, payload)
-     .then((response) => {
-       const settings: VideoParameterSettings =
-           response.data as VideoParameterSettings
-         update_video_parameter_values(settings)
-       
+    .then((response) => {
+      const settings = response.data as VideoParameterSettings
+      update_video_parameter_values(settings)
     })
-    .catch((error) =>
-      console.error(
-        `Error sending ${video_parameter_settings}':`,
-        error.message
-      )
-    ).finally(() => {
-      doRestart()
-    })
+    .catch((error) => {
+      console.error(`Error sending partial video params '${JSON.stringify(partial)}':`, error.message)
+  })
 }
+
+const handleVideoChanges = (what: 'resolution' | 'bitrate', value: any): void => {
+  if (!props.selectedCameraUuid) return
+
+  if (what === 'resolution' && value) {
+    selectedVideoResolution.value = value as VideoResolutionValue
+    tempVideoChanges.value.pic_width  = value.width
+    tempVideoChanges.value.pic_height = value.height
+    const key = `${value.width}x${value.height}`
+    const allowed = resolutionsToBitrate[key]
+
+    if (allowed?.length) {
+      selectedVideoBitrate.value = allowed[0]      
+      tempVideoChanges.value.bitrate = allowed[0]  
+    }
+  }
+
+  if (what === 'bitrate') {
+    selectedVideoBitrate.value = value as number   
+    tempVideoChanges.value.bitrate = value as number
+  }
+
+  const videoTempChanges = Object.entries(tempVideoChanges.value).some(([k, v]) => {
+    if (v === null) return false
+    return (selectedVideoParameters.value as any)[k] !== v
+  })
+
+  hasUnsavedVideoChanges.value = videoTempChanges   
+}
+
 
 const update_video_parameter_values = (settings: VideoParameterSettings) => {
   downloadedVideoParameters.value = { ...settings }
@@ -735,13 +855,29 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
   selectedVideoParameters.value = { ...settings }
   selectedVideoParameters.value.pixel_list = undefined
 
-  const previousResolution = settings.pixel_list?.find(p => p.width === settings.pic_width && p.height === settings.pic_height)
+  const matchOption = resolutionOptions.value.find(                   
+    o => o.value.width === settings.pic_width &&                     
+         o.value.height === settings.pic_height                      
+  )                                                                  
 
-  selectedVideoResolution.value = previousResolution ?? {
-    width: settings.pic_width!,
-    height: settings.pic_height!,
-  } as VideoResolutionValue
+const width = settings.pic_width
+const height = settings.pic_height
+
+if (matchOption) {
+  selectedVideoResolution.value = matchOption.value
+  return
 }
+
+if (width && height) {
+  const injectedValue = { width, height }
+  resolutionOptions.value.push({ name: `${width}x${height}`, value: injectedValue })
+  selectedVideoResolution.value = injectedValue
+  return
+}
+
+selectedVideoResolution.value = null                                                                 
+}
+
 
 const doRestart = () => {
   if (!props.selectedCameraUuid) {
@@ -774,27 +910,43 @@ const doRestart = () => {
 }
 
 const saveDataAndRestart = async (): Promise<void> => {
-  if (!props.selectedCameraUuid || !hasUnsavedChanges.value) return
+  if (!props.selectedCameraUuid ) return
 
-  const changed = Object.entries(tempChannelChanges.value).filter(
-    ([k, v]) =>
-      (focusAndZoomParams.value as any)[k as keyof ActuatorsParametersConfig] !== v,
+  const changedActuators = Object.entries(tempChannelChanges.value).filter(
+    ([k, v]) => (focusAndZoomParams.value as any)[k as keyof ActuatorsParametersConfig] !== v,
   ) as [keyof ActuatorsParametersConfig, unknown][]
 
-  if (changed.length === 0) {
-    hasUnsavedChanges.value = false
-    return
+  if (changedActuators.length > 0) {
+    await Promise.all(changedActuators.map(([param, value]) => updateActuatorsConfig(param, value)))
+    changedActuators.forEach(([param, value]) => {
+      (focusAndZoomParams.value as any)[param] = value
+    })
   }
 
-  await Promise.all(
-    changed.map(([param, value]) => updateActuatorsConfig(param, value)),
-  )
+  const videoPartial: Partial<VideoParameterSettings> = {}
+  const curr = selectedVideoParameters.value
+  const tmp  = tempVideoChanges.value
 
-  changed.forEach(([param, value]) => {
-    (focusAndZoomParams.value as any)[param] = value
-  })
+  if (tmp.pic_width !== null  && tmp.pic_width  !== curr.pic_width)  videoPartial.pic_width  = tmp.pic_width
+  if (tmp.pic_height !== null && tmp.pic_height !== curr.pic_height) videoPartial.pic_height = tmp.pic_height
+  if (tmp.bitrate !== null    && (tmp.bitrate as any) !== (curr as any).bitrate) (videoPartial as any).bitrate = tmp.bitrate
 
-  hasUnsavedChanges.value = false
+  if (Object.keys(videoPartial).length > 0) {
+    await updateVideoParameters(videoPartial)           
+    Object.assign(selectedVideoParameters.value, videoPartial) 
+  }
+
+  tempChannelChanges.value = {
+    focus_channel: focusAndZoomParams.value.focus_channel,
+    zoom_channel:  focusAndZoomParams.value.zoom_channel,
+    tilt_channel:  focusAndZoomParams.value.tilt_channel,
+    tilt_channel_reversed: focusAndZoomParams.value.tilt_channel_reversed,
+    script_channel: focusAndZoomParams.value.script_channel,
+  }
+  tempVideoChanges.value = { pic_width: null, pic_height: null, bitrate: null }
+
+  hasUnsavedChannelChanges.value = false
+  hasUnsavedVideoChanges.value = false
   doRestart()
 }
 
@@ -822,10 +974,36 @@ watch(
 
 watch(
   () => selectedVideoResolution.value,
-  async (newValue) => {
-    if (newValue) {
-      selectedVideoParameters.value.pic_width = newValue.width
-      selectedVideoParameters.value.pic_height = newValue.height
+  (newRes) => {
+    if (!newRes) return
+    const key = `${newRes.width}x${newRes.height}`
+    const allowed = resolutionsToBitrate[key]
+    if (!allowed?.length) {
+      selectedVideoBitrate.value = null
+      tempVideoChanges.value.bitrate = null
+      return
+    }
+    if (!selectedVideoBitrate.value || !allowed.includes(selectedVideoBitrate.value)) {
+      selectedVideoBitrate.value = allowed[0]
+      tempVideoChanges.value.bitrate = allowed[0]
+    }
+  }
+)
+
+// keep bitrate options in sync with resolution changes
+watch(
+  () => selectedVideoResolution.value,
+  (newRes) => {
+    if (!newRes) return
+    const key = `${newRes.width}x${newRes.height}`
+    const allowed = resolutionsToBitrate[key]
+    if (!allowed || allowed.length === 0) {
+      selectedVideoBitrate.value = null
+      return
+    }
+    if (!selectedVideoBitrate.value || !allowed.includes(selectedVideoBitrate.value)) {
+      selectedVideoBitrate.value = allowed[0]                                  
+      updateVideoParameters({ bitrate: allowed[0] })                          
     }
   }
 )
