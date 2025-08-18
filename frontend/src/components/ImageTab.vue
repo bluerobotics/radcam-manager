@@ -1,113 +1,115 @@
 <template>
   <!-- ImageParameters Sliders -->
-  <Slider
-    name="hue"
-    label="Hue"
-    :current="baseParams.hue ?? 0"
-    :min="0"
-    :max="255"
-    :step="1"
-    :disabled="props.disabled"
-    @update:current="updateBaseParameter('hue', $event)"
-  />
-  <Slider
-    name="brightness"
-    label="Brightness"
-    :current="baseParams.brightness ?? 0"
-    :min="0"
-    :max="255"
-    :step="1"
-    :disabled="props.disabled"
-    @update:current="updateBaseParameter('brightness', $event)"
-  />
-  <Slider
-    name="sharpness"
-    label="Sharpness"
-    :current="baseParams.sharpness ?? 0"
-    :min="0"
-    :max="255"
-    :step="1"
-    :disabled="props.disabled"
-    @update:current="updateBaseParameter('sharpness', $event)"
-  />
-  <Slider
-    name="contrast"
-    label="Contrast"
-    :current="baseParams.contrast ?? 0"
-    :min="0"
-    :max="255"
-    :step="1"
-    :disabled="props.disabled"
-    @update:current="updateBaseParameter('contrast', $event)"
-  />
-  <Slider
-    name="saturation"
-    label="Saturation"
-    :current="baseParams.saturation ?? 0"
-    :min="0"
-    :max="255"
-    :step="1"
-    :disabled="props.disabled"
-    @update:current="updateBaseParameter('saturation', $event)"
-  />
-  <Slider
-    name="gamma"
-    label="Gamma"
-    :current="baseParams.gamma ?? 0"
-    :min="0"
-    :max="255"
-    :step="1"
-    :disabled="props.disabled"
-    @update:current="updateBaseParameter('gamma', $event)"
-  />
-  <Slider
-    name="blc_level"
-    label="Backlight Compensation"
-    :current="baseParams.blc_level ?? 0"
-    :min="0"
-    :max="255"
-    :step="1"
-    :disabled="props.disabled"
-    @update:current="updateBaseParameter('blc_level', $event)"
-  />
+  <div class="px-4">
+    <Slider
+      name="hue"
+      label="Hue"
+      :current="baseParams.hue ?? 0"
+      :min="0"
+      :max="255"
+      :step="1"
+      :disabled="props.disabled"
+      @update:current="updateBaseParameter('hue', $event)"
+    />
+    <Slider
+      name="brightness"
+      label="Brightness"
+      :current="baseParams.brightness ?? 0"
+      :min="0"
+      :max="255"
+      :step="1"
+      :disabled="props.disabled"
+      @update:current="updateBaseParameter('brightness', $event)"
+    />
+    <Slider
+      name="sharpness"
+      label="Sharpness"
+      :current="baseParams.sharpness ?? 0"
+      :min="0"
+      :max="255"
+      :step="1"
+      :disabled="props.disabled"
+      @update:current="updateBaseParameter('sharpness', $event)"
+    />
+    <Slider
+      name="contrast"
+      label="Contrast"
+      :current="baseParams.contrast ?? 0"
+      :min="0"
+      :max="255"
+      :step="1"
+      :disabled="props.disabled"
+      @update:current="updateBaseParameter('contrast', $event)"
+    />
+    <Slider
+      name="saturation"
+      label="Saturation"
+      :current="baseParams.saturation ?? 0"
+      :min="0"
+      :max="255"
+      :step="1"
+      :disabled="props.disabled"
+      @update:current="updateBaseParameter('saturation', $event)"
+    />
+    <Slider
+      name="gamma"
+      label="Gamma"
+      :current="baseParams.gamma ?? 0"
+      :min="0"
+      :max="255"
+      :step="1"
+      :disabled="props.disabled"
+      @update:current="updateBaseParameter('gamma', $event)"
+    />
+    <Slider
+      name="blc_level"
+      label="Backlight Compensation"
+      :current="baseParams.blc_level ?? 0"
+      :min="0"
+      :max="255"
+      :step="1"
+      :disabled="props.disabled"
+      @update:current="updateBaseParameter('blc_level', $event)"
+    />
 
-  <!-- Restore Image Parameters -->
-  <div class="ma-2 text-right">
-    <v-btn
-      variant="tonal"
-      :disabled="props.disabled || processingBaseRestore"
-      @click="doRestoreBase"
-    >
-      <v-progress-circular
-        v-if="processingBaseRestore"
-        indeterminate
-        color="white"
-        size="20"
-        class="me-2"
-      />
-      {{ processingBaseRestore ? "Processing..." : "Restore defaults" }}
-    </v-btn>
-  </div>
-  <div class="ma-2 text-right">
-    <v-btn
-      variant="tonal"
-      :disabled="props.disabled || processingWhiteBalance"
-      @click="doWhiteBalance"
-    >
-      <v-progress-circular
-        v-if="processingWhiteBalance"
-        indeterminate
-        color="white"
-        size="20"
-        class="me-2"
-      />
-      {{ processingWhiteBalance ? "Processing..." : "Do White Balance" }}
-    </v-btn>
+    <!-- Restore Image Parameters -->
+    <div class="ma-2 text-right">
+      <v-btn
+        variant="tonal"
+        :disabled="props.disabled || processingBaseRestore"
+        @click="doRestoreBase"
+      >
+        <v-progress-circular
+          v-if="processingBaseRestore"
+          indeterminate
+          color="white"
+          size="20"
+          class="me-2"
+        />
+        {{ processingBaseRestore ? "Processing..." : "Restore defaults" }}
+      </v-btn>
+    </div>
+    <div class="ma-2 text-right">
+      <v-btn
+        variant="tonal"
+        :disabled="props.disabled || processingWhiteBalance"
+        @click="doWhiteBalance"
+      >
+        <v-progress-circular
+          v-if="processingWhiteBalance"
+          indeterminate
+          color="white"
+          size="20"
+          class="me-2"
+        />
+        {{ processingWhiteBalance ? "Processing..." : "Do White Balance" }}
+      </v-btn>
+    </div>
   </div>
 
   <v-divider class="ma-5" />
 
-  <v-expansion-panels>
+  <v-expansion-panels theme="dark">
     <!-- White Balance -->
     <v-expansion-panel>
       <v-expansion-panel-title>White Balance</v-expansion-panel-title>
@@ -683,6 +685,7 @@
       </v-expansion-panel-text>
     </v-expansion-panel>
   </v-expansion-panels>
+
 </template>
 
 <script setup lang="ts">
