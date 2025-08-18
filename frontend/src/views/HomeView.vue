@@ -41,11 +41,6 @@
                 </v-list-item-title>
               </v-list-item>
               <v-divider />
-              <v-list-item @click="isCockpitMode = !isCockpitMode">
-                <v-list-item-title class="flex">
-                  Cockpit mode
-                </v-list-item-title>
-              </v-list-item>
             </v-list>
           </v-menu>
           <v-select
