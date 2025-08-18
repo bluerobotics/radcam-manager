@@ -46,7 +46,7 @@
               class="font-bold select-none"
               draggable="false"
             >
-              {{ step && step < 1 ? currentSliderValue?.toFixed(1) || 0 : currentSliderValue }}
+              {{ step && step < 1 ? currentSliderValue?.toFixed(1) || 0 : currentSliderValue.toFixed(0) }}
             </p>
           </div>
           <div v-else>
