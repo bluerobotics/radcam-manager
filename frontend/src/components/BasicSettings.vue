@@ -115,57 +115,79 @@
         class="mt-5"
         @update:model-value="(value: any) => handleVideoChanges('bitrate', value)"
       >
-      <template #insetElement>
-        <div class="flex items-center justify-end w-full">
-        <v-menu offset-y transition="scale-transition" theme="dark">
-          <template #activator="{ props }">
-            <v-icon
-              v-bind="props"
-              class="ml-2 cursor-pointer text-[18px] mr-6"
+        <template #insetElement>
+          <div class="flex items-center justify-end w-full">
+            <v-menu
+              offset-y
+              transition="scale-transition"
+              theme="dark"
             >
-              mdi-information-outline
-            </v-icon>
-          </template>
-          <v-card class="w-[550px] text-white pa-0 rounded-lg border-[1px] border-[#ffffff33]">
-            <div class="text-[sm] font-bold bg-[#4C4C4C22] text-center pa-1 pt-2">H.264 Bitrate Options</div>
-            <v-divider class="mb-2" />
-            <div class="pr-0 pb-0">
-            <table class="border-collapse w-full text-[16px]">
-              <thead>
-                <tr>
-                  <th class="border-b border-gray-600 pb-1 text-left pl-4 text-[14px]">Resolution</th>
-                  <th class="border-b border-gray-600 pb-1 text-center text-[14px]">High</th>
-                  <th class="border-b border-gray-600 pb-1 text-center text-[14px]">Medium</th>
-                  <th class="border-b border-gray-600 pb-1 text-center text-[14px]">Low</th>
-                </tr>
-              </thead>
-            <tbody>
-            <tr v-for="row in h264BitrateTable" :key="row.resolution" class="border-t-[1px] border-[#ffffff11]">
-              <td class="pl-4 py-1 text-[16px] pt-2">{{ row.resolution }}<br />
-                <span class="opacity-70 text-[14px] align-center">Disk usage</span>
-              </td>
-              <td class="mt-1 text-center">
-                {{ row.high.bitrate }} kbps<br />
-                <span class="opacity-70">{{ row.high.storage }} Gb/h</span>
-              </td>
-              <td class="mt-1 text-center">
-                {{ row.medium.bitrate }} kbps<br />
-                <span class="opacity-70">{{ row.medium.storage }} Gb/h</span>
-              </td>
-              <td class="mt-1 text-center">
-                {{ row.low.bitrate }} kbps<br />
-                <span class="opacity-70">{{ row.low.storage }} Gb/h</span>
-              </td>
-            </tr>
-          </tbody>
-            </table>
-            </div>
-          </v-card>
-        </v-menu>
-        </div>
-      </template>
+              <template #activator="{ props: activatorProps }">
+                <v-icon
+                  v-bind="activatorProps"
+                  class="ml-2 cursor-pointer text-[18px] mr-6"
+                >
+                  mdi-information-outline
+                </v-icon>
+              </template>
+              <v-card class="w-[550px] text-white pa-0 rounded-lg border-[1px] border-[#ffffff33]">
+                <div class="text-[sm] font-bold bg-[#4C4C4C22] text-center pa-1 pt-2">
+                  H.264 Bitrate Options
+                </div>
+                <v-divider class="mb-2" />
+                <div class="pr-0 pb-0">
+                  <table class="border-collapse w-full text-[16px]">
+                    <thead>
+                      <tr>
+                        <th class="border-b border-gray-600 pb-1 text-left pl-4 text-[14px]">
+                          Resolution
+                        </th>
+                        <th class="border-b border-gray-600 pb-1 text-center text-[14px]">
+                          High
+                        </th>
+                        <th class="border-b border-gray-600 pb-1 text-center text-[14px]">
+                          Medium
+                        </th>
+                        <th class="border-b border-gray-600 pb-1 text-center text-[14px]">
+                          Low
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="row in h264BitrateTable"
+                        :key="row.resolution"
+                        class="border-t-[1px] border-[#ffffff11]"
+                      >
+                        <td class="pl-4 py-1 text-[16px] pt-2">
+                          {{ row.resolution }}<br>
+                          <span class="opacity-70 text-[14px] align-center">Disk usage</span>
+                        </td>
+                        <td class="mt-1 text-center">
+                          {{ row.high.bitrate }} kbps<br>
+                          <span class="opacity-70">{{ row.high.storage }} Gb/h</span>
+                        </td>
+                        <td class="mt-1 text-center">
+                          {{ row.medium.bitrate }} kbps<br>
+                          <span class="opacity-70">{{ row.medium.storage }} Gb/h</span>
+                        </td>
+                        <td class="mt-1 text-center">
+                          {{ row.low.bitrate }} kbps<br>
+                          <span class="opacity-70">{{ row.low.storage }} Gb/h</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </v-card>
+            </v-menu>
+          </div>
+        </template>
       </BlueSelect>
-      <div v-if="hasUnsavedVideoChanges" class="flex justify-end mt-8 mb-[-20px]">
+      <div
+        v-if="hasUnsavedVideoChanges"
+        class="flex justify-end mt-8 mb-[-20px]"
+      >
         <v-btn
           class="py-1 px-3 rounded-md bg-[#0B5087] text-white hover:bg-[#0A3E6B]"
           :class="{ 'opacity-50 pointer-events-none': !hasUnsavedVideoChanges }"
@@ -271,20 +293,23 @@
           theme="dark"
           class="scale-90 origin-right"
           @update:model-value="handleChannelChanges('tilt_channel_reversed', $event)"
-          />
-        </ExpansibleOptions>
-      </ExpansiblePanel>
-      <div v-if="hasUnsavedChannelChanges" class="flex justify-end mr-8">
-        <v-btn
-          class="py-1 px-3 rounded-md bg-[#0B5087] text-white hover:bg-[#0A3E6B]"
-          size="small"
-          variant="elevated"
-          @click="saveDataAndRestart"
-          :disabled="!hasUnsavedChannelChanges"
-        >
-          SAVE AND RESTART CAMERA
-        </v-btn>
-      </div>
+        />
+      </ExpansibleOptions>
+    </ExpansiblePanel>
+    <div
+      v-if="hasUnsavedChannelChanges"
+      class="flex justify-end mr-8"
+    >
+      <v-btn
+        class="py-1 px-3 rounded-md bg-[#0B5087] text-white hover:bg-[#0A3E6B]"
+        size="small"
+        variant="elevated"
+        :disabled="!hasUnsavedChannelChanges"
+        @click="saveDataAndRestart"
+      >
+        SAVE AND RESTART CAMERA
+      </v-btn>
+    </div>
   </div>
   <v-dialog
     v-model="openRGBSetpointForm"
@@ -455,7 +480,7 @@ const currentRGBSetpointValue = ref<number[]>([
   baseParams.value.awb_green || 0,
   baseParams.value.awb_blue || 0,
 ])
-const currentRGBSetpointProfile = ref<string | null>('Custom 2')
+const currentRGBSetpointProfile = ref<string | null>('Custom 1')
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const selectedVideoBitrate = ref<number | null>(null)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
@@ -496,7 +521,7 @@ const RGBSetpointProfiles = ref([
   {
     name: 'Custom 1',
     onSelected: () => applyRGBSetpointProfile('Custom 1'),
-    options: { awb_red: 100, awb_green: 100, awb_blue: 100 },
+    options: { awb_red: 0, awb_green: 0, awb_blue: 0 },
     preSelected: currentRGBSetpointProfile.value === 'Custom 1',
   },
   {
@@ -555,7 +580,7 @@ const focusOffsetUI = computed<number>({
     const max = focusAndZoomParams.value.focus_channel_max
     let raw = focusAndZoomParams.value.focus_channel_trim
     if (raw! < min! || raw! > max!) {
-      let averageRaw = Math.round((min! + max!) / 2)
+      const averageRaw = Math.round((min! + max!) / 2)
       raw = averageRaw
     }
     return mapFocusRawToUi(raw!, min!, max!)
@@ -803,10 +828,10 @@ const handleChannelChanges = ( param: keyof typeof tempChannelChanges.value, val
 
   tempChannelChanges.value[param] = value                                 
   hasUnsavedChannelChanges.value = (
-    (focusAndZoomParams.value as any)[param] !== value                    
+    (focusAndZoomParams.value)[param] !== value                    
   ) || Object.entries(tempChannelChanges.value).some(                    
     ([k, v]) =>
-      (focusAndZoomParams.value as any)[k as keyof ActuatorsParametersConfig] !== v,
+      (focusAndZoomParams.value)[k as keyof ActuatorsParametersConfig] !== v,
   )
 }
 
@@ -863,6 +888,7 @@ const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void =
   })
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const handleVideoChanges = (what: 'resolution' | 'bitrate', value: any): void => {
   if (!props.selectedCameraUuid) return
 
@@ -884,9 +910,11 @@ const handleVideoChanges = (what: 'resolution' | 'bitrate', value: any): void =>
     tempVideoChanges.value.bitrate = value as number
   }
 
-  const videoTempChanges = Object.entries(tempVideoChanges.value).some(([k, v]) => {
-    if (v === null) return false
-    return (selectedVideoParameters.value as any)[k] !== v
+  const cfg = selectedVideoParameters.value as Pick<VideoParameterSettings, keyof typeof tempVideoChanges.value>
+  const videoTempChanges = (Object.entries(tempVideoChanges.value) as [keyof typeof tempVideoChanges.value, number | null][])
+    .some(([k, v]) => {
+      if (v === null) return false
+      return (cfg[k] ?? null) !== v
   })
 
   hasUnsavedVideoChanges.value = videoTempChanges   
@@ -954,38 +982,51 @@ const doRestart = () => {
 }
 
 const saveDataAndRestart = async (): Promise<void> => {
-  if (!props.selectedCameraUuid ) return
+  if (!props.selectedCameraUuid) return
 
-  const changedActuators = Object.entries(tempChannelChanges.value).filter(
-    ([k, v]) => (focusAndZoomParams.value as any)[k as keyof ActuatorsParametersConfig] !== v,
-  ) as [keyof ActuatorsParametersConfig, unknown][]
-
-  if (changedActuators.length > 0) {
-    await Promise.all(changedActuators.map(([param, value]) => updateActuatorsConfig(param, value)))
-    changedActuators.forEach(([param, value]) => {
-      (focusAndZoomParams.value as any)[param] = value
-    })
-  }
+  type ChannelKeys = Extract<keyof ActuatorsParametersConfig, keyof typeof tempChannelChanges.value>
+  const changedActuators = (
+    Object.entries(tempChannelChanges.value) as [ChannelKeys, ActuatorsParametersConfig[ChannelKeys]][]
+  ).filter(([k, v]) => focusAndZoomParams.value[k] !== v)
 
   const videoPartial: Partial<VideoParameterSettings> = {}
   const curr = selectedVideoParameters.value
   const tmp  = tempVideoChanges.value
 
-  if (tmp.pic_width !== null  && tmp.pic_width  !== curr.pic_width)  videoPartial.pic_width  = tmp.pic_width
-  if (tmp.pic_height !== null && tmp.pic_height !== curr.pic_height) videoPartial.pic_height = tmp.pic_height
-  if (tmp.bitrate !== null    && (tmp.bitrate as any) !== (curr as any).bitrate) (videoPartial as any).bitrate = tmp.bitrate
+  type VideoMutableKeys = 'pic_width' | 'pic_height' | 'bitrate'
+  const videoKeys: VideoMutableKeys[] = ['pic_width', 'pic_height', 'bitrate']
+
+  videoKeys.forEach((k) => {
+    const newVal: number | null = tmp[k]
+    const currVal: number | null | undefined = (curr as Record<VideoMutableKeys, number | null | undefined>)[k]
+    if (newVal !== null && newVal !== currVal) {
+      ;(videoPartial as Record<VideoMutableKeys, number>)[k] = newVal
+    }
+  })
+
+  if (changedActuators.length === 0 && Object.keys(videoPartial).length === 0) {
+    return
+  }
+
+  if (changedActuators.length > 0) {
+    await Promise.all(
+      changedActuators.map(([param, value]) => updateActuatorsConfig(param, value))
+    )
+    const patch = Object.fromEntries(changedActuators as unknown as [string, unknown][]) as Partial<ActuatorsParametersConfig>
+    Object.assign(focusAndZoomParams.value, patch)
+  }
 
   if (Object.keys(videoPartial).length > 0) {
-    await updateVideoParameters(videoPartial)           
-    Object.assign(selectedVideoParameters.value, videoPartial) 
+    await updateVideoParameters(videoPartial)
+    Object.assign(selectedVideoParameters.value, videoPartial)
   }
 
   tempChannelChanges.value = {
-    focus_channel: focusAndZoomParams.value.focus_channel,
-    zoom_channel:  focusAndZoomParams.value.zoom_channel,
-    tilt_channel:  focusAndZoomParams.value.tilt_channel,
-    tilt_channel_reversed: focusAndZoomParams.value.tilt_channel_reversed,
-    script_channel: focusAndZoomParams.value.script_channel,
+    focus_channel:           focusAndZoomParams.value.focus_channel,
+    zoom_channel:            focusAndZoomParams.value.zoom_channel,
+    tilt_channel:            focusAndZoomParams.value.tilt_channel,
+    tilt_channel_reversed:   focusAndZoomParams.value.tilt_channel_reversed,
+    script_channel:          focusAndZoomParams.value.script_channel,
   }
   tempVideoChanges.value = { pic_width: null, pic_height: null, bitrate: null }
 
@@ -993,6 +1034,7 @@ const saveDataAndRestart = async (): Promise<void> => {
   hasUnsavedVideoChanges.value = false
   doRestart()
 }
+
 
 onMounted(() => {
   getActuatorsConfig()
