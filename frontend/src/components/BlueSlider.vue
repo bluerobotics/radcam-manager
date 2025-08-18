@@ -1,6 +1,9 @@
 <template>
   <div class="flex w-full justify-between items-center">
-    <div v-if="label" class="min-w-[130px]">
+    <div
+      v-if="label"
+      class="min-w-[130px]"
+    >
       <label
         class="text-start mr-6"
         :class="theme === 'dark' ? 'text-white' : 'text-black'"

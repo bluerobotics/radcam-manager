@@ -7,9 +7,17 @@
     <div                                              
       class="loading-card flex flex-col items-center justify-center pt-[10px] rounded-lg" 
     >                                                 
-      <img src="../../public/assets/logo.svg" class="w-[120px] h-[120px] mb-1" alt="logo" />              
+      <img
+        src="../../public/assets/logo.svg"
+        class="w-[120px] h-[120px] mb-1"
+        alt="logo"
+      >              
       <span class="w-[200px] text-[#e9f5e6] text-center text-lg mb-6">Applying settings…</span>                     
-      <v-progress-linear indeterminate color="#FFFFFF44" class="w-full" />
+      <v-progress-linear
+        indeterminate
+        color="#FFFFFF44"
+        class="w-full"
+      />
     </div>                                            
   </v-dialog>   
 </template>

@@ -1,34 +1,50 @@
 <template>
   <div class="min-w-[650px] border-[1px] border-[#ffffff22] rounded-[8px]">
     <v-container
-    no-gutters
-    class="max-w-[800px] text-white pa-0  rounded-[8px] elevation-5 no-user-select"
-    :class="[
-      theme === 'dark' ? 'bg-[#363636]' : 'bg-[#F5F5F5]',
-      {
-        'transparent-card': isCockpitMode,
-      },
-    ]"
+      no-gutters
+      class="max-w-[800px] text-white pa-0  rounded-[8px] elevation-5 no-user-select"
+      :class="[
+        theme === 'dark' ? 'bg-[#363636]' : 'bg-[#F5F5F5]',
+        {
+          'transparent-card': isCockpitMode,
+        },
+      ]"
     >
-      <div class="flex  items-center justify-between rounded-t-[8px]" :class="isCockpitMode ? 'bg-[#2C2C2C88]' : 'bg-[#15151577]'">
+      <div
+        class="flex  items-center justify-between rounded-t-[8px]"
+        :class="isCockpitMode ? 'bg-[#2C2C2C88]' : 'bg-[#15151577]'"
+      >
         <div class="flex items-center justify-around w-[400px] pl-5 border-b-[1px] border-[#ffffff88]">
-          <v-menu offset-y theme="dark" class="cursor-pointer">
+          <v-menu
+            offset-y
+            theme="dark"
+            class="cursor-pointer"
+          >
             <template #activator="{ props, isActive }">
-              <v-icon v-bind="props" class="mt-[-2px] ml-[-5px]">
+              <v-icon
+                v-bind="props"
+                class="mt-[-2px] ml-[-5px]"
+              >
                 {{ isActive ? 'mdi-menu-open' : 'mdi-menu-close' }}
               </v-icon>
             </template>
             <v-list class="pa-0 border-[1px] border-[#ffffff22] rounded-[4px]">
               <v-list-item @click="updateLuaScript">
-                <v-list-item-title class="flex">Update Lua script</v-list-item-title>
+                <v-list-item-title class="flex">
+                  Update Lua script
+                </v-list-item-title>
               </v-list-item>
               <v-divider />
               <v-list-item @click="resetCameraSettings">
-                <v-list-item-title class="flex">Reset camera settings</v-list-item-title>
+                <v-list-item-title class="flex">
+                  Reset camera settings
+                </v-list-item-title>
               </v-list-item>
               <v-divider />
               <v-list-item @click="isCockpitMode = !isCockpitMode">
-                <v-list-item-title class="flex">Cockpit mode</v-list-item-title>
+                <v-list-item-title class="flex">
+                  Cockpit mode
+                </v-list-item-title>
               </v-list-item>
             </v-list>
           </v-menu>
@@ -43,29 +59,50 @@
             class="bg-[#15151577] ml-3 -mb-[1px]"
           >
             <template #item="{ props, item }">
-              <v-list-item v-bind="props" :subtitle="item.raw.uuid" />
+              <v-list-item
+                v-bind="props"
+                :subtitle="item.raw.uuid"
+              />
             </template>
           </v-select>
         </div>
-        <BlueButtonGroup :button-items="configButtons" :theme="theme" class="mr-4" type="switch" />
+        <BlueButtonGroup
+          :button-items="configButtons"
+          :theme="theme"
+          class="mr-4"
+          type="switch"
+        />
       </div>
       <div
         class="transition-all duration-300 ease-in-out"
       >
         <div v-if="configMode === 'basic'">
           <BasicSettings
+            ref="cameraControls"
             :selected-camera-uuid="selectedCameraUUID"
             :backend-api="backendAPI"
             :disabled="false"
-            ref="cameraControls"
-            :cockpitMode="isCockpitMode"
+            :cockpit-mode="isCockpitMode"
           />
         </div>
         <div v-if="configMode === 'advanced'">
-          <v-tabs v-model="tab" align-tabs="center" class="mb-5">
-            <v-tab value="image"> Image </v-tab>
-            <v-tab value="streams"> Streams </v-tab>
-            <v-tab value="configs" :disabled="true"> Configs </v-tab>
+          <v-tabs
+            v-model="tab"
+            align-tabs="center"
+            class="mb-5"
+          >
+            <v-tab value="image">
+              Image
+            </v-tab>
+            <v-tab value="streams">
+              Streams
+            </v-tab>
+            <v-tab
+              value="configs"
+              :disabled="true"
+            >
+              Configs
+            </v-tab>
           </v-tabs>
 
           <v-tabs-window v-model="tab">
@@ -88,7 +125,11 @@
       </div>
     </v-container>
   </div>
-  <v-snackbar :timeout="3000" color="green" v-model="showSnackbar">
+  <v-snackbar
+    v-model="showSnackbar"
+    :timeout="3000"
+    color="green"
+  >
     {{ snackbarMessage }}
   </v-snackbar>
 </template>
