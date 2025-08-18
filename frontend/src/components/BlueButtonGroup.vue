@@ -10,7 +10,7 @@
     <slot name="insetElement" />
     <div
       class="relative flex justify-end overflow-hidden rounded-[6px] elevation-1 z-[666]"
-      :class="[theme === 'dark' ? 'bg-[#464646]' : 'bg-[#00000011]', disabled ? 'opacity-50 pointer-events-none' : '']"
+      :class="[theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]', disabled ? 'opacity-50 pointer-events-none' : '']"
       :style="{ height: height || '30px' }"
     >
       <div

@@ -97,7 +97,7 @@
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Video"
-      expanded
+      :expanded="cockpitMode ? false : true"
       theme="dark"
     >
       <BlueSelect
@@ -116,23 +116,24 @@
         @update:model-value="(value: any) => handleVideoChanges('bitrate', value)"
       >
       <template #insetElement>
+        <div class="flex items-center justify-end w-full">
         <v-menu offset-y transition="scale-transition" theme="dark">
           <template #activator="{ props }">
             <v-icon
               v-bind="props"
-              class="ml-2 cursor-pointer text-[18px] relative right-[230px] mb-[2px]"
+              class="ml-2 cursor-pointer text-[18px] mr-6"
             >
               mdi-information-outline
             </v-icon>
           </template>
           <v-card class="w-[550px] text-white pa-0 rounded-lg border-[1px] border-[#ffffff33]">
-            <div class="text-[sm] font-bold bg-[#4C4C4C22] text-center pa-1 pt-2">H.264 Bitrate Table</div>
+            <div class="text-[sm] font-bold bg-[#4C4C4C22] text-center pa-1 pt-2">H.264 Bitrate Options</div>
             <v-divider class="mb-2" />
-            <div class="pl-4 pr-1 pb-1">
+            <div class="pr-0 pb-0">
             <table class="border-collapse w-full text-[16px]">
               <thead>
                 <tr>
-                  <th class="border-b border-gray-600 pb-1 text-left text-[14px]">Resolution</th>
+                  <th class="border-b border-gray-600 pb-1 text-left pl-4 text-[14px]">Resolution</th>
                   <th class="border-b border-gray-600 pb-1 text-center text-[14px]">High</th>
                   <th class="border-b border-gray-600 pb-1 text-center text-[14px]">Medium</th>
                   <th class="border-b border-gray-600 pb-1 text-center text-[14px]">Low</th>
@@ -140,28 +141,28 @@
               </thead>
             <tbody>
             <tr v-for="row in h264BitrateTable" :key="row.resolution" class="border-t-[1px] border-[#ffffff11]">
-              <td class="py-1 text-[16px] pt-1">{{ row.resolution }}<br />
+              <td class="pl-4 py-1 text-[16px] pt-2">{{ row.resolution }}<br />
                 <span class="opacity-70 text-[14px] align-center">Disk usage</span>
               </td>
-              <td class="py-1 text-center">
+              <td class="mt-1 text-center">
                 {{ row.high.bitrate }} kbps<br />
                 <span class="opacity-70">{{ row.high.storage }} Gb/h</span>
               </td>
-              <td class="py-1 text-center">
+              <td class="mt-1 text-center">
                 {{ row.medium.bitrate }} kbps<br />
                 <span class="opacity-70">{{ row.medium.storage }} Gb/h</span>
               </td>
-              <td class="py-1 text-center">
+              <td class="mt-1 text-center">
                 {{ row.low.bitrate }} kbps<br />
                 <span class="opacity-70">{{ row.low.storage }} Gb/h</span>
               </td>
-              
             </tr>
           </tbody>
             </table>
             </div>
           </v-card>
         </v-menu>
+        </div>
       </template>
       </BlueSelect>
       <div v-if="hasUnsavedVideoChanges" class="flex justify-end mt-8 mb-[-20px]">
@@ -223,7 +224,7 @@
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Hardware setup"
-      expanded
+      :expanded="cockpitMode ? false : true"
       theme="dark"
     >
       <BlueSelect
@@ -375,6 +376,7 @@ const props = defineProps<{
   selectedCameraUuid: string | null
   backendApi: string
   disabled: boolean
+  cockpitMode: boolean
 }>()
 
 const servoChannelOptions = Array.from({ length: 16 }, (_, i) => ({

@@ -9,7 +9,7 @@
     <div
       name="switch-track"
       class="relative rounded-[8px] elevation-1 cursor-pointer overflow-hidden"
-      :class="[theme === 'dark' ? 'bg-[#464646]' : 'bg-[#00000011]', disabled ? 'opacity-50 cursor-not-allowed' : '']"
+      :class="[theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]', disabled ? 'opacity-50 cursor-not-allowed' : '']"
       :style="{ minWidth: width || '75px', height: height || '30px' }"
       @click="toggleSwitch"
     >

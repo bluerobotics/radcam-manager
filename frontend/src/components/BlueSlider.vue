@@ -1,6 +1,6 @@
 <template>
   <div class="flex w-full justify-between items-center">
-    <div v-if="label">
+    <div v-if="label" class="min-w-[130px]">
       <label
         class="text-start mr-6"
         :class="theme === 'dark' ? 'text-white' : 'text-black'"
@@ -10,7 +10,7 @@
       <div
         name="slider-track"
         class="relative overflow-visible rounded-[6px] elevation-1"
-        :class="[theme === 'dark' ? 'bg-[#464646]' : 'bg-[#00000011]', disabled ? 'opacity-50' : '']"
+        :class="[theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]', disabled ? 'opacity-50' : '']"
         :style="{ width: width || '100%', height: height || '30px', cursor: disabled ? 'not-allowed' : 'pointer' }"
         @mousedown="startSliding"
         @mouseup="stopSliding"
@@ -122,7 +122,7 @@ const props = defineProps<{
   /** Step increment (default 1). */
   step?: number
   /** 'light' or 'dark' theme. (default 'light')*/
-  theme?: 'light' | 'dark'
+  theme?: 'light' | 'dark' | 'transparent'
   /** Container width (default '100%'). */
   width?: string
   /** Model value for v-model */

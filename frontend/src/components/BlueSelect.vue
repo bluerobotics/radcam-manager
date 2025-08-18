@@ -23,7 +23,7 @@
           v-bind="menuProps"
           class="relative inline-flex items-center justify-between pl-4 rounded-[6px] elevation-1"
           :class="[
-            theme === 'dark' ? 'bg-[#464646]' : 'bg-[#00000011]',
+            theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]',
             disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer',
           ]"
           :style="{ height: height || '30px', width: width || 'auto' }"

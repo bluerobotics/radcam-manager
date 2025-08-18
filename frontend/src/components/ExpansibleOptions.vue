@@ -19,7 +19,7 @@
           </v-icon>
         </div>
       </button>
-      <div class="h-[1px] w-1/3 bg-[#ffffff15] my-2 ml-6 borde" />
+      <div class="h-[1px] w-[15%] bg-[#ffffff25] my-2 ml-6" />
     </div>
 
     <transition name="expand">
