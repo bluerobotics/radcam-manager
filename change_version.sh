@@ -23,7 +23,7 @@ sed -i "s/\(LABEL version=\"\)[^\"]*\"/\1${NEW_VERSION}\"/" "$DOCKERFILE"
 # Update workspace Cargo.toml file:
 echo "Updating workspace Cargo.toml file..."
 CARGO_TOML_FILE="Cargo.toml"
-sed -i '/^\[package\]/, /^\[/ {
+sed -i '/^\[workspace.package\]/, /^\[/ {
     s/^\(\s*version = "\)[^"]*"/\1'"${NEW_VERSION}"'"/
 }' "$CARGO_TOML_FILE"
 
