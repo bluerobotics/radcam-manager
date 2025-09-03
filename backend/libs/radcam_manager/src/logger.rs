@@ -85,18 +85,14 @@ pub fn init(log_path: String, is_verbose: bool, is_tracing: bool) {
     LogTracer::init_with_filter(tracing::log::LevelFilter::Trace).expect("Failed to set logger");
 
     // Configure the console log
-    let console_env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            if is_verbose {
-                EnvFilter::new(LevelFilter::DEBUG.to_string())
-            } else {
-                EnvFilter::new(LevelFilter::INFO.to_string())
-            }
-        })
-        // Hyper is used for http request by our thread leak test
-        // And it's pretty verbose when it's on
-        .add_directive("hyper=off".parse().unwrap())
-        .add_directive("reqwest=off".parse().unwrap());
+    let console_env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        if is_verbose {
+            EnvFilter::new(LevelFilter::DEBUG.to_string())
+        } else {
+            EnvFilter::new(LevelFilter::INFO.to_string())
+        }
+    });
+
     let console_layer = fmt::Layer::new()
         .with_writer(std::io::stdout)
         .with_ansi(true)
@@ -106,7 +102,7 @@ pub fn init(log_path: String, is_verbose: bool, is_tracing: bool) {
         .with_target(false)
         .with_thread_ids(true)
         .with_thread_names(true)
-        .with_filter(console_env_filter);
+        .with_filter(filter_unwanted_crates(console_env_filter));
 
     // Configure the file log
     let file_env_filter = if is_tracing {
@@ -129,7 +125,7 @@ pub fn init(log_path: String, is_verbose: bool, is_tracing: bool) {
         .with_target(false)
         .with_thread_ids(true)
         .with_thread_names(true)
-        .with_filter(file_env_filter);
+        .with_filter(filter_unwanted_crates(file_env_filter));
 
     // Configure the server log
     let server_env_filter = if is_tracing {
@@ -147,7 +143,7 @@ pub fn init(log_path: String, is_verbose: bool, is_tracing: bool) {
         .with_target(false)
         .with_thread_ids(true)
         .with_thread_names(true)
-        .with_filter(server_env_filter);
+        .with_filter(filter_unwanted_crates(server_env_filter));
 
     let history = HISTORY.get_or_init(|| Mutex::new(History::default()));
 
@@ -186,4 +182,13 @@ fn custom_rolling_appender<P: AsRef<std::path::Path>>(
         .filename_suffix(suffix)
         .build(dir)
         .expect("failed to initialize rolling file appender")
+}
+
+fn filter_unwanted_crates(env_filter: EnvFilter) -> EnvFilter {
+    env_filter
+        // Hyper is used for http request by our thread leak test
+        // And it's pretty verbose when it's on
+        .add_directive("hyper=off".parse().unwrap())
+        // Reducing verbosity for whe we make requests to other backends
+        .add_directive("reqwest=off".parse().unwrap())
 }
