@@ -175,6 +175,7 @@ dependencies = [
  "futures",
  "indexmap 2.10.0",
  "mavlink",
+ "merge-struct",
  "mlua",
  "num_enum",
  "once_cell",
@@ -2566,6 +2567,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "483758ad303d734cec05e5c12b41d7e93e6a6390c5e9dae6bdeb7c1259012d28"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "merge-struct"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d82012d21e24135b839b6b9bebd622b7ff0cb40071498bc2d066d3a6d04dd4a"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
