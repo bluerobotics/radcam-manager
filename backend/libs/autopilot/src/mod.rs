@@ -95,9 +95,20 @@ pub(crate) async fn control_inner(
         }
         Action::SetActuatorsConfig(new_config) => {
             let mut manager = MANAGER.get().context("Not available")?.write().await;
+            let mut new_config = new_config.to_owned();
+
+            let base_config = &manager
+                .settings
+                .actuators
+                .get(&actuators_control.camera_uuid)
+                .map(api::ActuatorsConfig::from)
+                .unwrap_or(api::ActuatorsConfig::from(&CameraActuators::default()));
+
+            new_config = merge_struct::merge(base_config, &new_config.clone())
+                .context("Failing to merge structs")?;
 
             manager
-                .update_config(&actuators_control.camera_uuid, new_config, false)
+                .update_config(&actuators_control.camera_uuid, &new_config, false)
                 .await?;
 
             let config: &api::ActuatorsConfig = &manager
