@@ -50,3 +50,6 @@ url_params_serializer = { workspace = true }
 uuid = { workspace = true }
 ts-rs = { workspace = true }
 tsync = { workspace = true }
+
+[build-dependencies]
+vergen-gix = { workspace = true }
