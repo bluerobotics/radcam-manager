@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn generate_build_details() -> Result<(), Box<dyn std::error::Error>> {
-    if std::path::Path::new("../.git").is_dir() {
+    if std::path::Path::new("../../.git").is_dir() {
         vergen_gix::Emitter::default()
             .add_instructions(&BuildBuilder::all_build()?)?
             .add_instructions(&GixBuilder::all_git()?)?
