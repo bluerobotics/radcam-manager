@@ -3126,6 +3126,7 @@ dependencies = [
  "url",
  "url_params_serializer",
  "uuid",
+ "vergen-gix",
  "web_client",
 ]
 

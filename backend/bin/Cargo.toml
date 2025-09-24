@@ -24,4 +24,4 @@ tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 
 [build-dependencies]
-vergen-gix = { version = "1.0.9", default-features = false, features = ["build", "cargo"] }
+vergen-gix = { workspace = true }
