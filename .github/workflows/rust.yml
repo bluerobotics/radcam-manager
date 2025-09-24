@@ -37,6 +37,8 @@ jobs:
           cache-dependency-path: "frontend/package-lock.json"
           cache: "npm"
 
+      - name: Install rustfmt
+        run: rustup component add rustfmt
       - name: Check style
         run: cargo fmt --check
 
