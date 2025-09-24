@@ -12,14 +12,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn generate_build_details() -> Result<(), Box<dyn std::error::Error>> {
+    let mut emitter = vergen_gix::Emitter::default();
+
+    emitter.add_instructions(&BuildBuilder::all_build()?)?;
+    emitter.add_instructions(
+        CargoBuilder::all_cargo()?.set_dep_kind_filter(Some(DependencyKind::Normal)),
+    )?;
+
     if std::path::Path::new("../../.git").is_dir() {
-        vergen_gix::Emitter::default()
-            .add_instructions(&BuildBuilder::all_build()?)?
-            .add_instructions(&GixBuilder::all_git()?)?
-            .add_instructions(
-                CargoBuilder::all_cargo()?.set_dep_kind_filter(Some(DependencyKind::Normal)),
-            )?
-            .emit()?;
+        emitter.add_instructions(&GixBuilder::all_git()?)?;
     }
+
+    emitter.emit()?;
+
     Ok(())
 }
