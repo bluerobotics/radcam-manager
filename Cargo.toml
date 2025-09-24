@@ -42,6 +42,7 @@ url_params_serializer = "0.1.1"
 uuid = { version = "1.17.0", features = ["v5", "serde"] }
 reqwest = { version = "0.12.22", default-features = false, features = ["http2", "json", "rustls-tls"] }
 regex = { version = "1.11.1", default-features = false, features = ["std"] }
+vergen-gix = { version = "1.0.9", default-features = false, features = ["build", "cargo"] }
 
 [profile.release]
 strip = true
