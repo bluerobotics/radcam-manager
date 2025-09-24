@@ -13,10 +13,10 @@ async fn main() -> Result<()> {
 
     info!(
         "{}, version: {}-{}, build date: {}",
-        option_env!("CARGO_PKG_NAME").unwrap_or("?"),
-        option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0"),
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
         option_env!("VERGEN_GIT_SHA").unwrap_or("?"),
-        option_env!("VERGEN_BUILD_DATE").unwrap_or("?"),
+        env!("VERGEN_BUILD_DATE"),
     );
     info!(
         "Starting at {}",

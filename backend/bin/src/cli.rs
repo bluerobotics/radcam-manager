@@ -11,9 +11,9 @@ struct Manager {
 
 #[derive(Debug, Parser)]
 #[command(
-    version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0"),
-    author = option_env!("CARGO_PKG_AUTHORS").unwrap_or("?"),
-    about = option_env!("CARGO_PKG_DESCRIPTION").unwrap_or("?"),
+    version = env!("CARGO_PKG_VERSION"),
+    author = env!("CARGO_PKG_AUTHORS"),
+    about = env!("CARGO_PKG_DESCRIPTION"),
 )]
 pub struct Args {
     /// Turns all log categories up to Debug, for more information check RUST_LOG env variable.

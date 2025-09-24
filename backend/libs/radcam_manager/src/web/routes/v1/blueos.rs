@@ -37,7 +37,7 @@ impl Default for ServerMetadata {
             description: "The official management interface for RadCam",
             icon: "mdi-camera-outline",
             company: "BlueRobotics",
-            version: option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0"),
+            version: env!("CARGO_PKG_VERSION"),
             webpage: "https://github.com/BluerRobotics/radcam-manager",
             api: "/docs",
             route: None,
