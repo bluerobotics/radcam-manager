@@ -73,10 +73,6 @@ pub async fn cockpit_extras() -> impl IntoResponse {
 }
 
 fn widgets(cameras: &Cameras) -> Vec<CockpitWidget> {
-    let version = option_env!("CARGO_PKG_VERSION")
-        .unwrap_or("0.0.0")
-        .to_string();
-
     cameras
         .iter()
         .map(|(camera_uuid, camera)| CockpitWidget {
@@ -84,7 +80,7 @@ fn widgets(cameras: &Cameras) -> Vec<CockpitWidget> {
             config_iframe_url: None,
             iframe_url: format!("#/?uuid={camera_uuid}&cockpit_mode=true"),
             iframe_icon: "/assets/logo.svg".to_string(),
-            version: version.clone(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
         })
         .collect()
 }

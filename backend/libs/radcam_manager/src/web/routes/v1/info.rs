@@ -38,11 +38,11 @@ async fn info() -> Json<Info> {
     Json(Info {
         version: 0,
         service: InfoContent {
-            name: option_env!("CARGO_PKG_NAME").unwrap_or("?").into(),
+            name: env!("CARGO_PKG_NAME").into(),
             version: option_env!("VERGEN_GIT_DESCRIBE").unwrap_or("?").into(),
             sha: option_env!("VERGEN_GIT_SHA").unwrap_or("?").into(),
-            build_date: option_env!("VERGEN_BUILD_TIMESTAMP").unwrap_or("?").into(),
-            authors: option_env!("CARGO_PKG_AUTHORS").unwrap_or("?").into(),
+            build_date: env!("VERGEN_BUILD_TIMESTAMP").into(), // TODO: WE NEED TO HAVE VERGEN-GIX HERE EMITTING IT HERE TOO!!!
+            authors: env!("CARGO_PKG_AUTHORS").into(),
         },
     })
 }
