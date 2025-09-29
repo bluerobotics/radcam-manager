@@ -102,7 +102,7 @@
           size="20"
           class="me-2"
         />
-        {{ processingWhiteBalance ? "Processing..." : "Do White Balance" }}
+        {{ processingWhiteBalance ? "Processing..." : "One-Push White Balance" }}
       </v-btn>
     </div>
   </div>
