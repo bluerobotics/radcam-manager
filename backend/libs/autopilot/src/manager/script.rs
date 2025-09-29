@@ -313,7 +313,7 @@ fn generate_lua_script(config: &CameraActuators) -> Result<String> {
 
     context.insert("param_table_key", &param_table_key);
     context.insert("param_prefix", &param_prefix);
-    context.insert("margin_gain", &(config.parameters.focus_margin_gain as f32));
+    context.insert("margin_gain", &{ config.parameters.focus_margin_gain });
     context.insert("k_script", &(config.parameters.script_function as u8));
     context.insert("closest_points", &config.closest_points.to_lua());
     context.insert("furthest_points", &config.furthest_points.to_lua());
