@@ -237,7 +237,7 @@
         @update:model-value="updateActuatorsState('zoom', $event as number)"
       />
       <BlueSlider
-        v-if="actuatorsState"
+        v-if="actuatorsState && false"
         v-model="actuatorsState.tilt"
         name="tilt"
         label="Tilt"
