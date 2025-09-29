@@ -11,7 +11,7 @@ use crate::{
 };
 
 const PARAM_TABLE_KEY_BASE: u8 = 73;
-pub const PARAM_PREFIX: &'static str = "RCAM";
+pub const PARAM_PREFIX: &str = "RCAM";
 
 impl Manager {
     #[instrument(level = "debug", skip(self))]
