@@ -260,7 +260,7 @@
     >
       <div class="mb-4 p-3">
         Please select below each correspondent channel pin from the Navigator Board each cable is connected to. 
-        The recommended is focus 10, zoom 11, script 12, tilt 16.
+        The recommended is focus 10, zoom 11, focus correlation script 12, tilt 16.
       </div>
 
       <BlueSelect
@@ -280,7 +280,7 @@
       />
       <BlueSelect
         v-model="tempChannelChanges.script_channel"
-        label="Script PWM input"
+        label="Focus Correlation Script input"
         :items="availableServoChannelOptions"
         theme="dark"
         class="mt-6"
