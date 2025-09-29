@@ -168,6 +168,10 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
             };
 
             for source in available_radcam_sources {
+                if !source.source.ends_with("stream_0") {
+                    continue; // We only want the main stream
+                }
+
                 if existing_radcam_streams.iter().any(|stream| {
                     // Note: Here we are ignoring any authentication so we avoid duplicated streams
 
