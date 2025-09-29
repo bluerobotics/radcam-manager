@@ -4,7 +4,7 @@
     align-tabs="center"
   >
     <v-tab
-      v-for="option in channelOptions.filter(opt => opt.value < 2)"
+      v-for="option in channelOptions.filter(opt => opt.value < 1)"
       :key="option.value"
       :value="option.value"
       :disabled="props.disabled || processingUpdate"
