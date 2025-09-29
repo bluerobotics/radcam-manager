@@ -32,10 +32,11 @@ impl Manager {
             tokio::fs::create_dir_all(parent_dir).await?;
         }
 
-        if let Ok(existing_contents) = tokio::fs::read_to_string(path_obj).await {
-            if !overwrite && existing_contents == contents {
-                return Ok(false);
-            }
+        if let Ok(existing_contents) = tokio::fs::read_to_string(path_obj).await
+            && !overwrite
+            && existing_contents == contents
+        {
+            return Ok(false);
         }
 
         trace!("Saving Lua script to {path:?}. Lua script content: {contents:#?}");

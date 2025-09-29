@@ -287,11 +287,9 @@ impl MavlinkComponent {
         param_name: &str,
         skip_cache: bool,
     ) -> Result<Parameter> {
-        if !skip_cache {
-            if let Some(parameter) = inner.parameters.read().await.get(param_name) {
-                trace!("Got parameter from cache!");
-                return Ok(parameter.clone());
-            }
+        if !skip_cache && let Some(parameter) = inner.parameters.read().await.get(param_name) {
+            trace!("Got parameter from cache!");
+            return Ok(parameter.clone());
         }
 
         let target_system = inner.system_id;

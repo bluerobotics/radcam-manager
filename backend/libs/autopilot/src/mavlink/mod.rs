@@ -297,16 +297,16 @@ impl MavlinkComponent {
                                 && recv_header.component_id == target_component
                                 && matches!(recv_message, MavMessage::COMMAND_ACK(_)) =>
                         {
-                            if let MavMessage::COMMAND_ACK(command_ack) = recv_message {
-                                if command_ack.command == command.command {
-                                    return match command_ack.result {
-                                        MavResult::MAV_RESULT_ACCEPTED => Ok(()),
-                                        reason => Err(anyhow!(
-                                            "Command {:?} rejected: {reason:?}",
-                                            command_ack.command
-                                        )),
-                                    };
-                                }
+                            if let MavMessage::COMMAND_ACK(command_ack) = recv_message
+                                && command_ack.command == command.command
+                            {
+                                return match command_ack.result {
+                                    MavResult::MAV_RESULT_ACCEPTED => Ok(()),
+                                    reason => Err(anyhow!(
+                                        "Command {:?} rejected: {reason:?}",
+                                        command_ack.command
+                                    )),
+                                };
                             }
                         }
                         Ok(_) => continue,
