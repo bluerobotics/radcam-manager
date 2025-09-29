@@ -6,7 +6,7 @@
       theme="dark"
     >
       <BlueButtonGroup
-        label="Water environment for OPWB"
+        label="Water environment for One-Push White Balance"
         :button-items="[
           { name: 'Green', onSelected: () => (OPWBMode = 'green') },
           { name: 'Blue', onSelected: () => (OPWBMode = 'blue') },
