@@ -89,7 +89,7 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
     cameras
         .iter()
         .flat_map(|(camera_uuid, camera)| {
-            let name: String = format!("RadCam White Balance ({})", camera.hostname);
+            let name: String = format!("RadCam One-Push White Balance ({})", camera.hostname);
 
             vec![CockpitAction {
                 id: format!("radcam-white-balance-{camera_uuid}"),
