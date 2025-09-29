@@ -46,7 +46,7 @@
               class="font-bold select-none"
               draggable="false"
             >
-              {{ step && step < 1 ? currentSliderValue?.toFixed(1) || 0 : currentSliderValue.toFixed(0) }}
+              {{ formatValue ? formatValue(currentSliderValue) : (step && step < 1 ? currentSliderValue?.toFixed(1) || '0' : currentSliderValue.toFixed(0)) }}
             </p>
           </div>
           <div v-else>
@@ -116,6 +116,8 @@ const props = defineProps<{
   labelMax?: string
   /** Custom text for the min label. */
   labelMin?: string
+  /** Custom text for the pill value */
+  formatValue?: (raw: number) => string
   /** Maximum allowed value. */
   max: number
   /** Minimum allowed value. */
