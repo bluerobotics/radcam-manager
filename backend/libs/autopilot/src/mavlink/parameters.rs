@@ -134,7 +134,7 @@ impl MavlinkComponent {
         let this_component = inner.component_id;
         let sender = inner.get_sender().await;
         let mut receiver = inner.get_receiver().await;
-        let encoding = inner.encoding.read().await.clone();
+        let encoding = *inner.encoding.read().await;
 
         let header = MavHeader {
             system_id: this_system,
@@ -230,7 +230,7 @@ impl MavlinkComponent {
     #[instrument(level = "debug", skip(inner))]
     pub(crate) async fn params_sync_task(inner: Arc<ComponentInner>) {
         let mut receiver = inner.get_receiver().await;
-        let encoding = inner.encoding.read().await.clone();
+        let encoding = *inner.encoding.read().await;
 
         loop {
             let (_header, message) = match receiver.recv().await {
@@ -298,7 +298,7 @@ impl MavlinkComponent {
         let this_component = inner.component_id;
         let sender = inner.get_sender().await;
         let mut receiver = inner.get_receiver().await;
-        let encoding = inner.encoding.read().await.clone();
+        let encoding = *inner.encoding.read().await;
 
         let header = MavHeader {
             system_id: this_system,
@@ -345,7 +345,7 @@ impl MavlinkComponent {
     #[instrument(level = "debug", skip(inner))]
     async fn wait_for_param(inner: Arc<ComponentInner>, param_name: &str) -> Result<Parameter> {
         let mut receiver = inner.get_receiver().await;
-        let encoding = inner.encoding.read().await.clone();
+        let encoding = *inner.encoding.read().await;
 
         let mut max_retries = 5;
         while max_retries > 0 {
@@ -417,7 +417,7 @@ impl MavlinkComponent {
         let this_system = inner.system_id;
         let this_component = inner.component_id;
         let sender = inner.get_sender().await;
-        let encoding = inner.encoding.read().await.clone();
+        let encoding = *inner.encoding.read().await;
 
         let header = MavHeader {
             system_id: this_system,
@@ -471,6 +471,6 @@ impl MavlinkComponent {
 
     #[instrument(level = "debug", skip(self))]
     pub async fn encoding(&self) -> ParamEncodingType {
-        self.inner.encoding.read().await.clone()
+        *self.inner.encoding.read().await
     }
 }
