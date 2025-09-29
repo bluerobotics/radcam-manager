@@ -212,6 +212,9 @@
         :min="0"
         :max="100"
         :step="1"
+        :format-value="formatFocusValue"
+        label-min="0.5m"
+        label-max="∞"
         width="400px"
         theme="dark"
         class="mt-5"
@@ -225,6 +228,9 @@
         :min="0"
         :max="100"
         :step="1"
+        :format-value="formatZoomValue"
+        label-min="1x"
+        label-max="3x"
         width="400px"
         theme="dark"
         class="mt-5"
@@ -238,6 +244,9 @@
         :min="0"
         :max="100"
         :step="1"
+        :format-value="formatTiltValue"
+        :label-min="`${focusAndZoomParams.tilt_mnt_pitch_min !== null ? focusAndZoomParams.tilt_mnt_pitch_min : -90}°`"
+        :label-max="`${focusAndZoomParams.tilt_mnt_pitch_max !== null ? focusAndZoomParams.tilt_mnt_pitch_max : 90}°`"
         width="400px"
         theme="dark"
         class="mt-5"
@@ -604,6 +613,41 @@ const onFocusOffsetChange = (uiVal: number): void => {
   }
   const raw = mapFocusUiToRaw(uiVal, min, max)
   updateActuatorsConfig('focus_channel_trim', raw)
+}
+
+const formatFocusValue = (raw: number): string => {
+  if (raw >= 100) {
+    return '∞'
+  }
+  // Map 0–99.99 → 0.5m – ~50m
+  const ratio = raw / 100 // [0, 1)
+  const distance = 0.5 / (1 - ratio)
+
+  // Optional: cap for readability (e.g., don't show 1234.56m)
+  if (distance >= 50) {
+    return '50m+'
+  }
+
+  // Round to 1 decimal for <10m, whole number otherwise
+  if (distance < 10) {
+    return `${distance.toFixed(1)}m`
+  } else {
+    return `${Math.round(distance)}m`
+  }
+}
+
+const formatZoomValue = (raw: number): string => {
+  const zoomLevel = 1.0 + (raw / 100) * 2.0
+  return `${zoomLevel.toFixed(1)}x`
+}
+
+const formatTiltValue = (raw: number): string => {
+  const minAngle = focusAndZoomParams.value.tilt_mnt_pitch_min ?? -90
+  const maxAngle = focusAndZoomParams.value.tilt_mnt_pitch_max ?? 90
+
+  // Map raw [0, 100] → [minAngle, maxAngle]
+  const angle = minAngle + (raw / 100) * (maxAngle - minAngle)
+  return `${angle.toFixed(1)}°`
 }
 
 const saveRGBSetpointProfile = () => {
