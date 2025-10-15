@@ -40,7 +40,7 @@ ENTRYPOINT [ \
     "--web-server", "0.0.0.0:8080", \
     "--mcm-address", "blueos.internal:6020", \
     "--mavlink", "udpout:blueos.internal:11001", \
-    "--mavlink-system-id", "1", \
+    "--mavlink-system-id", "$MAV_SYSTEM_ID", \
     "--mavlink-component-id", "56", \
     "--log-path", "/logs", \
     "--settings-file", "/app/settings.json", \
