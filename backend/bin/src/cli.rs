@@ -17,11 +17,11 @@ struct Manager {
 )]
 pub struct Args {
     /// Turns all log categories up to Debug, for more information check RUST_LOG env variable.
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = expand::<bool>)]
     verbose: bool,
 
     /// Sets the IP and port that the server will be provided.
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    #[arg(long, default_value = "0.0.0.0:8080", value_parser = expand::<String>)]
     web_server: String,
 
     /// Turns all log categories up to Trace to the log file, for more information check RUST_LOG env variable.
@@ -29,52 +29,64 @@ pub struct Args {
     enable_tracing_level_log_file: bool,
 
     /// Specifies the path in which the logs will be stored.
-    #[arg(long, default_value = "./logs")]
+    #[arg(long, default_value = "./logs", value_parser = expand::<String>)]
     log_path: Option<String>,
 
     /// Sets the default version used by the REST API, this will remove the prefix used by its path.
-    #[arg(long, default_value = "1", value_names = ["1"])]
+    #[arg(long, default_value = "1", value_names = ["1"], value_parser = expand::<u8>)]
     default_api_version: u8,
 
     /// Sets the Mavlink Camera Manager address.
-    #[arg(long, default_value = "127.0.0.1:6020")]
+    #[arg(long, default_value = "127.0.0.1:6020", value_parser = expand::<String>)]
     mcm_address: String,
 
     /// Sets the file path for the autopilot lua script to control zoom and focus
-    #[arg(long, default_value = "./scripts/radcam.lua")]
+    #[arg(long, default_value = "./scripts/radcam.lua", value_parser = expand::<String>)]
     autopilot_scripts_file: Option<String>,
 
     /// Sets the settings file path
     #[arg(
         long,
         value_name = "./settings.json",
-        default_value = "~/.config/radcam-manager/settings.json"
+        default_value = "~/.config/radcam-manager/settings.json",
+        value_parser = expand::<String>,
     )]
     settings_file: String,
 
     /// Deletes settings file before starting.
-    #[arg(long)]
+    #[arg(long,value_parser = expand::<bool>)]
     reset: bool,
 
     /// Sets the mavlink connection string
     #[arg(
         long,
         value_name = "<TYPE>:<IP/SERIAL>:<PORT/BAUDRATE>",
-        default_value = "udpout:127.0.0.1:11001"
+        default_value = "udpout:127.0.0.1:11001",
+        value_parser = expand::<String>,
     )]
     mavlink: String,
 
     /// Sets the MAVLink System ID.
-    #[arg(long, value_name = "SYSTEM_ID", default_value = "1")]
+    #[arg(long, value_name = "SYSTEM_ID", default_value = "1", value_parser = expand::<u8>)]
     mavlink_system_id: u8,
 
     /// Sets the MAVLink Component ID.
-    #[arg(long, value_name = "COMPONENT_ID", default_value = "56")]
+    #[arg(long, value_name = "COMPONENT_ID", default_value = "56", value_parser = expand::<u8>)]
     mavlink_component_id: u8,
 
     /// Sets the BlueOS IP address.
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long, default_value = "127.0.0.1", value_parser = expand::<String>)]
     blueos_address: String,
+}
+
+fn expand<T: std::str::FromStr>(s: &str) -> Result<T, String>
+where
+    T::Err: std::fmt::Display,
+{
+    let expanded = shellexpand::full(s).map_err(|error| format!("Failed to expand: {error}"))?;
+    expanded
+        .parse::<T>()
+        .map_err(|error| format!("Failed to parse: {error}"))
 }
 
 /// Constructs our manager, Should be done inside main
@@ -107,14 +119,10 @@ pub fn is_tracing() -> bool {
 
 #[instrument(level = "debug")]
 pub fn log_path() -> String {
-    let log_path = args()
+    args()
         .log_path
         .clone()
-        .expect("Clap arg \"log-path\" should always be \"Some(_)\" because of the default value.");
-
-    shellexpand::full(&log_path)
-        .expect("Failed to expand path")
-        .to_string()
+        .expect("Clap arg \"log-path\" should always be \"Some(_)\" because of the default value.")
 }
 
 #[instrument(level = "debug")]
@@ -130,18 +138,12 @@ pub fn command_line() -> String {
 
 #[instrument(level = "debug")]
 pub async fn web_server() -> std::net::SocketAddr {
-    let address = &args().web_server;
-    let address = shellexpand::full(&address).unwrap().to_string();
-
-    resolve_address(&address).await.unwrap()
+    resolve_address(&args().web_server).await.unwrap()
 }
 
 #[instrument(level = "debug")]
 pub async fn mcm_address() -> std::net::SocketAddr {
-    let address = &args().mcm_address;
-    let address = shellexpand::full(&address).unwrap().to_string();
-
-    resolve_address(&address).await.unwrap()
+    resolve_address(&args().mcm_address).await.unwrap()
 }
 
 #[instrument(level = "debug")]
@@ -150,10 +152,6 @@ pub fn autopilot_scripts_file() -> String {
         .autopilot_scripts_file
         .clone()
         .expect("Clap arg \"autopilot-scripts-file\" should always be \"Some(_)\" because of the default value.");
-
-    let autopilot_scripts_file = shellexpand::full(&autopilot_scripts_file)
-        .expect("Failed to expand path")
-        .to_string();
 
     if !autopilot_scripts_file.ends_with(".lua") {
         panic!("Clap arg \"autopilot-scripts-file\" Should always end with \".lua\"");
@@ -164,11 +162,7 @@ pub fn autopilot_scripts_file() -> String {
 
 #[instrument(level = "debug")]
 pub fn settings_file() -> String {
-    let settings_file = args().settings_file.clone();
-
-    shellexpand::full(&settings_file)
-        .expect("Failed to expand path")
-        .to_string()
+    args().settings_file.clone()
 }
 
 #[instrument(level = "debug")]
@@ -179,7 +173,6 @@ pub fn is_reset() -> bool {
 #[instrument(level = "debug")]
 pub async fn mavlink_connection_string() -> String {
     let mavlink = args().mavlink.clone();
-    let mavlink = shellexpand::full(&mavlink).unwrap();
 
     let (kind, address) = mavlink.split_once(":").unwrap();
 
@@ -206,7 +199,6 @@ pub fn default_api_version() -> u8 {
 #[instrument(level = "debug")]
 pub async fn blueos_address() -> std::net::SocketAddr {
     let address = &args().blueos_address;
-    let address = shellexpand::full(&address).unwrap().to_string();
 
     let (host, port) = address.split_once(':').unwrap_or((&address, "80"));
     let address = format!("{host}:{port}");
