@@ -392,6 +392,10 @@
     </v-card>
   </v-dialog>
   <Loading :is-loading="isLoading" />
+  <ErrorDialog
+    :message="errorDialogMessage"
+    @close="errorDialogMessage = null"
+  />
 </template>
 
 <script setup lang="ts">
@@ -504,6 +508,7 @@ const actuatorsState = ref<ActuatorsState>({
   tilt: 0,
 })
 const isLoading = ref<boolean>(false)
+const errorDialogMessage = ref<string | null>(null)
 const hasUnsavedChannelChanges = ref<boolean>(false)
 const tempChannelChanges = ref<{
   focus_channel: string | null
@@ -745,7 +750,9 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
       baseParams.value = response.data as BaseParameterSetting
     })
     .catch((error) => {
-      console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
+      const message = `Error sending ${String(param)} control with value '${value}'`
+      console.log(message, error.message)
+      showWarningToast(message, error)
     })
 }
 
@@ -763,7 +770,7 @@ const getActuatorsConfig = () => {
 
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
-    .then(response => {
+    .then((response) => {
       const newParams = (response.data as ActuatorsConfig)?.parameters
       if (newParams) {
         focusAndZoomParams.value = { ...newParams }
@@ -781,8 +788,10 @@ const getActuatorsConfig = () => {
       console.log('# - getActuatorsConfig response:', response.data)
 
     })
-    .catch(error => {
-      console.error(`Error sending getActuatorsConfig request:`, error.message)
+    .catch((error) => {
+      const message = 'Error getting actuator configuration'
+      console.log(message, error.message)
+      showError(message, error)
     })
 }
 
@@ -812,7 +821,9 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
       }
     })
     .catch((error) => {
-      console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
+      const message = `Error sending ${String(param)} control with value '${value}'`
+      console.log(message, error.message)
+      showErrorDialog(message, error)
     })
 }
 
@@ -830,14 +841,16 @@ const getActuatorsState = () => {
 
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
-    .then(response => {
+    .then((response) => {
       const state = response.data as ActuatorsState
 
       applyNonNull(actuatorsState.value, state)
       console.log(state)
     })
-    .catch(error => {
-      console.error(`Error sending getActuatorsState request:`, error.message)
+    .catch((error) => {
+      const message = 'Error getting actuators state'
+      console.log(message, error.message)
+      showError(message, error)
     })
 }
 
@@ -854,16 +867,25 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
 
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
-    .then(response => { 
+    .then((response) => { 
       const state = response.data as ActuatorsState;
 
       applyNonNull(actuatorsState.value, state)
       console.log(state)
     })
-    .catch(error => {
-      console.error(`Error updating ${param}:`, error.message)
+    .catch((error) => {
+      const message = `Error updating ${param}`
+      console.log(message, error.message)
+      showWarningToast(message, error)
     })
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const showErrorDialog = (message: string, error: any) => {
+  if (error.response?.status === 404 || !checkIfConfigured(error)) return
+
+  const details = error.response?.data?.message || error.response?.data || error.response || error.message || error || 'Unknown error'
+  errorDialogMessage.value = `${message}: ${details}`
+})
 
 const isHardwareSetupComplete = computed<boolean>(() => {
   return (
@@ -952,7 +974,12 @@ const getVideoParameters = (update: boolean) => {
         update_video_parameter_values(settings)
       }
     })
-    .catch((error) => console.error(`Error sending getVencConf request:`, error.message))
+    .catch((error) => {
+      const message = 'Error getting video parameters'
+      console.log(message, error.message)
+      showWarningToast(message, error)
+    })
+    
 }
 
 const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void => {
@@ -971,7 +998,9 @@ const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void =
       update_video_parameter_values(settings)
     })
     .catch((error) => {
-      console.error(`Error sending partial video params '${JSON.stringify(partial)}':`, error.message)
+      const message = `Error sending partial video params '${JSON.stringify(partial)}'`
+      console.log(message, error.message)
+      showWarningToast(message, error)
   })
 }
 
@@ -1062,12 +1091,11 @@ const doRestart = () => {
     .then((response) => {
       console.log("Got an answer from the restarting request", response.data)
     })
-    .catch((error) =>
-      console.error(
-        `Error sending restart':`,
-        error.message
-      )
-    )
+    .catch((error) => {
+      const message = 'Error sending restart'
+      console.log(message, error.message)
+      showErrorDialog(message, error)
+    })
     .finally(() => {
       isLoading.value = false
     })
@@ -1139,12 +1167,11 @@ const saveHardwareSetup = async (): Promise<void> => {
         hasUnsavedChannelChanges.value = false
       }
     })
-    .catch((error) =>
-      console.error(
-        `Error saving hardware setup':`,
-        error.message
-      )
-    )
+    .catch((error) => {
+      const message = 'Error saving hardware setup'
+      console.log(message, error.message)
+      showErrorDialog(message, error)
+    })
     .finally(() => {
       isLoading.value = false
     })
