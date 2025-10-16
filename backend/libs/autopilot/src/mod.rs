@@ -93,6 +93,11 @@ pub(crate) async fn control_inner(
 
             serde_json::to_value(config)?
         }
+        Action::GetActuatorsDefaultConfig => {
+            let config = api::ActuatorsConfig::from(&CameraActuators::default());
+
+            serde_json::to_value(config)?
+        }
         Action::SetActuatorsConfig(new_config) => {
             let mut manager = MANAGER.get().context("Not available")?.write().await;
             let mut new_config = new_config.to_owned();
