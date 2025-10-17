@@ -7,6 +7,7 @@
     >
       <BlueButtonGroup
         label="Water environment for One-Push White Balance"
+        :disabled="props.disabled"
         :button-items="[
           { name: 'Green', onSelected: () => (OPWBMode = 'green') },
           { name: 'Blue', onSelected: () => (OPWBMode = 'blue') },
@@ -17,6 +18,7 @@
 
       <BlueButtonGroup
         label="RGB setpoints"
+        :disabled="props.disabled"
         :button-items="RGBSetpointProfiles"
         :buttons-menu="[
           { name: 'Add new profile', action: () => (openRGBSetpointForm = true), menuItemDisabled: RGBSetpointProfiles.length > 3 },
@@ -27,6 +29,7 @@
         type="switch"
       />
       <ExpansibleOptions
+        :disabled="props.disabled"
         :is-open="openRGBSetpointOptions"
         button-class="mt-[-25px] ml-[155px]"
         content-class="mt-4"
@@ -35,6 +38,7 @@
         <div class="flex flex-col justify-end items-end">
           <BlueSlider
             v-model="currentRGBSetpointValue[0]"
+            :disabled="props.disabled"
             name="awb_red"
             label="WB Red"
             color="red"
@@ -48,6 +52,7 @@
           />
           <BlueSlider
             v-model="currentRGBSetpointValue[1]"
+            :disabled="props.disabled"
             name="green-setpoint"
             label="WB Green"
             color="green"
@@ -61,6 +66,7 @@
           />
           <BlueSlider
             v-model="currentRGBSetpointValue[2]"
+            :disabled="props.disabled"
             name="blue-setpoint"
             label="WB Blue"
             color="#0B5087"
@@ -76,6 +82,7 @@
       </ExpansibleOptions>
       <BlueSwitch
         v-model="focusAndZoomParams.enable_focus_and_zoom_correlation"
+        :disabled="props.disabled"
         name="focus-zoom-correlation"
         label="Focus and zoom correlation"
         theme="dark"
@@ -84,6 +91,7 @@
       />
       <BlueSlider
         v-model="focusOffsetUI"
+        :disabled="props.disabled"
         name="focus-offset"
         label="Focus offset"
         :min="-10"
@@ -102,6 +110,7 @@
     >
       <BlueSelect
         v-model="selectedVideoResolution"
+        :disabled="props.disabled"
         label="Resolution"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
@@ -109,6 +118,7 @@
       />
       <BlueSelect
         v-model="selectedVideoBitrate"
+        :disabled="props.disabled"
         label="Bitrate"
         :items="bitrateOptions || [{ name: 'No bitrates available', value: null }]"
         theme="dark"
@@ -189,6 +199,7 @@
         class="flex justify-end mt-8 mb-[-20px]"
       >
         <v-btn
+          :disabled="props.disabled"
           class="py-1 px-3 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
           :class="{ 'opacity-50 pointer-events-none': !hasUnsavedVideoChanges }"
           size="small"
@@ -208,6 +219,7 @@
       <BlueSlider
         v-if="actuatorsState"
         v-model="actuatorsState.focus"
+        :disabled="props.disabled"
         name="focus"
         label="Focus"
         :min="0"
@@ -223,6 +235,7 @@
       <BlueSlider
         v-if="actuatorsState"
         v-model="actuatorsState.zoom"
+        :disabled="props.disabled"
         name="zoom"
         label="Zoom"
         :min="0"
@@ -239,6 +252,7 @@
       <BlueSlider
         v-if="actuatorsState && false"
         v-model="actuatorsState.tilt"
+        :disabled="props.disabled"
         name="tilt"
         label="Tilt"
         :min="0"
@@ -280,6 +294,7 @@
       >
         <div class="d-flex flex-row ga-3 mt-5 justify-end">
           <v-btn
+            :disabled="props.disabled"
             class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
@@ -292,7 +307,7 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="isLoading"
+            :disabled="isLoading || props.disabled"
             :loading="isLoading"
             theme="dark"
             @click="saveHardwareSetup"
@@ -312,6 +327,7 @@
         >
           <BlueSelect
             v-model="tempAdvancedParams.focus_channel"
+            :disabled="props.disabled"
             label="PWM Output Channel"
             :items="availableServoChannelOptions"
             theme="dark"
@@ -320,6 +336,7 @@
           <div class="d-flex flex-row ga-3 mt-5">
             <v-text-field
               v-model.number="tempAdvancedParams.focus_channel_min"
+              :disabled="props.disabled"
               label="Min (µs)"
               type="number"
               density="compact"
@@ -329,6 +346,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.focus_channel_trim"
+              :disabled="props.disabled"
               label="Trim (µs)"
               type="number"
               density="compact"
@@ -338,6 +356,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.focus_channel_max"
+              :disabled="props.disabled"
               label="Max (µs)"
               type="number"
               density="compact"
@@ -348,6 +367,7 @@
           </div>
           <v-text-field
             v-model.number="tempAdvancedParams.focus_margin_gain"
+            :disabled="props.disabled"
             type="number"
             label="Focus Margin Gain"
             density="compact"
@@ -366,6 +386,7 @@
         >
           <BlueSelect
             v-model="tempAdvancedParams.zoom_channel"
+            :disabled="props.disabled"
             label="PWM Output Channel"
             :items="availableServoChannelOptions"
             theme="dark"
@@ -374,6 +395,7 @@
           <div class="d-flex flex-row ga-3 mt-5">
             <v-text-field
               v-model.number="tempAdvancedParams.zoom_channel_min"
+              :disabled="props.disabled"
               label="Min (µs)"
               type="number"
               density="compact"
@@ -383,6 +405,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.zoom_channel_trim"
+              :disabled="props.disabled"
               label="Trim (µs)"
               type="number"
               density="compact"
@@ -392,6 +415,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.zoom_channel_max"
+              :disabled="props.disabled"
               label="Max (µs)"
               type="number"
               density="compact"
@@ -410,6 +434,7 @@
         >
           <BlueSelect
             v-model="tempAdvancedParams.script_channel"
+            :disabled="props.disabled"
             label="PWM Input Channel"
             :items="availableServoChannelOptions"
             theme="dark"
@@ -418,6 +443,7 @@
           <div class="d-flex flex-row ga-3 mt-5">
             <v-text-field
               v-model.number="tempAdvancedParams.script_channel_min"
+              :disabled="props.disabled"
               label="Min (µs)"
               type="number"
               density="compact"
@@ -427,6 +453,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.script_channel_trim"
+              :disabled="props.disabled"
               label="Trim (µs)"
               type="number"
               density="compact"
@@ -436,6 +463,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.script_channel_max"
+              :disabled="props.disabled"
               label="Max (µs)"
               type="number"
               density="compact"
@@ -447,6 +475,7 @@
           <div class="d-flex flex-column ga-4 mt-4">
             <BlueSelect
               v-model="tempAdvancedParams.script_function"
+              :disabled="props.disabled"
               label="Script Function"
               :items="scriptFunctionOptions"
               theme="dark"
@@ -455,6 +484,7 @@
             />
             <BlueSelect
               v-model="tempAdvancedParams.camera_id"
+              :disabled="props.disabled"
               label="Camera ID"
               :items="cameraIdOptions"
               theme="dark"
@@ -463,6 +493,7 @@
             />
             <BlueSwitch
               v-model="tempAdvancedParams.enable_focus_and_zoom_correlation"
+              :disabled="props.disabled"
               name="focus-zoom-correlation"
               label="Focus/Zoom Correlation"
               theme="dark"
@@ -478,6 +509,7 @@
         >
           <BlueSelect
             v-model="tempAdvancedParams.tilt_channel"
+            :disabled="props.disabled"
             label="PWM Output Channel"
             :items="availableServoChannelOptions"
             theme="dark"
@@ -486,6 +518,7 @@
           <div class="d-flex flex-row ga-3 mt-5">
             <v-text-field
               v-model.number="tempAdvancedParams.tilt_channel_min"
+              :disabled="props.disabled"
               label="Min (µs)"
               type="number"
               density="compact"
@@ -495,6 +528,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.tilt_channel_trim"
+              :disabled="props.disabled"
               label="Trim (µs)"
               type="number"
               density="compact"
@@ -504,6 +538,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.tilt_channel_max"
+              :disabled="props.disabled"
               label="Max (µs)"
               type="number"
               density="compact"
@@ -515,6 +550,7 @@
           <div class="d-flex flex-row ga-3 pt-4">
             <v-text-field
               v-model.number="tempAdvancedParams.tilt_mnt_pitch_min"
+              :disabled="props.disabled"
               label="Pitch Min (°)"
               type="number"
               density="compact"
@@ -524,6 +560,7 @@
             />
             <v-text-field
               v-model.number="tempAdvancedParams.tilt_mnt_pitch_max"
+              :disabled="props.disabled"
               label="Pitch Max (°)"
               type="number"
               density="compact"
@@ -535,12 +572,14 @@
           <div class="d-flex flex-column ga-4 mt-4">
             <BlueSwitch
               v-model="tempAdvancedParams.tilt_channel_reversed"
+              :disabled="props.disabled"
               name="tilt-channel-reversed"
               label="Reverse Direction"
               theme="dark"
             />
             <BlueSelect
               v-model="tempAdvancedParams.tilt_mnt_type"
+              :disabled="props.disabled"
               label="Mount Type"
               :items="mountTypeOptions"
               theme="dark"
@@ -553,6 +592,7 @@
         <!-- Action Buttons -->
         <div class="d-flex flex-row ga-3 mt-5 justify-end">
           <v-btn
+            :disabled="props.disabled"
             class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
@@ -565,7 +605,7 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="!isHardwareSetupComplete || hasDuplicateChannels || isLoading"
+            :disabled="!isHardwareSetupComplete || hasDuplicateChannels || isLoading || props.disabled"
             :loading="isLoading"
             theme="dark"
             @click="saveHardwareSetup"
@@ -578,6 +618,7 @@
   </div>
   <v-dialog
     v-model="openRGBSetpointForm"
+    :disabled="props.disabled"
     width="400px"
   >
     <v-card class="bg-[#363636] text-white">
@@ -587,6 +628,7 @@
       <v-card-text>
         <v-text-field
           v-model="newRGBSetpointProfileName"
+          :disabled="props.disabled"
           label="Profile Name"
           required
           class="my-3 mx-2"
@@ -596,6 +638,7 @@
       </v-card-text>
       <v-card-actions class="px-4">
         <v-btn
+          :disabled="props.disabled"
           variant="text"
           class="opacity-70"
           @click="openRGBSetpointForm = false"
@@ -604,6 +647,7 @@
         </v-btn>
         <v-spacer />
         <v-btn
+          :disabled="props.disabled"
           color="white"
           @click="saveRGBSetpointProfile"
         >
@@ -614,6 +658,7 @@
   </v-dialog>
   <v-dialog
     v-model="openRGBSetpointDelete"
+    :disabled="props.disabled"
     width="400px"
   >
     <v-card class="bg-[#363636] text-white">
@@ -625,6 +670,7 @@
       </v-card-text>
       <v-card-actions class="px-4">
         <v-btn
+          :disabled="props.disabled"
           variant="text"
           class="opacity-70"
           @click="openRGBSetpointDelete = false"
@@ -633,6 +679,7 @@
         </v-btn>
         <v-spacer />
         <v-btn
+          :disabled="props.disabled"
           color="red"
           @click="() => {
             RGBSetpointProfiles = RGBSetpointProfiles.filter(profile => profile.name !== currentRGBSetpointProfile)
