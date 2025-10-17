@@ -310,7 +310,7 @@ impl MavlinkComponent {
                 param_index: -1,
                 target_system,
                 target_component,
-                param_id: Parameter::param_name_to_id(param_name),
+                param_id: param_name.into(),
             });
 
         let mut max_retries = 5;
@@ -427,7 +427,7 @@ impl MavlinkComponent {
         let message = MavMessage::PARAM_SET(mavlink::ardupilotmega::PARAM_SET_DATA {
             target_system,
             target_component,
-            param_id: Parameter::param_name_to_id(&parameter.name),
+            param_id: parameter.name.as_str().into(),
             param_value: parameter.param_value(encoding)?,
             param_type: parameter.param_type(),
         });
