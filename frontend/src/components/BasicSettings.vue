@@ -1614,23 +1614,23 @@ const saveHardwareSetup = async (): Promise<void> => {
 }
 
 onMounted(() => {
-  getInitialCameraStates()
+  getCameraStates()
 })
 
-const getInitialCameraStates = () => {
+const getCameraStates = () => {
   getActuatorsConfig()
   getActuatorsDefaultConfig()
   getActuatorsState()
   getVideoParameters(true)
 }
 
-defineExpose({ getInitialCameraStates })
+defineExpose({ getCameraStates: getCameraStates })
 
 watch(
   () => props.selectedCameraUuid,
   async (newValue) => {
     if (newValue) {
-      getInitialCameraStates()
+      getCameraStates()
     }
   }
 )

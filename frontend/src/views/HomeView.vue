@@ -227,7 +227,7 @@ const isCamera = (data: unknown): data is Omit<Camera, 'uuid'> => {
 }
 
 const refreshCameraStates = () => {
-  cameraControls.value?.getInitialCameraStates()
+  cameraControls.value?.getCameraStates()
 }
 
 const updateLuaScript = (): void => {
