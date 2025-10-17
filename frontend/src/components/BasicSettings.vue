@@ -2,12 +2,12 @@
   <div class="px-6 py-4">
     <ExpansiblePanel
       title="Image"
-      expanded
+      :expanded="isConfigured"
       theme="dark"
     >
       <BlueButtonGroup
         label="Water environment for One-Push White Balance"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         :button-items="[
           { name: 'Green', onSelected: () => (OPWBMode = 'green') },
           { name: 'Blue', onSelected: () => (OPWBMode = 'blue') },
@@ -18,7 +18,7 @@
 
       <BlueButtonGroup
         label="RGB setpoints"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         :button-items="RGBSetpointProfiles"
         :buttons-menu="[
           { name: 'Add new profile', action: () => (openRGBSetpointForm = true), menuItemDisabled: RGBSetpointProfiles.length > 3 },
@@ -29,7 +29,7 @@
         type="switch"
       />
       <ExpansibleOptions
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         :is-open="openRGBSetpointOptions"
         button-class="mt-[-25px] ml-[155px]"
         content-class="mt-4"
@@ -38,7 +38,7 @@
         <div class="flex flex-col justify-end items-end">
           <BlueSlider
             v-model="currentRGBSetpointValue[0]"
-            :disabled="props.disabled"
+            :disabled="!isConfigured || props.disabled"
             name="awb_red"
             label="WB Red"
             color="red"
@@ -52,7 +52,7 @@
           />
           <BlueSlider
             v-model="currentRGBSetpointValue[1]"
-            :disabled="props.disabled"
+            :disabled="!isConfigured || props.disabled"
             name="green-setpoint"
             label="WB Green"
             color="green"
@@ -66,7 +66,7 @@
           />
           <BlueSlider
             v-model="currentRGBSetpointValue[2]"
-            :disabled="props.disabled"
+            :disabled="!isConfigured || props.disabled"
             name="blue-setpoint"
             label="WB Blue"
             color="#0B5087"
@@ -82,7 +82,7 @@
       </ExpansibleOptions>
       <BlueSwitch
         v-model="focusAndZoomParams.enable_focus_and_zoom_correlation"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         name="focus-zoom-correlation"
         label="Focus and zoom correlation"
         theme="dark"
@@ -91,7 +91,7 @@
       />
       <BlueSlider
         v-model="focusOffsetUI"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         name="focus-offset"
         label="Focus offset"
         :min="-10"
@@ -105,12 +105,12 @@
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Video"
-      :expanded="cockpitMode ? false : true"
+      :expanded="isConfigured && !cockpitMode"
       theme="dark"
     >
       <BlueSelect
         v-model="selectedVideoResolution"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         label="Resolution"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
@@ -118,7 +118,7 @@
       />
       <BlueSelect
         v-model="selectedVideoBitrate"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         label="Bitrate"
         :items="bitrateOptions || [{ name: 'No bitrates available', value: null }]"
         theme="dark"
@@ -199,7 +199,7 @@
         class="flex justify-end mt-8 mb-[-20px]"
       >
         <v-btn
-          :disabled="props.disabled"
+          :disabled="!isConfigured || props.disabled"
           class="py-1 px-3 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
           :class="{ 'opacity-50 pointer-events-none': !hasUnsavedVideoChanges }"
           size="small"
@@ -213,13 +213,13 @@
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Actuators"
-      expanded
+      :expanded="isConfigured"
       theme="dark"
     >
       <BlueSlider
         v-if="actuatorsState"
         v-model="actuatorsState.focus"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         name="focus"
         label="Focus"
         :min="0"
@@ -235,7 +235,7 @@
       <BlueSlider
         v-if="actuatorsState"
         v-model="actuatorsState.zoom"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         name="zoom"
         label="Zoom"
         :min="0"
@@ -252,7 +252,7 @@
       <BlueSlider
         v-if="actuatorsState && false"
         v-model="actuatorsState.tilt"
-        :disabled="props.disabled"
+        :disabled="!isConfigured || props.disabled"
         name="tilt"
         label="Tilt"
         :min="0"
@@ -269,7 +269,7 @@
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Hardware setup"
-      :expanded="cockpitMode ? false : true"
+      :expanded="!isConfigured"
       theme="dark"
     >
       <div>
@@ -618,7 +618,7 @@
   </div>
   <v-dialog
     v-model="openRGBSetpointForm"
-    :disabled="props.disabled"
+    :disabled="!isConfigured || props.disabled"
     width="400px"
   >
     <v-card class="bg-[#363636] text-white">
@@ -658,7 +658,7 @@
   </v-dialog>
   <v-dialog
     v-model="openRGBSetpointDelete"
-    :disabled="props.disabled"
+    :disabled="!isConfigured || props.disabled"
     width="400px"
   >
     <v-card class="bg-[#363636] text-white">
@@ -691,6 +691,11 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
+
+  <WelcomeDialog
+    :show="(!isConfigured) && showWelcomeDialog"
+    @close="showWelcomeDialog = false"
+  />
   <Loading :is-loading="isLoading" />
   <ErrorDialog
     :message="errorDialogMessage"
@@ -712,6 +717,7 @@ import axios from 'axios'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
 import { applyNonNull } from '@/utils/jsonUtils'
 import ErrorDialog from './ErrorDialog.vue'
+import WelcomeDialog from './WelcomeDialog.vue'
 
 
 const props = defineProps<{
@@ -813,6 +819,8 @@ const actuatorsState = ref<ActuatorsState>({
   zoom: 0,
   tilt: 0,
 })
+const isConfigured = ref<boolean>(true)
+const showWelcomeDialog = ref<boolean>(true)
 const isLoading = ref<boolean>(false)
 const errorDialogMessage = ref<string | null>(null)
 const hasUnsavedChannelChanges = ref<boolean>(false)
@@ -1167,7 +1175,7 @@ const getActuatorsConfig = () => {
     .catch((error) => {
       const message = 'Error getting actuator configuration'
       console.log(message, error.message)
-      showError(message, error)
+      showWarningToast(message, error)
     })
 }
 
@@ -1185,6 +1193,10 @@ const checkIfConfigured = (error: any) => {
 }
 
 const getActuatorsDefaultConfig = () => {
+  if (!props.selectedCameraUuid) {
+    return
+  }
+
   const payload = {
     camera_uuid: props.selectedCameraUuid,
     action: "getActuatorsDefaultConfig",
@@ -1205,7 +1217,7 @@ const getActuatorsDefaultConfig = () => {
     .catch((error) => {
       const message = 'Error getting actuators default configuration'
       console.log(message, error.message)
-      showError(message, error)
+      showWarningToast(message, error)
     })
 }
 
@@ -1264,7 +1276,7 @@ const getActuatorsState = () => {
     .catch((error) => {
       const message = 'Error getting actuators state'
       console.log(message, error.message)
-      showError(message, error)
+      showWarningToast(message, error)
     })
 }
 
