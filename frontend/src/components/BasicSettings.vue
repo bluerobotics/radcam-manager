@@ -701,6 +701,7 @@
     :message="errorDialogMessage"
     @close="errorDialogMessage = null"
   />
+  <WarningToast :message="warningToastMessage" />
 </template>
 
 <script setup lang="ts">
@@ -823,6 +824,7 @@ const isConfigured = ref<boolean>(true)
 const showWelcomeDialog = ref<boolean>(true)
 const isLoading = ref<boolean>(false)
 const errorDialogMessage = ref<string | null>(null)
+const warningToastMessage = ref<string | null>(null)
 const hasUnsavedChannelChanges = ref<boolean>(false)
 const showAdvancedHardware = ref(false)
 const tempAdvancedParams = ref<ActuatorsParametersConfig>({
@@ -1312,7 +1314,15 @@ const showErrorDialog = (message: string, error: any) => {
 
   const details = error.response?.data?.message || error.response?.data || error.response || error.message || error || 'Unknown error'
   errorDialogMessage.value = `${message}: ${details}`
-})
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const showWarningToast = (message: string, error: any) => {
+  if (error.response?.status === 404 || !checkIfConfigured(error)) return
+  
+  const details = error.response?.data?.message || error.response?.data || error.response || error.message || error || 'Unknown error'
+  warningToastMessage.value = `${message}: ${details}`
+}
 
 const isHardwareSetupComplete = computed<boolean>(() => {
   return (
@@ -1672,4 +1682,13 @@ watch(
     }
   }
 )
+
+watch(warningToastMessage, (newVal) => {
+  if (newVal) {
+    setTimeout(() => {
+      warningToastMessage.value = null
+    }, 5000)
+  }
+})
+
 </script>
