@@ -22,5 +22,6 @@ declare module 'vue' {
     Slider: typeof import('./src/components/Slider.vue')['default']
     SpinningLogo: typeof import('./src/components/common/SpinningLogo.vue')['default']
     StreamsTab: typeof import('./src/components/StreamsTab.vue')['default']
+    WelcomeDialog: typeof import('./src/components/WelcomeDialog.vue')['default']
   }
 }
