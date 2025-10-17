@@ -20,7 +20,7 @@ axum = { version = "0.8.3", features = ["ws"] }
 chrono = { workspace = true }
 futures = { workspace = true }
 indexmap = { workspace = true }
-mavlink = { default-features = false, features = ["std", "tcp", "udp", "direct-serial", "ardupilotmega", "serde", "tokio-1", "format-generated-code", "emit-extensions"], git = "https://github.com/mavlink/rust-mavlink.git", rev = "57379ef" }
+mavlink = { default-features = false, features = ["std", "tcp", "udp", "direct-serial", "ardupilotmega", "serde", "tokio-1", "format-generated-code", "emit-extensions"], git = "https://github.com/mavlink/rust-mavlink.git", tag = "0.16.1" }
 mlua = { version = "0.11.1", default-features = false, features = ["lua54", "vendored", "error-send"] }
 num_enum = { version = "0.7.4" }
 merge-struct = { version = "0.1.0" }
