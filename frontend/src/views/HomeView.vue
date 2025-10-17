@@ -76,7 +76,7 @@
             ref="cameraControls"
             :selected-camera-uuid="selectedCameraUUID"
             :backend-api="backendAPI"
-            :disabled="false"
+            :disabled="selectedCameraUUID == null"
             :cockpit-mode="isCockpitMode"
           />
         </div>
