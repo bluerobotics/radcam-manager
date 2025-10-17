@@ -302,6 +302,9 @@ name = "bitflags"
 version = "2.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "block-buffer"
@@ -2254,15 +2257,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ioctl-rs"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7970510895cee30b3e9128319f2cefd4bde883a39f38baa279567ba3a7eb97d"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2473,10 +2467,10 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mavlink"
-version = "0.14.1"
-source = "git+https://github.com/mavlink/rust-mavlink.git?rev=57379ef#57379ef547e6b3624d5bef38509c1315fed8d4c2"
+version = "0.16.0"
+source = "git+https://github.com/mavlink/rust-mavlink.git?tag=0.16.1#2e75158dd63ce510e1ffc53e38921c52c7ec4ce1"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.9.1",
  "mavlink-bindgen",
  "mavlink-core",
  "num-derive",
@@ -2487,28 +2481,30 @@ dependencies = [
 
 [[package]]
 name = "mavlink-bindgen"
-version = "0.14.1"
-source = "git+https://github.com/mavlink/rust-mavlink.git?rev=57379ef#57379ef547e6b3624d5bef38509c1315fed8d4c2"
+version = "0.16.0"
+source = "git+https://github.com/mavlink/rust-mavlink.git?tag=0.16.1#2e75158dd63ce510e1ffc53e38921c52c7ec4ce1"
 dependencies = [
  "crc-any",
  "lazy_static",
  "proc-macro2",
  "quick-xml",
  "quote",
- "thiserror 1.0.69",
+ "regex",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "mavlink-core"
-version = "0.14.1"
-source = "git+https://github.com/mavlink/rust-mavlink.git?rev=57379ef#57379ef547e6b3624d5bef38509c1315fed8d4c2"
+version = "0.16.0"
+source = "git+https://github.com/mavlink/rust-mavlink.git?tag=0.16.1#2e75158dd63ce510e1ffc53e38921c52c7ec4ce1"
 dependencies = [
  "async-trait",
  "byteorder",
  "crc-any",
+ "futures",
  "serde",
  "serde_arrays",
- "serial",
+ "serialport",
  "tokio",
  "tokio-serial",
 ]
@@ -2964,9 +2960,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.36.2"
+version = "0.38.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
+checksum = "42a232e7487fc2ef313d96dde7948e7a3c05101870d8985e4fd8d26aedd27b89"
 dependencies = [
  "memchr",
 ]
@@ -3452,9 +3448,9 @@ dependencies = [
 
 [[package]]
 name = "serde_arrays"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38636132857f68ec3d5f3eb121166d2af33cb55174c4d5ff645db6165cbef0fd"
+checksum = "94a16b99c5ea4fe3daccd14853ad260ec00ea043b2708d1fd1da3106dcd8d9df"
 dependencies = [
  "serde",
 ]
@@ -3554,48 +3550,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.104",
-]
-
-[[package]]
-name = "serial"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1237a96570fc377c13baa1b88c7589ab66edced652e43ffb17088f003db3e86"
-dependencies = [
- "serial-core",
- "serial-unix",
- "serial-windows",
-]
-
-[[package]]
-name = "serial-core"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f46209b345401737ae2125fe5b19a77acce90cd53e1658cda928e4fe9a64581"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "serial-unix"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f03fbca4c9d866e24a459cbca71283f545a37f8e3e002ad8c70593871453cab7"
-dependencies = [
- "ioctl-rs",
- "libc",
- "serial-core",
- "termios",
-]
-
-[[package]]
-name = "serial-windows"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15c6d3b776267a75d31bbdfd5d36c0ca051251caafc285827052bc53bcdc8162"
-dependencies = [
- "libc",
- "serial-core",
 ]
 
 [[package]]
@@ -3896,15 +3850,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "termios"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5d9cf598a6d7ce700a4e6a9199da127e6819a61e64b68609683cc9a01b5683a"
-dependencies = [
- "libc",
 ]
 
 [[package]]
