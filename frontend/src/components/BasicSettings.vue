@@ -705,7 +705,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import BlueButtonGroup from './BlueButtonGroup.vue'
 import BlueSlider from './BlueSlider.vue'
 import BlueSwitch from './BlueSwitch.vue'
@@ -719,6 +719,7 @@ import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, Actu
 import { applyNonNull } from '@/utils/jsonUtils'
 import ErrorDialog from './ErrorDialog.vue'
 import WelcomeDialog from './WelcomeDialog.vue'
+import { OneMoreTime } from '@/utils/oneMoreTime'
 
 
 const props = defineProps<{
@@ -1613,10 +1614,6 @@ const saveHardwareSetup = async (): Promise<void> => {
     })
 }
 
-onMounted(() => {
-  getCameraStates()
-})
-
 const getCameraStates = () => {
   getActuatorsConfig()
   getActuatorsDefaultConfig()
@@ -1690,5 +1687,7 @@ watch(warningToastMessage, (newVal) => {
     }, 5000)
   }
 })
+
+new OneMoreTime({ delay: 1000, errorDelay: 5000, autostart: true, disposeWith: this }, getCameraStates);
 
 </script>
