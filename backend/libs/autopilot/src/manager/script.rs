@@ -90,8 +90,8 @@ impl Manager {
                         Ok(_) => {
                             if old_value != new_value {
                                 info!(
-                                    "script_channel (SERVO{}) changed from {:?} to {new_value:?}",
-                                    current_parameters.script_channel as u8, old_value
+                                    "script_channel (SERVO{}) changed from {old_value:?} to {new_value:?}",
+                                    current_parameters.script_channel as u8,
                                 );
                                 autopilot_reboot_required = true;
                             }
@@ -124,8 +124,8 @@ impl Manager {
                         Ok(_) => {
                             if overwrite || old_value != new_value {
                                 info!(
-                                    "script_channel (SERVO{}) changed from {:?} to {new_value:?}",
-                                    *channel as u8, old_value
+                                    "script_channel (SERVO{}) changed from {old_value:?} to {new_value:?}",
+                                    *channel as u8
                                 );
                             }
 
@@ -184,10 +184,8 @@ impl Manager {
                 Ok(_) => {
                     if old_value != new_value {
                         info!(
-                            "{} changed from {:?} to {:?}",
+                            "{} changed from {old_value:?} to {new_value:?}",
                             stringify!(enable_focus_and_zoom_correlation),
-                            old_value,
-                            new_value
                         );
                     }
                     current_parameters.enable_focus_and_zoom_correlation = new_value;
@@ -239,10 +237,8 @@ impl Manager {
                 Ok(_) => {
                     if old_value != new_value {
                         info!(
-                            "{} changed from {:?} to {:?}",
+                            "{} changed from {old_value:?} to {new_value:?}",
                             stringify!(focus_margin_gain),
-                            old_value,
-                            new_value
                         );
                     }
                     current_parameters.focus_margin_gain = new_value;
