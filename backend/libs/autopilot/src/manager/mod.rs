@@ -8,6 +8,7 @@ mod zoom;
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
+use mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
 use tracing::*;
@@ -15,7 +16,11 @@ use uuid::Uuid;
 
 use settings::MANAGER as SETTINGS_MANAGER;
 
-use crate::{CameraActuators, api, mavlink::MavlinkComponent};
+use crate::{
+    CameraActuators,
+    api::{self, ServoChannel},
+    mavlink::MavlinkComponent,
+};
 
 pub static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 
@@ -80,21 +85,52 @@ impl Manager {
             .get_mut(camera_uuid)
             .context("Camera's actuators not configured")?;
 
-        let camera_settings = self
+        let servo_output_raw = self
             .mavlink
-            .request_camera_settings((&(actuators).parameters.camera_id).into())
+            .request_servo_output_raw()
             .await
-            .context("Failed waiting for CAMERA_SETTINGS after MAV_CMD_SET_CAMERA_FOCUS")?;
+            .context("Failed waiting for SERVO_OUTPUT_RAW_DATA message")?;
 
-        let current_state = api::ActuatorsState {
-            focus: Some(camera_settings.focusLevel),
-            zoom: Some(camera_settings.zoomLevel),
-            tilt: None, // TODO: Fix this after implementing the tilt API
+        let focus = {
+            let (channel, min, max) = if actuators.parameters.enable_focus_and_zoom_correlation {
+                (
+                    actuators.parameters.script_channel,
+                    actuators.parameters.script_channel_min,
+                    actuators.parameters.script_channel_max,
+                )
+            } else {
+                (
+                    actuators.parameters.focus_channel,
+                    actuators.parameters.focus_channel_min,
+                    actuators.parameters.focus_channel_max,
+                )
+            };
+
+            get_output_raw_from_channel(&servo_output_raw, channel)
+                .map(|value| percentage_within_range(value, min, max))
         };
 
-        actuators.state = current_state;
+        let zoom = {
+            let channel = actuators.parameters.zoom_channel;
+            let min = actuators.parameters.zoom_channel_min;
+            let max = actuators.parameters.zoom_channel_max;
 
-        Ok(current_state)
+            get_output_raw_from_channel(&servo_output_raw, channel)
+                .map(|value| percentage_within_range(value, min, max))
+        };
+
+        let tilt = {
+            let channel = actuators.parameters.tilt_channel;
+            let min = actuators.parameters.tilt_channel_min;
+            let max = actuators.parameters.tilt_channel_max;
+
+            get_output_raw_from_channel(&servo_output_raw, channel)
+                .map(|value| percentage_within_range(value, min, max))
+        };
+
+        actuators.state = api::ActuatorsState { focus, zoom, tilt };
+
+        Ok(actuators.state)
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -104,19 +140,6 @@ impl Manager {
         new_state: &api::ActuatorsState,
     ) -> Result<api::ActuatorsState> {
         use ::mavlink::ardupilotmega::{COMMAND_LONG_DATA, CameraZoomType, MavCmd, SetFocusType};
-
-        let actuators = self
-            .settings
-            .actuators
-            .get_mut(camera_uuid)
-            .context("Camera's actuators not configured")?;
-
-        // TODO: we should just wait before sending commands
-        // let wait_camera_settings_handle = tokio::spawn({
-        //     let inner = self.inner.clone();
-
-        //     Self::wait_camera_settings(inner)
-        // });
 
         if let Some(focus) = new_state.focus {
             self.mavlink
@@ -150,20 +173,7 @@ impl Manager {
                 .context("Failed sending MAV_CMD_SET_CAMERA_ZOOM command")?;
         }
 
-        let camera_settings = self
-            .mavlink
-            .request_camera_settings((&actuators.parameters.camera_id).into())
-            .await
-            .context("Failed waiting for CAMERA_SETTINGS after MAV_CMD_SET_CAMERA_FOCUS")?;
-
-        if new_state.focus.is_some() || new_state.zoom.is_some() {
-            actuators.state.focus = none_if_nan(camera_settings.focusLevel);
-            actuators.state.zoom = none_if_nan(camera_settings.zoomLevel);
-        }
-
-        if let Some(_tilt) = new_state.tilt {
-            warn!("TILT NOT IMPLEMENTED!");
-        }
+        let _ = self.get_state(camera_uuid).await;
 
         Ok(*new_state)
     }
@@ -274,6 +284,32 @@ pub async fn init(
     Ok(())
 }
 
-fn none_if_nan(value: f32) -> Option<f32> {
-    if value.is_nan() { None } else { Some(value) }
+fn get_output_raw_from_channel(data: &SERVO_OUTPUT_RAW_DATA, channel: ServoChannel) -> Option<u16> {
+    match channel {
+        ServoChannel::SERVO1 => Some(data.servo1_raw),
+        ServoChannel::SERVO2 => Some(data.servo2_raw),
+        ServoChannel::SERVO3 => Some(data.servo3_raw),
+        ServoChannel::SERVO4 => Some(data.servo4_raw),
+        ServoChannel::SERVO5 => Some(data.servo5_raw),
+        ServoChannel::SERVO6 => Some(data.servo6_raw),
+        ServoChannel::SERVO7 => Some(data.servo7_raw),
+        ServoChannel::SERVO8 => Some(data.servo8_raw),
+        ServoChannel::SERVO9 => Some(data.servo9_raw),
+        ServoChannel::SERVO10 => Some(data.servo10_raw),
+        ServoChannel::SERVO11 => Some(data.servo11_raw),
+        ServoChannel::SERVO12 => Some(data.servo12_raw),
+        ServoChannel::SERVO13 => Some(data.servo13_raw),
+        ServoChannel::SERVO14 => Some(data.servo14_raw),
+        ServoChannel::SERVO15 => Some(data.servo15_raw),
+        ServoChannel::SERVO16 => Some(data.servo16_raw),
+        _ => None,
+    }
+}
+
+fn percentage_within_range(value: u16, min: u16, max: u16) -> f32 {
+    if max == min {
+        return 0.0;
+    }
+    let clamped = value.clamp(min, max);
+    (100.0 * ((clamped - min) as f32 / (max - min) as f32)).round()
 }

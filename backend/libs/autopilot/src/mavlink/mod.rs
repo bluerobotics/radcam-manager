@@ -7,9 +7,8 @@ use anyhow::{Context, Result, anyhow};
 use indexmap::IndexMap;
 use mavlink::{
     self, MavHeader, Message as _, MessageData,
-    ardupilotmega::{CAMERA_SETTINGS_DATA, COMMAND_LONG_DATA, MavCmd, MavMessage, MavResult},
+    ardupilotmega::{COMMAND_LONG_DATA, MavCmd, MavMessage, MavResult, SERVO_OUTPUT_RAW_DATA},
 };
-use settings::CameraID;
 use tokio::sync::{RwLock, broadcast};
 use tracing::*;
 
@@ -321,12 +320,11 @@ impl MavlinkComponent {
                 }
             };
 
-            match tokio::time::timeout(tokio::time::Duration::from_secs(5), wait_command_ack).await
+            match tokio::time::timeout(tokio::time::Duration::from_secs(1), wait_command_ack).await
             {
                 Ok(res) => return res,
                 Err(_) => {
                     warn!("Timeout for command {:?}, retrying", command.command);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }
         }
@@ -334,34 +332,32 @@ impl MavlinkComponent {
         Ok(())
     }
 
-    pub async fn request_camera_settings(
-        &self,
-        camera_id: CameraID,
-    ) -> Result<CAMERA_SETTINGS_DATA> {
+    pub async fn request_servo_output_raw(&self) -> Result<SERVO_OUTPUT_RAW_DATA> {
         let target_system = self.inner.system_id;
         let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
 
-        let wait_camera_settings_handle = tokio::spawn({
+        let wait_servo_output_raw_handle = tokio::spawn({
             let inner = self.inner.clone();
 
-            Self::wait_camera_settings(inner)
+            Self::wait_servo_output_raw(inner)
         });
 
-        // TODO: use camera_id to get from the specific camera
         self.send_command(COMMAND_LONG_DATA {
             command: MavCmd::MAV_CMD_REQUEST_MESSAGE,
             target_system,
             target_component,
             confirmation: 0,
-            param1: CAMERA_SETTINGS_DATA::ID as f32,
+            param1: SERVO_OUTPUT_RAW_DATA::ID as f32,
             ..Default::default()
         })
         .await?;
 
-        wait_camera_settings_handle.await?
+        wait_servo_output_raw_handle.await?
     }
 
-    pub async fn wait_camera_settings(inner: Arc<ComponentInner>) -> Result<CAMERA_SETTINGS_DATA> {
+    pub async fn wait_servo_output_raw(
+        inner: Arc<ComponentInner>,
+    ) -> Result<SERVO_OUTPUT_RAW_DATA> {
         let target_system = inner.system_id;
         let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
         let mut receiver = inner.get_receiver().await;
@@ -374,10 +370,14 @@ impl MavlinkComponent {
                     Ok(Message::Received((recv_header, recv_message)))
                         if recv_header.system_id == target_system
                             && recv_header.component_id == target_component
-                            && recv_message.message_id() == CAMERA_SETTINGS_DATA::ID =>
+                            && recv_message.message_id() == SERVO_OUTPUT_RAW_DATA::ID =>
                     {
-                        if let MavMessage::CAMERA_SETTINGS(camera_settings) = recv_message {
-                            return Ok(camera_settings);
+                        if let MavMessage::SERVO_OUTPUT_RAW(servo_output_raw) = recv_message {
+                            if servo_output_raw.port == 0 {
+                                return Ok(servo_output_raw);
+                            }
+
+                            continue;
                         }
                     }
                     Ok(_) => continue,
@@ -392,7 +392,7 @@ impl MavlinkComponent {
             }
         };
 
-        match tokio::time::timeout(tokio::time::Duration::from_secs(5), wait_message).await {
+        match tokio::time::timeout(tokio::time::Duration::from_secs(1), wait_message).await {
             Ok(res) => res,
             Err(_) => Err(anyhow!("Timeout waiting")),
         }
