@@ -1127,8 +1127,6 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
     },
   }
 
-  console.log(payload)
-
   axios
     .post(`${props.backendApi}/camera/control`, payload)
     .then((response) => {
@@ -1151,8 +1149,6 @@ const getActuatorsConfig = () => {
     action: "getActuatorsConfig",
   }
   
-  console.log('# - getActuatorsConfig payload:', payload)
-
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
     .then((response) => {
@@ -1237,8 +1233,6 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
     json: { "parameters": { [param]: value } as ActuatorsParametersConfig} as ActuatorsConfig
   }
 
-  console.log(payload)
-
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
     .then((response) => {
@@ -1266,8 +1260,6 @@ const getActuatorsState = () => {
     action: "getActuatorsState",
   }
 
-  console.log(payload)
-
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
     .then((response) => {
@@ -1291,8 +1283,6 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
     action: "setActuatorsState",
     json: { [param]: value } as ActuatorsState
   }
-
-  console.log(payload)
 
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
