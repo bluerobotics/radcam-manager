@@ -46,20 +46,20 @@
               class="font-bold select-none"
               draggable="false"
             >
-              {{ formatValue ? formatValue(currentSliderValue) : (step && step < 1 ? currentSliderValue?.toFixed(1) || '0' : currentSliderValue.toFixed(0)) }}
+              {{ formatDisplay ? formatDisplay(scaledValue) : (step && step < 1 ? scaledValue?.toFixed(1) || '0' : scaledValue.toFixed(0)) }}
             </p>
           </div>
           <div v-else>
             <input
               ref="editInput"
-              v-model.number="currentSliderValue"
+              v-model.number="scaledValueForEdit"
               type="number"
-              :min="min"
-              :max="max"
+              :min="displayMin"
+              :max="displayMax"
               :step="step || 0.1"
               autofocus
               class="bg-white border border-gray-300 rounded px-1 py-0.5"
-              @input="currentSliderValue = Math.min(Math.max(currentSliderValue || 0, min), max)"
+              @input="clampEditedValue"
               @keydown="handleValueChange"
               @blur="isEditingCurrentSliderValue = false"
             >
@@ -82,13 +82,13 @@
           class="absolute min-w-[30px] ml-[10px] mt-1 text-[15px] text-center z-10 pointer-events-none"
           :class="theme === 'dark' ? 'text-[#ffffff44]' : 'text-[#00000066]'"
         >
-          {{ labelMin || min }}
+          {{ labelMinDisplay }}
         </p>
         <p
           class="absolute right-0 min-w-[30px] mr-[10px] mt-1 text-[15px] text-center z-10 pointer-events-none"
           :class="theme === 'dark' ? 'text-[#ffffff44]' : 'text-[#00000066]'"
         >
-          {{ labelMax || max }}
+          {{ labelMaxDisplay }}
         </p>
         <div
           v-if="isEditingCurrentSliderValue"
@@ -116,8 +116,6 @@ const props = defineProps<{
   labelMax?: string
   /** Custom text for the min label. */
   labelMin?: string
-  /** Custom text for the pill value */
-  formatValue?: (raw: number) => string
   /** Maximum allowed value. */
   max: number
   /** Minimum allowed value. */
@@ -132,24 +130,58 @@ const props = defineProps<{
   width?: string
   /** Model value for v-model */
   modelValue: number | null
+  /** Function to scale the internal percentage value to a display value */
+  scaleFn?: (raw: number) => number
+  /** Function to unscale the displayed value to the internal percentage value */
+  unscaleFn?: (scaled: number) => number
+  /** Function format scaled values, converting them to strings */
+  formatDisplay?: (scaled: number) => string
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: number | null): void
 }>()
 
-const currentSliderValue = ref<number>(props.modelValue || props.min)
+// Raw value (internal logic always uses this)
+const currentSliderValue = ref<number>(props.modelValue ?? props.min)
 const lastSentValue = ref<number>(currentSliderValue.value)
+
+// Editing state
 const isEditingCurrentSliderValue = ref(false)
-const staticFillWidth = ref<number>(0)
+const scaledValueForEdit = ref(0)
+const editedDisplayValue = ref<number>(0)
 
-let sliderInterval: number | null = null
-let isSliding = false
+// Derived display values
+const scaledValue = computed(() => 
+  props.scaleFn ? props.scaleFn(currentSliderValue.value) : currentSliderValue.value
+)
 
+const labelMinDisplay = computed(() =>
+  props.formatDisplay 
+    ? props.formatDisplay(props.scaleFn ? props.scaleFn(props.min) : props.min)
+    : props.labelMin || props.min
+)
+
+const labelMaxDisplay = computed(() =>
+  props.formatDisplay 
+    ? props.formatDisplay(props.scaleFn ? props.scaleFn(props.max) : props.max)
+    : props.labelMax || props.max
+)
+
+const displayValue = computed(() => {
+  const raw = currentSliderValue.value
+  return props.scaleFn ? props.scaleFn(raw) : raw
+})
+
+const displayMin = computed(() => props.scaleFn ? props.scaleFn(props.min) : props.min)
+const displayMax = computed(() => props.scaleFn ? props.scaleFn(props.max) : props.max)
+
+// Pill position logic
 const fillWidth = computed(() => {
-  const val = currentSliderValue.value ?? props.min
+  const val = currentSliderValue.value
   return ((val - props.min) / (props.max - props.min)) * 100
 })
+const staticFillWidth = ref<number>(0)
 
 const pillLeft = computed(() =>                      
   `calc((100% - 70px) * ${                           
@@ -164,11 +196,38 @@ const sendValue = (val: number) => {
   emit('update:modelValue', val)
 }
 
+// Slider input → update raw
 const onSliderInput = (): void => {
-  currentSliderValue.value = Math.min(Math.max(currentSliderValue.value ?? props.min, props.min), props.max)
-  if (!isSliding) sendValue(currentSliderValue.value)
+  const clamped = Math.min(Math.max(currentSliderValue.value, props.min), props.max)
+  currentSliderValue.value = clamped
+  if (!isSliding) sendValue(clamped)
 }
 
+// Handle double-click edit start
+watch(isEditingCurrentSliderValue, (v) => {
+  if (v) {
+    staticFillWidth.value = fillWidth.value
+    editedDisplayValue.value = displayValue.value
+  } else {
+    // Commit edited value
+    if (props.unscaleFn) {
+      const raw = props.unscaleFn(editedDisplayValue.value)
+      currentSliderValue.value = Math.min(Math.max(raw, props.min), props.max)
+    } else {
+      currentSliderValue.value = Math.min(Math.max(editedDisplayValue.value, props.min), props.max)
+    }
+    sendValue(currentSliderValue.value)
+  }
+})
+
+// Clamp during input
+const clampEditedValue = () => {
+  editedDisplayValue.value = Math.min(Math.max(editedDisplayValue.value, displayMin.value), displayMax.value)
+}
+
+// Sliding logic (for continuous updates)
+let sliderInterval: number | null = null
+let isSliding = false
 const startSliding = (): void => {
   isSliding = true
   if (!sliderInterval) {
@@ -187,25 +246,36 @@ const stopSliding = (): void => {
   sendValue(currentSliderValue.value)
 }
 
+// Keyboard handling
 const handleValueChange = (e: KeyboardEvent): void => {
   if (e.key === 'Escape') {
     isEditingCurrentSliderValue.value = false
     currentSliderValue.value = lastSentValue.value
   } else if (e.key === 'Enter') {
     isEditingCurrentSliderValue.value = false
-    currentSliderValue.value = Math.min(Math.max(currentSliderValue.value || 0, props.min), props.max)
-    sendValue(currentSliderValue.value)
   }
 }
 
+// Sync from parent
 watch(
   () => props.modelValue,
   (v) => (currentSliderValue.value = v ?? props.min),
   { immediate: true }
 )
 
-watch(isEditingCurrentSliderValue, (v) => {         
-  if (v) staticFillWidth.value = fillWidth.value
+watch(isEditingCurrentSliderValue, (isEditing) => {
+  if (isEditing) {
+    scaledValueForEdit.value = scaledValue.value
+    staticFillWidth.value = fillWidth.value
+  } else {
+    if (props.unscaleFn) {
+      const raw = props.unscaleFn(scaledValueForEdit.value)
+      currentSliderValue.value = Math.min(Math.max(raw, props.min), props.max)
+    } else {
+      currentSliderValue.value = Math.min(Math.max(scaledValueForEdit.value, props.min), props.max)
+    }
+    sendValue(currentSliderValue.value)
+  }
 })
 
 onBeforeUnmount(() => {
