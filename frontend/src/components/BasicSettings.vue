@@ -15,71 +15,6 @@
         theme="dark"
         type="switch"
       />
-
-      <BlueButtonGroup
-        label="RGB setpoints"
-        :disabled="!isConfigured || props.disabled"
-        :button-items="RGBSetpointProfiles"
-        :buttons-menu="[
-          { name: 'Add new profile', action: () => (openRGBSetpointForm = true), menuItemDisabled: RGBSetpointProfiles.length > 3 },
-          { name: 'Delete profile', action: () => openRGBSetpointDelete = true, menuItemDisabled: RGBSetpointProfiles.length === 1 },
-        ]"
-        theme="dark"
-        class="mt-5"
-        type="switch"
-      />
-      <ExpansibleOptions
-        :disabled="!isConfigured || props.disabled"
-        :is-open="openRGBSetpointOptions"
-        button-class="mt-[-25px] ml-[155px]"
-        content-class="mt-4"
-        :class="{ 'border-b-[1px] border-[#ffffff11] pb-2': openRGBSetpointOptions }"
-      >
-        <div class="flex flex-col justify-end items-end">
-          <BlueSlider
-            v-model="currentRGBSetpointValue[0]"
-            :disabled="!isConfigured || props.disabled"
-            name="awb_red"
-            label="WB Red"
-            color="red"
-            :min="0"
-            :max="255"
-            :step="1"
-            width="320px"
-            theme="dark"
-            class="scale-80 origin-right"
-            @update:model-value="applyRGBSetpointColor('red', $event ?? 0)"
-          />
-          <BlueSlider
-            v-model="currentRGBSetpointValue[1]"
-            :disabled="!isConfigured || props.disabled"
-            name="green-setpoint"
-            label="WB Green"
-            color="green"
-            :min="0"
-            :max="255"
-            :step="1"
-            width="320px"
-            theme="dark"
-            class="scale-80 origin-right ml-4"
-            @update:model-value="applyRGBSetpointColor('green', $event ?? 0)"
-          />
-          <BlueSlider
-            v-model="currentRGBSetpointValue[2]"
-            :disabled="!isConfigured || props.disabled"
-            name="blue-setpoint"
-            label="WB Blue"
-            color="#0B5087"
-            :min="0"
-            :max="255"
-            :step="1"
-            width="320px"
-            theme="dark"
-            class="scale-80 origin-right ml-4"
-            @update:model-value="applyRGBSetpointColor('blue', $event ?? 0)"
-          />
-        </div>
-      </ExpansibleOptions>
       <BlueSwitch
         v-model="currentFocusAndZoomParams.enable_focus_and_zoom_correlation"
         :disabled="!isConfigured || props.disabled"
@@ -626,82 +561,7 @@
       </div>
     </ExpansiblePanel>
   </div>
-  <v-dialog
-    v-model="openRGBSetpointForm"
-    :disabled="!isConfigured || props.disabled"
-    width="400px"
-  >
-    <v-card class="bg-[#363636] text-white">
-      <v-card-title class="text-h6 text-center py-4">
-        RGB Setpoint Profile
-      </v-card-title>
-      <v-card-text>
-        <v-text-field
-          v-model="newRGBSetpointProfileName"
-          :disabled="props.disabled"
-          label="Profile Name"
-          required
-          class="my-3 mx-2"
-          counter="10"
-          maxlength="10"
-        />
-      </v-card-text>
-      <v-card-actions class="px-4">
-        <v-btn
-          :disabled="props.disabled"
-          variant="text"
-          class="opacity-70"
-          @click="openRGBSetpointForm = false"
-        >
-          Cancel
-        </v-btn>
-        <v-spacer />
-        <v-btn
-          :disabled="props.disabled"
-          color="white"
-          @click="saveRGBSetpointProfile"
-        >
-          Save
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
-  <v-dialog
-    v-model="openRGBSetpointDelete"
-    :disabled="!isConfigured || props.disabled"
-    width="400px"
-  >
-    <v-card class="bg-[#363636] text-white">
-      <v-card-title class="text-h6 text-center py-4">
-        Delete RGB Setpoint Profile
-      </v-card-title>
-      <v-card-text>
-        Are you sure you want to delete the profile "{{ currentRGBSetpointProfile }}"?
-      </v-card-text>
-      <v-card-actions class="px-4">
-        <v-btn
-          :disabled="props.disabled"
-          variant="text"
-          class="opacity-70"
-          @click="openRGBSetpointDelete = false"
-        >
-          Cancel
-        </v-btn>
-        <v-spacer />
-        <v-btn
-          :disabled="props.disabled"
-          color="red"
-          @click="() => {
-            RGBSetpointProfiles = RGBSetpointProfiles.filter(profile => profile.name !== currentRGBSetpointProfile)
-            openRGBSetpointDelete = false
-          }"
-        >
-          Delete
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
-
+  
   <WelcomeDialog
     :show="(!isConfigured) && showWelcomeDialog"
     @close="showWelcomeDialog = false"
@@ -721,7 +581,6 @@ import BlueSlider from './BlueSlider.vue'
 import BlueSwitch from './BlueSwitch.vue'
 import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
-import ExpansibleOptions from './ExpansibleOptions.vue'
 import Loading from './Loading.vue'
 import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue } from '@/bindings/radcam'
 import axios from 'axios'
@@ -812,20 +671,10 @@ const currentFocusAndZoomParams = ref<ActuatorsParametersConfig>({
 })
 
 const OPWBMode = ref('green')
-const openRGBSetpointOptions = ref(false)
-const openRGBSetpointForm = ref(false)
-const newRGBSetpointProfileName = ref('')
-const currentRGBSetpointValue = ref<number[]>([
-  baseParams.value.awb_red || 0,
-  baseParams.value.awb_green || 0,
-  baseParams.value.awb_blue || 0,
-])
-const currentRGBSetpointProfile = ref<string | null>('Custom 1')
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const selectedVideoBitrate = ref<number | null>(null)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
 const downloadedVideoParameters = ref<VideoParameterSettings>({})
-const openRGBSetpointDelete = ref(false)
 const actuatorsState = ref<ActuatorsState>({
   focus: 0,
   zoom: 0,
@@ -899,21 +748,6 @@ const tempVideoChanges = ref<{
   pic_height: null,
   bitrate: null,
 })
-
-const RGBSetpointProfiles = ref([
-  {
-    name: 'Custom 1',
-    onSelected: () => applyRGBSetpointProfile('Custom 1'),
-    options: { awb_red: 0, awb_green: 0, awb_blue: 0 },
-    preSelected: currentRGBSetpointProfile.value === 'Custom 1',
-  },
-  {
-    name: 'Custom 2',
-    onSelected: () => applyRGBSetpointProfile('Custom 2'),
-    options: { awb_red: 150, awb_green: 150, awb_blue: 150 },
-    preSelected: currentRGBSetpointProfile.value === 'Custom 2',
-  },
-])
 
 const resolutionOptions = ref([
   { name: '3840x2160', value: { width: 3840, height: 2160 } },
@@ -1112,79 +946,6 @@ const unscaleTilt = (scaled: number): number => {
 
 const formatTiltValue = (angle: number): string => {
   return `${angle.toFixed(1)}°`
-}
-
-const saveRGBSetpointProfile = () => {
-  if (!newRGBSetpointProfileName.value) {
-    console.error('Profile name is required')
-    return
-  }
-  const profileName = newRGBSetpointProfileName.value
-  RGBSetpointProfiles.value.push({
-    name: profileName,
-    onSelected: () => applyRGBSetpointProfile(profileName),
-    options: {
-      awb_red: 0,
-      awb_green: 0,
-      awb_blue: 0,
-    },
-    preSelected: currentRGBSetpointProfile.value === profileName,
-  })
-  openRGBSetpointForm.value = false
-  newRGBSetpointProfileName.value = ''
-}
-
-const applyRGBSetpointColor = (color: 'red' | 'green' | 'blue', value: number) => {
-  console.log(`Applying RGB setpoint color: ${color} with value: ${value}`)
-  switch (color) {
-    case 'red':
-      currentRGBSetpointValue.value[0] = value
-      updateBaseParameter('awb_red', value)
-      RGBSetpointProfiles.value.forEach((profile) => {
-        if (profile.name === currentRGBSetpointProfile.value) {
-          profile.options.awb_red = value
-        }
-      })
-      break
-    case 'green':
-      currentRGBSetpointValue.value[1] = value
-      updateBaseParameter('awb_green', value)
-      RGBSetpointProfiles.value.forEach((profile) => {
-        if (profile.name === currentRGBSetpointProfile.value) {
-          profile.options.awb_green = value
-        }
-      })
-      break
-    case 'blue':
-      currentRGBSetpointValue.value[2] = value
-      updateBaseParameter('awb_blue', value)
-      RGBSetpointProfiles.value.forEach((profile) => {
-        if (profile.name === currentRGBSetpointProfile.value) {
-          profile.options.awb_blue = value
-        }
-      })
-      break
-  }
-}
-
-const applyRGBSetpointProfile = (profileName: string) => {
-  const profile = RGBSetpointProfiles.value.find((profile) => profile.name === profileName)
-  if (!profile) {
-    console.error('Profile not found')
-    return
-  }
-  console.log(`Applying RGB setpoint profile: ${profileName}`)
-
-  currentRGBSetpointProfile.value = profileName
-  currentRGBSetpointValue.value = [
-    profile.options.awb_red || 0,
-    profile.options.awb_green || 0,
-    profile.options.awb_blue || 0,
-  ]
-
-  updateBaseParameter('awb_red', profile.options.awb_red)
-  updateBaseParameter('awb_green', profile.options.awb_green)
-  updateBaseParameter('awb_blue', profile.options.awb_blue)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
