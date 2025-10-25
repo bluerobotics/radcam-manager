@@ -224,8 +224,10 @@
         label="Focus"
         :min="0"
         :max="100"
-        :step="1"
-        :format-value="formatFocusValue"
+        :step="0.1"
+        :format-display="formatFocusValue"
+        :scale-fn="scaleFocus"
+        :unscale-fn="unscaleFocus"
         label-min="0.5m"
         label-max="∞"
         width="400px"
@@ -241,7 +243,9 @@
         :min="0"
         :max="100"
         :step="1"
-        :format-value="formatZoomValue"
+        :format-display="formatZoomValue"
+        :scale-fn="scaleZoom"
+        :unscale-fn="unscaleZoom"
         label-min="1x"
         label-max="3x"
         width="400px"
@@ -258,9 +262,11 @@
         :min="0"
         :max="100"
         :step="1"
-        :format-value="formatTiltValue"
-        :label-min="`${currentFocusAndZoomParams.tilt_mnt_pitch_min !== null ? currentFocusAndZoomParams.tilt_mnt_pitch_min : -90}°`"
-        :label-max="`${currentFocusAndZoomParams.tilt_mnt_pitch_max !== null ? currentFocusAndZoomParams.tilt_mnt_pitch_max : 90}°`"
+        :format-display="formatTiltValue"
+        :scale-fn="scaleTilt"
+        :unscale-fn="unscaleTilt"
+        :label-min="`${currentFocusAndZoomParams.tilt_mnt_pitch_min}` || ''"
+        :label-max="`${currentFocusAndZoomParams.tilt_mnt_pitch_max}` || ''"
         width="400px"
         theme="dark"
         class="mt-6"
@@ -1059,20 +1065,25 @@ const onFocusOffsetChange = (uiVal: number): void => {
   updateActuatorsConfig('focus_channel_trim', raw)
 }
 
-const formatFocusValue = (raw: number): string => {
-  if (raw >= 100) {
-    return '∞'
-  }
-  // Map 0–99.99 → 0.5m – ~50m
-  const ratio = raw / 100 // [0, 1)
-  const distance = 0.5 / (1 - ratio)
+// Focus: raw [0–100] → distance [0.5 – 50]
+const scaleFocus = (raw: number): number => {
+  const ratio = raw / 100
+  const distance = (0.5 / (1 - ratio))
+  return Math.min(distance, 50)
+}
 
-  // Optional: cap for readability (e.g., don't show 1234.56m)
+const unscaleFocus = (scaled: number): number => {
+  return 100 * (1 - 0.5 / scaled)
+}
+
+const formatFocusValue = (distance: number): string => {
   if (distance >= 50) {
     return '50m+'
   }
 
-  // Round to 1 decimal for <10m, whole number otherwise
+  if (distance < 1) {
+    return `${distance.toFixed(2)}m`
+  }
   if (distance < 10) {
     return `${distance.toFixed(1)}m`
   } else {
@@ -1080,17 +1091,26 @@ const formatFocusValue = (raw: number): string => {
   }
 }
 
-const formatZoomValue = (raw: number): string => {
-  const zoomLevel = 1.0 + (raw / 100) * 2.0
+const scaleZoom = (raw: number): number => 1.0 + (raw / 100) * 2.0
+const unscaleZoom = (scaled: number): number => ((scaled - 1.0) / 2.0) * 100
+const formatZoomValue = (zoomLevel: number): string => {
   return `${zoomLevel.toFixed(1)}x`
 }
 
-const formatTiltValue = (raw: number): string => {
+const scaleTilt = (raw: number): number => {
   const minAngle = currentFocusAndZoomParams.value.tilt_mnt_pitch_min ?? -90
   const maxAngle = currentFocusAndZoomParams.value.tilt_mnt_pitch_max ?? 90
+  return minAngle + (raw / 100) * (maxAngle - minAngle)
+}
 
-  // Map raw [0, 100] → [minAngle, maxAngle]
-  const angle = minAngle + (raw / 100) * (maxAngle - minAngle)
+const unscaleTilt = (scaled: number): number => {
+  const minAngle = currentFocusAndZoomParams.value.tilt_mnt_pitch_min ?? -90
+  const maxAngle = currentFocusAndZoomParams.value.tilt_mnt_pitch_max ?? 90
+  if (maxAngle === minAngle) return 0
+  return 100 * (scaled - minAngle) / (maxAngle - minAngle)
+}
+
+const formatTiltValue = (angle: number): string => {
   return `${angle.toFixed(1)}°`
 }
 
