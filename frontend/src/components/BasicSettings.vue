@@ -17,6 +17,98 @@
       />
     </ExpansiblePanel>
     <ExpansiblePanel
+      title="Actuators"
+      :expanded="isConfigured"
+      theme="dark"
+    >
+      <BlueSlider
+        v-if="actuatorsState"
+        v-model="actuatorsState.focus"
+        :disabled="!isConfigured || props.disabled"
+        name="focus"
+        label="Focus"
+        :min="0"
+        :max="100"
+        :step="0.1"
+        :format-display="formatFocusValue"
+        :scale-fn="scaleFocus"
+        :unscale-fn="unscaleFocus"
+        label-min="0.5m"
+        label-max="∞"
+        width="400px"
+        theme="dark"
+        @update:model-value="updateActuatorsState('focus', $event as number)"
+      />
+      <BlueSlider
+        v-if="actuatorsState"
+        v-model="actuatorsState.zoom"
+        :disabled="!isConfigured || props.disabled"
+        name="zoom"
+        label="Zoom"
+        :min="0"
+        :max="100"
+        :step="1"
+        :format-display="formatZoomValue"
+        :scale-fn="scaleZoom"
+        :unscale-fn="unscaleZoom"
+        label-min="1x"
+        label-max="3x"
+        width="400px"
+        theme="dark"
+        class="mt-6"
+        @update:model-value="updateActuatorsState('zoom', $event as number)"
+      />
+      <BlueSlider
+        v-if="actuatorsState && false"
+        v-model="actuatorsState.tilt"
+        :disabled="!isConfigured || props.disabled"
+        name="tilt"
+        label="Tilt"
+        :min="0"
+        :max="100"
+        :step="1"
+        :format-display="formatTiltValue"
+        :scale-fn="scaleTilt"
+        :unscale-fn="unscaleTilt"
+        :label-min="`${currentFocusAndZoomParams.tilt_mnt_pitch_min}` || ''"
+        :label-max="`${currentFocusAndZoomParams.tilt_mnt_pitch_max}` || ''"
+        width="400px"
+        theme="dark"
+        class="mt-6"
+        @update:model-value="updateActuatorsState('tilt', $event as number)"
+      />
+      <ExpansiblePanel
+        class="d-flex flex-col align-end mt-4"
+        title="more"
+        :expanded="isConfigured && !cockpitMode"
+        theme="dark"
+      >
+        <div>
+          <BlueSwitch
+            v-model="currentFocusAndZoomParams.enable_focus_and_zoom_correlation"
+            :disabled="!isConfigured || props.disabled"
+            name="focus-zoom-correlation"
+            label="Enable focus and zoom correlation"
+            theme="dark"
+            @update:model-value="updateActuatorsConfig('enable_focus_and_zoom_correlation', $event)"
+          />
+          <BlueSlider
+            v-model="focusOffsetUI"
+            :disabled="!isConfigured || props.disabled"
+            name="focus-offset"
+            label="Focus compensation"
+            :min="-10"
+            :max="10"
+            :step="0.1"
+            width="400px"
+            theme="dark"
+            class="mt-6"
+            @update:model-value="onFocusOffsetChange($event ?? 0)"
+          />
+        </div>
+      </ExpansiblePanel>
+    </ExpansiblePanel>
+    <ExpansiblePanel
       title="Video"
       :expanded="isConfigured && !cockpitMode"
       theme="dark"
@@ -123,98 +215,6 @@
           SAVE AND RESTART CAMERA
         </v-btn>
       </div>
-    </ExpansiblePanel>
-    <ExpansiblePanel
-      title="Actuators"
-      :expanded="isConfigured"
-      theme="dark"
-    >
-      <BlueSlider
-        v-if="actuatorsState"
-        v-model="actuatorsState.focus"
-        :disabled="!isConfigured || props.disabled"
-        name="focus"
-        label="Focus"
-        :min="0"
-        :max="100"
-        :step="0.1"
-        :format-display="formatFocusValue"
-        :scale-fn="scaleFocus"
-        :unscale-fn="unscaleFocus"
-        label-min="0.5m"
-        label-max="∞"
-        width="400px"
-        theme="dark"
-        @update:model-value="updateActuatorsState('focus', $event as number)"
-      />
-      <BlueSlider
-        v-if="actuatorsState"
-        v-model="actuatorsState.zoom"
-        :disabled="!isConfigured || props.disabled"
-        name="zoom"
-        label="Zoom"
-        :min="0"
-        :max="100"
-        :step="1"
-        :format-display="formatZoomValue"
-        :scale-fn="scaleZoom"
-        :unscale-fn="unscaleZoom"
-        label-min="1x"
-        label-max="3x"
-        width="400px"
-        theme="dark"
-        class="mt-6"
-        @update:model-value="updateActuatorsState('zoom', $event as number)"
-      />
-      <BlueSlider
-        v-if="actuatorsState && false"
-        v-model="actuatorsState.tilt"
-        :disabled="!isConfigured || props.disabled"
-        name="tilt"
-        label="Tilt"
-        :min="0"
-        :max="100"
-        :step="1"
-        :format-display="formatTiltValue"
-        :scale-fn="scaleTilt"
-        :unscale-fn="unscaleTilt"
-        :label-min="`${currentFocusAndZoomParams.tilt_mnt_pitch_min}` || ''"
-        :label-max="`${currentFocusAndZoomParams.tilt_mnt_pitch_max}` || ''"
-        width="400px"
-        theme="dark"
-        class="mt-6"
-        @update:model-value="updateActuatorsState('tilt', $event as number)"
-      />
-      <ExpansiblePanel
-        class="d-flex flex-col align-end mt-4"
-        title="more"
-        :expanded="isConfigured && !cockpitMode"
-        theme="dark"
-      >
-        <div>
-          <BlueSwitch
-            v-model="currentFocusAndZoomParams.enable_focus_and_zoom_correlation"
-            :disabled="!isConfigured || props.disabled"
-            name="focus-zoom-correlation"
-            label="Enable focus and zoom correlation"
-            theme="dark"
-            @update:model-value="updateActuatorsConfig('enable_focus_and_zoom_correlation', $event)"
-          />
-          <BlueSlider
-            v-model="focusOffsetUI"
-            :disabled="!isConfigured || props.disabled"
-            name="focus-offset"
-            label="Focus compensation"
-            :min="-10"
-            :max="10"
-            :step="0.1"
-            width="400px"
-            theme="dark"
-            class="mt-6"
-            @update:model-value="onFocusOffsetChange($event ?? 0)"
-          />
-        </div>
-      </ExpansiblePanel>
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Hardware setup"
