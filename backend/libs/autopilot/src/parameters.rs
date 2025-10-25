@@ -242,15 +242,15 @@ impl Default for ActuatorsParameters {
 
             // Tilt - controlled by the user
             tilt_channel: api::ServoChannel::SERVO16,
-            tilt_channel_min: 750,
+            tilt_channel_min: 865,
             tilt_channel_trim: 1500,
             tilt_channel_max: 2250,
             tilt_channel_reversed: false,
 
             // Mount
             tilt_mnt_type: api::MountType::Servo,
-            tilt_mnt_pitch_min: -90,
-            tilt_mnt_pitch_max: 90,
+            tilt_mnt_pitch_min: -70,
+            tilt_mnt_pitch_max: 70,
         }
     }
 }
