@@ -92,7 +92,7 @@
             theme="dark"
             @update:model-value="updateActuatorsConfig('enable_focus_and_zoom_correlation', $event)"
           />
-          <BlueSlider
+          <!-- <BlueSlider
             v-model="focusOffsetUI"
             :disabled="!isConfigured || props.disabled"
             name="focus-offset"
@@ -104,7 +104,7 @@
             theme="dark"
             class="mt-6"
             @update:model-value="onFocusOffsetChange($event ?? 0)"
-          />
+          /> -->
         </div>
       </ExpansiblePanel>
     </ExpansiblePanel>
