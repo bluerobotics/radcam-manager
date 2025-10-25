@@ -15,28 +15,6 @@
         theme="dark"
         type="switch"
       />
-      <BlueSwitch
-        v-model="currentFocusAndZoomParams.enable_focus_and_zoom_correlation"
-        :disabled="!isConfigured || props.disabled"
-        name="focus-zoom-correlation"
-        label="Focus and zoom correlation"
-        theme="dark"
-        class="mt-7"
-        @update:model-value="updateActuatorsConfig('enable_focus_and_zoom_correlation', $event)"
-      />
-      <BlueSlider
-        v-model="focusOffsetUI"
-        :disabled="!isConfigured || props.disabled"
-        name="focus-offset"
-        label="Focus offset"
-        :min="-10"
-        :max="10"
-        :step="0.1"
-        width="400px"
-        theme="dark"
-        class="mt-6"
-        @update:model-value="onFocusOffsetChange($event ?? 0)"
-      />
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Video"
@@ -207,6 +185,36 @@
         class="mt-6"
         @update:model-value="updateActuatorsState('tilt', $event as number)"
       />
+      <ExpansiblePanel
+        class="d-flex flex-col align-end mt-4"
+        title="more"
+        :expanded="isConfigured && !cockpitMode"
+        theme="dark"
+      >
+        <div>
+          <BlueSwitch
+            v-model="currentFocusAndZoomParams.enable_focus_and_zoom_correlation"
+            :disabled="!isConfigured || props.disabled"
+            name="focus-zoom-correlation"
+            label="Enable focus and zoom correlation"
+            theme="dark"
+            @update:model-value="updateActuatorsConfig('enable_focus_and_zoom_correlation', $event)"
+          />
+          <BlueSlider
+            v-model="focusOffsetUI"
+            :disabled="!isConfigured || props.disabled"
+            name="focus-offset"
+            label="Focus compensation"
+            :min="-10"
+            :max="10"
+            :step="0.1"
+            width="400px"
+            theme="dark"
+            class="mt-6"
+            @update:model-value="onFocusOffsetChange($event ?? 0)"
+          />
+        </div>
+      </ExpansiblePanel>
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Hardware setup"
