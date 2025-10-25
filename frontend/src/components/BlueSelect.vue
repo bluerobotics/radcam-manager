@@ -19,25 +19,34 @@
       :close-on-content-click="!multiSelect"
     >
       <template #activator="{ props: menuProps }">
-        <button
-          v-bind="menuProps"
-          class="relative inline-flex items-center justify-between pl-4 rounded-[6px] elevation-1"
-          :class="[
-            theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]',
-            disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer',
-          ]"
-          :style="{ height: height || '30px', width: width || 'auto' }"
-        >
-          <span
-            class="text-sm font-medium truncate mr-1 maxWidth-[100%] -mb-[1px]"
-            :class="selectedTextClass"
+        <div class="flex flex-column align-end">
+          <button
+            v-bind="menuProps"
+            class="relative inline-flex items-center justify-between pl-4 rounded-[6px] elevation-1"
+            :class="[
+              theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]',
+              disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer',
+              hasError ? 'border-solid border-opacity-50 border-error border-md' : ''
+            ]"
+            :style="{ height: height || '30px', width: width || 'auto' }"
           >
-            {{ !multiSelect ? selectedItem.name : selectedValues.length > 0 ? selectedValues.join(', ') : 'Select...' }}
-          </span>
-          <v-icon :class="['transition-transform', iconClass]">
-            mdi-menu-down
-          </v-icon>
-        </button>
+            <span
+              class="text-sm font-medium truncate mr-1 maxWidth-[100%] -mb-[1px]"
+              :class="selectedTextClass"
+            >
+              {{ !multiSelect ? selectedItem.name : selectedValues.length > 0 ? selectedValues.join(', ') : 'Select...' }}
+            </span>
+            <v-icon :class="['transition-transform', iconClass]">
+              mdi-menu-down
+            </v-icon>
+          </button>
+          <div
+            v-if="hasError"
+            class="text-[14px] text-error"
+          >
+            {{ (errorMessages?.[0]) || '' }}
+          </div>
+        </div>
       </template>
 
       <v-list
@@ -112,6 +121,8 @@ const props = defineProps<{
   /** Model value for v-model */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   modelValue?: any
+  /** Error messages, used to give beedback from validators */
+  errorMessages?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -120,6 +131,10 @@ const emit = defineEmits<{
 
 const selectedValues = ref<(string | number)[]>([])
 const selectedItem = ref<OptionItem>({ name: 'Select...' })
+
+const hasError = computed(() => 
+  props.errorMessages && props.errorMessages.length > 0
+)
 
 const selectOption = (index: number) => {
   if (props.multiSelect) {
