@@ -8,10 +8,7 @@
       <BlueButtonGroup
         label="Water environment White Balance"
         :disabled="!isConfigured || props.disabled"
-        :button-items="[
-          { name: 'Green', onSelected: () => (OPWBMode = 'green') },
-          { name: 'Blue', onSelected: () => (OPWBMode = 'blue') },
-        ]"
+        :button-items="WhiteBalanceSceneButtonItems"
         theme="dark"
         type="switch"
       />
@@ -649,7 +646,7 @@ import BlueSwitch from './BlueSwitch.vue'
 import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
 import Loading from './Loading.vue'
-import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
+import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, BaseAutoWhiteBalanceSceneValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
 import axios from 'axios'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
 import { applyNonNull } from '@/utils/jsonUtils'
@@ -737,7 +734,6 @@ const currentFocusAndZoomParams = ref<ActuatorsParametersConfig>({
   tilt_mnt_pitch_max: null,
 })
 
-const OPWBMode = ref('green')
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const selectedVideoBitrate = ref<number | null>(null)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
@@ -832,7 +828,20 @@ const h264BitrateTable = [
   { resolution: '1920x1080', high: { bitrate: 8192, storage: 3.6 }, medium: { bitrate: 4096, storage: 1.8 }, low: { bitrate: 2048, storage: 0.9 } }
 ]
 
-const whiteBalanceButtonItems = computed(() => [
+const WhiteBalanceSceneButtonItems = computed(() => [
+  { 
+    name: 'Green',
+    preSelected: baseParams.value.awb_auto_mode === BaseAutoWhiteBalanceSceneValue.Scene1,
+    onSelected: () => (updateBaseParameter('awb_auto_mode', BaseAutoWhiteBalanceSceneValue.Scene1))
+  },
+  { 
+    name: 'Blue',
+    preSelected: baseParams.value.awb_auto_mode === BaseAutoWhiteBalanceSceneValue.Scene2,
+    onSelected: () => (updateBaseParameter('awb_auto_mode', BaseAutoWhiteBalanceSceneValue.Scene2))
+  }
+])
+
+const whiteBalanceModeButtonItems = computed(() => [
   { 
     name: 'Auto',
     preSelected: baseParams.value.auto_awb === BaseAutoWhiteBalanceModeValue.Auto,
