@@ -6,7 +6,7 @@
       theme="dark"
     >
       <BlueButtonGroup
-        label="Water environment for One-Push White Balance"
+        label="Water environment White Balance"
         :disabled="!isConfigured || props.disabled"
         :button-items="[
           { name: 'Green', onSelected: () => (OPWBMode = 'green') },
