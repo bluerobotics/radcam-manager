@@ -939,48 +939,6 @@ const mountTypeOptions = [
   { name: 'Brushless PWM', value: 'BrushlessPWM' },
 ] satisfies { name: string; value: MountType }[];
 
-const mapFocusUiToRaw = (ui: number, min: number, max: number): number => {
-  if (max === min) return min
-  const ratio = (ui + 10) / 20 
-  return Math.round(min + ratio * (max - min))
-}
-
-const mapFocusRawToUi = (raw: number, min: number, max: number): number => {
-  if (max === min) return 0
-  const ratio = (raw - min) / (max - min)
-  return ratio * 20 - 10
-}
-
-// Convert focus_channel_trim (raw, user defined on BlueOS) to UI value (-10 to 10) and vice versa
-const focusOffsetUI = computed<number>({
-  get: () => {
-    const min = currentFocusAndZoomParams.value.focus_channel_min
-    const max = currentFocusAndZoomParams.value.focus_channel_max
-    let raw = currentFocusAndZoomParams.value.focus_channel_trim
-    if (raw! < min! || raw! > max!) {
-      const averageRaw = Math.round((min! + max!) / 2)
-      raw = averageRaw
-    }
-    return mapFocusRawToUi(raw!, min!, max!)
-  },
-  set: (uiVal: number) => {
-    const min = currentFocusAndZoomParams.value.focus_channel_min
-    const max = currentFocusAndZoomParams.value.focus_channel_max
-    if (min == null || max == null) return
-    currentFocusAndZoomParams.value.focus_channel_trim = mapFocusUiToRaw(uiVal, min, max)
-  },
-})
-
-const onFocusOffsetChange = (uiVal: number): void => {
-  const min = currentFocusAndZoomParams.value.focus_channel_min
-  const max = currentFocusAndZoomParams.value.focus_channel_max
-  if (min == null || max == null) {
-    return
-  }
-  const raw = mapFocusUiToRaw(uiVal, min, max)
-  updateActuatorsConfig('focus_channel_trim', raw)
-}
-
 // Focus: raw [0–100] → distance [0.5 – 50]
 const scaleFocus = (raw: number): number => {
   const ratio = raw / 100
