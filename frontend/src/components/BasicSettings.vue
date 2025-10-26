@@ -15,6 +15,14 @@
         theme="dark"
         type="switch"
       />
+      <BlueButtonGroup
+        label="White Balance Mode"
+        :disabled="!isConfigured || props.disabled"
+        :button-items="whiteBalanceModeButtonItems"
+        theme="dark"
+        type="switch"
+        class="mt-6"
+      />
       <div 
         class="d-flex flex-col align-end mt-6"
       >
@@ -35,6 +43,36 @@
           />
           {{ processingWhiteBalance ? "Processing..." : "One-Push White Balance" }}
         </v-btn>
+      </div>
+      <div
+        v-if="baseParams.auto_awb"
+        class="d-flex flex-column align-end mt-6"
+      >
+        <BlueSlider
+          v-model="baseParams.awb_red"
+          :disabled="!isConfigured || props.disabled"
+          name="red"
+          label="Red"
+          :min="0"
+          :max="255"
+          :step="1"
+          width="400px"
+          theme="dark"
+          @update:model-value="updateBaseParameter('awb_red', $event as number)"
+        />
+        <BlueSlider
+          v-model="baseParams.awb_blue"
+          :disabled="!isConfigured || props.disabled"
+          name="blue"
+          label="Blue"
+          :min="0"
+          :max="255"
+          :step="1"
+          width="400px"
+          theme="dark"
+          class="mt-6"
+          @update:model-value="updateBaseParameter('awb_blue', $event as number)"
+        />
       </div>
     </ExpansiblePanel>
     <ExpansiblePanel
@@ -611,7 +649,7 @@ import BlueSwitch from './BlueSwitch.vue'
 import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
 import Loading from './Loading.vue'
-import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue } from '@/bindings/radcam'
+import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
 import axios from 'axios'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
 import { applyNonNull } from '@/utils/jsonUtils'
@@ -793,6 +831,20 @@ const h264BitrateTable = [
   { resolution: '3840x2160', high: { bitrate: 16384, storage: 7.2 }, medium: { bitrate: 8192, storage: 3.6 }, low: { bitrate: 4096, storage: 1.8 } },
   { resolution: '1920x1080', high: { bitrate: 8192, storage: 3.6 }, medium: { bitrate: 4096, storage: 1.8 }, low: { bitrate: 2048, storage: 0.9 } }
 ]
+
+const whiteBalanceButtonItems = computed(() => [
+  { 
+    name: 'Auto',
+    preSelected: baseParams.value.auto_awb === BaseAutoWhiteBalanceModeValue.Auto,
+    onSelected: () => (updateBaseParameter('auto_awb', BaseAutoWhiteBalanceModeValue.Auto))
+  },
+  { 
+    name: 'Manual',
+    preSelected: baseParams.value.auto_awb === BaseAutoWhiteBalanceModeValue.Manual,
+    onSelected: () => (updateBaseParameter('auto_awb', BaseAutoWhiteBalanceModeValue.Manual))
+  }
+])
+
 
 const hasUnsavedChanges = computed(() => {
   const current = currentFocusAndZoomParams.value
@@ -1255,6 +1307,26 @@ const getVideoParameters = (update: boolean) => {
     
 }
 
+const getBaseParameters = () => {
+  if (!props.selectedCameraUuid) {
+    return
+  }
+
+  const payload = {
+    camera_uuid: props.selectedCameraUuid,
+    action: "getImageAdjustment",
+  }
+
+  axios.post(`${props.backendApi}/camera/control`, payload)
+    .then(response => {
+      baseParams.value = response.data as BaseParameterSetting
+      console.log(response.data)
+    })
+    .catch(error => {
+      console.error(`Error sending getImageAdjustment request:`, error.message)
+    })
+}
+
 const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void => {
   if (!props.selectedCameraUuid) return
 
@@ -1477,6 +1549,7 @@ const getCameraStates = () => {
   getActuatorsConfig()
   getActuatorsState()
   getVideoParameters(true)
+  getBaseParameters()
 }
 
 defineExpose({ getCameraStates: getCameraStates })
