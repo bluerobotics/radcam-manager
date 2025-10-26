@@ -35,11 +35,6 @@
                 </v-list-item-title>
               </v-list-item>
               <v-divider />
-              <v-list-item @click="resetCameraSettings">
-                <v-list-item-title class="flex">
-                  Reset camera settings
-                </v-list-item-title>
-              </v-list-item>
               <v-divider />
             </v-list>
           </v-menu>
@@ -226,10 +221,6 @@ const isCamera = (data: unknown): data is Omit<Camera, 'uuid'> => {
   )
 }
 
-const refreshCameraStates = () => {
-  cameraControls.value?.getCameraStates()
-}
-
 const updateLuaScript = (): void => {
   if (!selectedCameraUUID.value) return
 
@@ -249,29 +240,6 @@ const updateLuaScript = (): void => {
     })
     .catch((error) => {
       console.error(`Error sending exportLuaScript request:`, error.message)
-    })
-}
-
-const resetCameraSettings = (): void => {
-  if (!selectedCameraUUID.value) return
-
-  const payload = {
-    camera_uuid: selectedCameraUUID.value,
-    action: 'resetActuatorsConfig',
-  }
-
-  console.log(payload)
-
-  axios
-    .post(`${backendAPI.value}/autopilot/control`, payload)
-    .then((response) => {
-      refreshCameraStates()
-      snackbarMessage.value = `Camera settings reset.`
-      showSnackbar.value = true
-      console.log(`Reset actuators config initiated:`, response)
-    })
-    .catch((error) => {
-      console.error(`Error sending resetActuatorsConfig request:`, error.message)
     })
 }
 
