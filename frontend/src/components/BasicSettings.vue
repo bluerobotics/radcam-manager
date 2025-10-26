@@ -15,6 +15,27 @@
         theme="dark"
         type="switch"
       />
+      <div 
+        class="d-flex flex-col align-end mt-6"
+      >
+        <v-btn
+          :disabled="props.disabled"
+          class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
+          size="small"
+          variant="elevated"
+          theme="dark"
+          @click="doWhiteBalance"
+        >
+          <v-progress-circular
+            v-if="processingWhiteBalance"
+            indeterminate
+            color="white"
+            size="20"
+            class="me-2"
+          />
+          {{ processingWhiteBalance ? "Processing..." : "One-Push White Balance" }}
+        </v-btn>
+      </div>
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Actuators"
@@ -756,6 +777,7 @@ const tempVideoChanges = ref<{
   pic_height: null,
   bitrate: null,
 })
+const processingWhiteBalance = ref(false)
 
 const resolutionOptions = ref([
   { name: '3840x2160', value: { width: 3840, height: 2160 } },
@@ -1320,6 +1342,32 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
     pic_height: null,
     bitrate: null,
   }
+}
+
+const doWhiteBalance = async () => {
+  if (!props.selectedCameraUuid) {
+    return
+  }
+
+  // Prevent multiple concurrent white balance operations
+  if (processingWhiteBalance.value) return
+  processingWhiteBalance.value = true
+
+  const payload: CameraControl = {
+    camera_uuid: props.selectedCameraUuid,
+    action: "setImageAdjustmentEx",
+    json: {
+      onceAWB: 1,
+    } as AdvancedParameterSetting,
+  }
+
+  axios.post(`${props.backendApi}/camera/control`, payload)
+    .catch(error => {
+      console.error("Error sending onceAWB control:", error.message)
+    }).finally(() => {
+      processingWhiteBalance.value = false
+      getBaseParameters()
+    })
 }
 
 const doRestart = () => {
