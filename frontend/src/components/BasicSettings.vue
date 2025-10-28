@@ -492,7 +492,7 @@
             />
             <BlueSelect
               v-model="intendedFocusAndZoomParams.camera_id"
-              :disabled="props.disabled"
+              :disabled="props.disabled || true"
               label="Camera ID"
               :items="cameraIdOptions"
               theme="dark"
