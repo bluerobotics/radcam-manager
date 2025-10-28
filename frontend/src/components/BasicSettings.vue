@@ -736,6 +736,7 @@ const currentFocusAndZoomParams = ref<ActuatorsParametersConfig>({
 
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const selectedVideoBitrate = ref<number | null>(null)
+const hasUserEditedVideo = ref<boolean>(false)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
 const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const actuatorsState = ref<ActuatorsState>({
@@ -1321,62 +1322,74 @@ const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void =
 const handleVideoChanges = (what: 'resolution' | 'bitrate', value: any): void => {
   if (!props.selectedCameraUuid) return
 
+  hasUserEditedVideo.value = true
+
   if (what === 'resolution' && value) {
     selectedVideoResolution.value = value as VideoResolutionValue
-    tempVideoChanges.value.pic_width  = value.width
-    tempVideoChanges.value.pic_height = value.height
     const key = `${value.width}x${value.height}`
     const allowed = resolutionsToBitrate[key]
-
     if (allowed?.length) {
-      selectedVideoBitrate.value = allowed[0]      
-      tempVideoChanges.value.bitrate = allowed[0]  
+      selectedVideoBitrate.value = allowed[0]
     }
+  } else if (what === 'bitrate') {
+    selectedVideoBitrate.value = value as number
   }
 
-  if (what === 'bitrate') {
-    selectedVideoBitrate.value = value as number   
-    tempVideoChanges.value.bitrate = value as number
-  }
+  // Compute unsaved state
+  const currentResolution = selectedVideoParameters.value.pic_width && selectedVideoParameters.value.pic_height
+    ? { width: selectedVideoParameters.value.pic_width, height: selectedVideoParameters.value.pic_height }
+    : null
+  const currentBitrate = selectedVideoParameters.value.bitrate ?? null
 
-  const cfg = selectedVideoParameters.value as Pick<VideoParameterSettings, keyof typeof tempVideoChanges.value>
-  const videoTempChanges = (Object.entries(tempVideoChanges.value) as [keyof typeof tempVideoChanges.value, number | null][])
-    .some(([k, v]) => {
-      if (v === null) return false
-      return (cfg[k] ?? null) !== v
-  })
+  const hasUnsaved = 
+    (selectedVideoResolution.value?.width !== currentResolution?.width ||
+     selectedVideoResolution.value?.height !== currentResolution?.height) ||
+    (selectedVideoBitrate.value !== currentBitrate)
 
-  hasUnsavedVideoChanges.value = videoTempChanges   
+  hasUnsavedVideoChanges.value = hasUnsaved
 }
 
 
 const update_video_parameter_values = (settings: VideoParameterSettings) => {
   downloadedVideoParameters.value = { ...settings }
-
   selectedVideoParameters.value = { ...settings }
   selectedVideoParameters.value.pixel_list = undefined
 
-  const width = settings.pic_width
-  const height = settings.pic_height
+  // Only update UI selectors if user hasn't made changes
+  if (!hasUserEditedVideo.value) {
+    const width = settings.pic_width
+    const height = settings.pic_height
 
-  let matchOption = resolutionOptions.value.find(                   
-    o => o.value.width === width && o.value.height === height                      
-  )
+    if (width && height) {
+      const match = resolutionOptions.value.find(o => o.value.width === width && o.value.height === height)
+      if (match) {
+        selectedVideoResolution.value = match.value
+      } else {
+        // Inject new resolution if not in list
+        const injected = { width, height }
+        resolutionOptions.value.push({ name: `${width}x${height}`, value: injected })
+        selectedVideoResolution.value = injected
+      }
+    } else {
+      selectedVideoResolution.value = null
+    }
 
-  if (!matchOption && width && height) {
-    const injectedValue = { width, height }
-    resolutionOptions.value.push({ name: `${width}x${height}`, value: injectedValue })
-    matchOption = resolutionOptions.value[resolutionOptions.value.length - 1]
+    selectedVideoBitrate.value = settings.bitrate ?? null
   }
 
-  if (matchOption) {
-    selectedVideoResolution.value = matchOption.value
-  } else {
-    selectedVideoResolution.value = null
+  // Always update bitrate options based on current resolution
+  if (selectedVideoResolution.value) {
+    const key = `${selectedVideoResolution.value.width}x${selectedVideoResolution.value.height}`
+    const allowed = resolutionsToBitrate[key]
+    if (allowed && !allowed.includes(selectedVideoBitrate.value ?? -1)) {
+      // If current bitrate is invalid for new res, reset to first option (but only if user hasn't edited)
+      if (!hasUserEditedVideo.value) {
+        selectedVideoBitrate.value = allowed[0]
+      }
+    }
   }
 
-  selectedVideoBitrate.value = settings.bitrate ?? null
-  
+  // Clear temp changes
   tempVideoChanges.value = {
     pic_width: null,
     pic_height: null,
@@ -1464,6 +1477,7 @@ const saveVideoDataAndRestart = async (): Promise<void> => {
   }
 
   tempVideoChanges.value = { pic_width: null, pic_height: null, bitrate: null }
+  hasUserEditedVideo.value = false
   hasUnsavedVideoChanges.value = false
 }
 
