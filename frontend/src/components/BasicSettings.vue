@@ -1044,7 +1044,6 @@ const getActuatorsConfig = () => {
         if (!hasUnsavedChanges.value) {
           intendedFocusAndZoomParams.value = { ...newParams }
         }
-        isConfigured.value = true
       } else {
         console.warn("Received null 'parameters' from response:", response.data)
       }
@@ -1150,6 +1149,7 @@ const getActuatorsState = () => {
 
       applyNonNull(actuatorsState.value, state)
       console.log(state)
+      isConfigured.value = true
     })
     .catch((error) => {
       const message = 'Error getting actuators state'
