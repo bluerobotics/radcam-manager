@@ -1044,6 +1044,7 @@ const getActuatorsConfig = () => {
         if (!hasUnsavedChanges.value) {
           intendedFocusAndZoomParams.value = { ...newParams }
         }
+        isConfigured.value = true
       } else {
         console.warn("Received null 'parameters' from response:", response.data)
       }
