@@ -7,14 +7,14 @@
     >
       <BlueButtonGroup
         label="Water environment White Balance"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="!isConfigured || props.disabled || processingWhiteBalance"
         :button-items="WhiteBalanceSceneButtonItems"
         theme="dark"
         type="switch"
       />
       <BlueButtonGroup
         label="White Balance Mode"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="!isConfigured || props.disabled || processingWhiteBalance"
         :button-items="whiteBalanceModeButtonItems"
         theme="dark"
         type="switch"
@@ -47,7 +47,7 @@
       >
         <BlueSlider
           v-model="baseParams.awb_red"
-          :disabled="!isConfigured || props.disabled"
+          :disabled="!isConfigured || props.disabled || processingWhiteBalance"
           name="red"
           label="Red"
           :min="0"
@@ -59,7 +59,7 @@
         />
         <BlueSlider
           v-model="baseParams.awb_blue"
-          :disabled="!isConfigured || props.disabled"
+          :disabled="!isConfigured || props.disabled || processingWhiteBalance"
           name="blue"
           label="Blue"
           :min="0"
@@ -171,7 +171,7 @@
     >
       <BlueSelect
         v-model="selectedVideoResolution"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="!isConfigured || props.disabled || processingWhiteBalance"
         label="Resolution"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
@@ -179,7 +179,7 @@
       />
       <BlueSelect
         v-model="selectedVideoBitrate"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="!isConfigured || props.disabled || processingWhiteBalance"
         label="Bitrate"
         :items="bitrateOptions || [{ name: 'No bitrates available', value: null }]"
         theme="dark"
@@ -260,7 +260,7 @@
         class="flex justify-end mt-8 mb-[-20px]"
       >
         <v-btn
-          :disabled="!isConfigured || props.disabled"
+          :disabled="!isConfigured || props.disabled || processingWhiteBalance"
           class="py-1 px-3 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
           :class="{ 'opacity-50 pointer-events-none': !hasUnsavedVideoChanges }"
           size="small"
@@ -312,7 +312,7 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="isLoading || props.disabled"
+            :disabled="isLoading || props.disabled || processingWhiteBalance"
             :loading="isLoading"
             theme="dark"
             @click="resetToRecommendedDefaults"
@@ -614,7 +614,7 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="hasChannelErrors || isLoading || props.disabled"
+            :disabled="hasChannelErrors || isLoading || props.disabled || processingWhiteBalance"
             :loading="isLoading"
             theme="dark"
             @click="saveHardwareSetup"
