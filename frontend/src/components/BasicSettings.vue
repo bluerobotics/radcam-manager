@@ -315,7 +315,7 @@
             :disabled="isLoading || props.disabled"
             :loading="isLoading"
             theme="dark"
-            @click="saveHardwareSetup"
+            @click="resetToRecommendedDefaults"
           >
             APPLY DEFAULT HARDWARE SETUP
           </v-btn>
@@ -1505,6 +1505,37 @@ const saveHardwareSetup = async (): Promise<void> => {
     .catch((error) => {
       const message = 'Error saving hardware setup'
       console.log(message, error.message)
+      showErrorDialog(message, error)
+    })
+    .finally(() => {
+      isLoading.value = false
+    })
+}
+
+const resetToRecommendedDefaults = async (): Promise<void> => {
+  if (!props.selectedCameraUuid) return
+  
+  isLoading.value = true
+
+  const payload = {
+    camera_uuid: props.selectedCameraUuid,
+    action: 'resetActuatorsConfig',
+  }
+
+  axios
+    .post(`${props.backendApi}/autopilot/control`, payload)
+    .then((response) => {
+      console.log("Got an answer from the setActuatorsConfig request", response.data)
+
+      const newParams = (response.data as ActuatorsConfig)?.parameters
+      if (newParams) {
+        currentFocusAndZoomParams.value = { ...newParams }
+        intendedFocusAndZoomParams.value = { ...newParams }
+      }
+    })
+    .catch((error) => {
+      const message = 'Failed to apply default hardware setup'
+      console.error(message, error)
       showErrorDialog(message, error)
     })
     .finally(() => {
