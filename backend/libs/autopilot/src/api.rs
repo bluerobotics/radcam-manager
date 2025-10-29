@@ -21,9 +21,9 @@ pub enum Action {
     GetActuatorsState,
     #[serde(rename = "setActuatorsState")]
     SetActuatorsState(ActuatorsState),
-    #[serde(rename = "getActuatorsConfig")]
-    GetActuatorsDefaultConfig,
     #[serde(rename = "getActuatorsDefaultConfig")]
+    GetActuatorsDefaultConfig,
+    #[serde(rename = "getActuatorsConfig")]
     GetActuatorsConfig,
     #[serde(rename = "setActuatorsConfig")]
     SetActuatorsConfig(ActuatorsConfig),
