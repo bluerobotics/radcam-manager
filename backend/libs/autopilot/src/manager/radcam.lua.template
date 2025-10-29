@@ -2,6 +2,7 @@
 
 --- Focus correction script. This script was generated and exported by RadCam extension.
 --- For more information, visit https://github.com/BlueRobotics/radcam-manager
+--- Version: {{ version }}
 
 -- Usage: change the output controlling focus from CameraFocus to "Script1"
 --        but assign CameraFocus to any other "Disabled" channel as we need to read it, as it allows fine-tuning
