@@ -313,6 +313,7 @@ fn generate_lua_script(config: &CameraActuators) -> Result<String> {
     context.insert("k_script", &(config.parameters.script_function as u8));
     context.insert("closest_points", &config.closest_points.to_lua());
     context.insert("furthest_points", &config.furthest_points.to_lua());
+    context.insert("version", env!("CARGO_PKG_VERSION"));
 
     let template = include_str!("radcam.lua.template");
 
