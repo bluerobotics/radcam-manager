@@ -12,6 +12,7 @@ pub struct CockpitExtras {
     pub target_cockpit_api_version: String,
     pub widgets: Vec<CockpitWidget>,
     pub actions: Vec<CockpitAction>,
+    pub joystick_suggestions: Vec<JoystickMapSuggestion>,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,6 +58,47 @@ pub enum HttpRequestMethod {
     DELETE,
 }
 
+/// Joystick map suggestion from BlueOS extensions
+/// Example of use: https://github.com/rafaellehmkuhl/MockBlueOsExtension/blob/913eb0a978159bdb2c4e4b610044f1c8082755ab/src/backend/main.py#L147
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JoystickMapSuggestion {
+    /// Unique identifier for this suggestion
+    pub id: String,
+    /// Protocol that holds the action
+    pub protocol: JoystickProtocol,
+    /// Human-readable name of the action to be mapped
+    pub action_name: String,
+    /// Unique identifier for the action to be mapped
+    pub action_id: String,
+    /// The button number (in Cockpit standard mapping) to map the action to
+    pub button: u32,
+    /// The modifier key for this suggestion (regular or shift)
+    pub modifier: CockpitModifierKeyOption,
+    /// Optional description of what the action does
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+/// Available joystick protocols.
+/// Each protocol is expected to have it's own way of doing thing, including mapping, limiting, communicating, etc.
+pub enum JoystickProtocol {
+    CockpitModifierKey,
+    MavlinkManualControl,
+    CockpitAction,
+    DataLakeVariable,
+    Other,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+/// Modifier keys
+pub enum CockpitModifierKeyOption {
+    Regular,
+    Shift,
+}
+
 pub async fn cockpit_extras() -> impl IntoResponse {
     let cameras = mcm_client::cameras().await;
 
@@ -65,6 +107,7 @@ pub async fn cockpit_extras() -> impl IntoResponse {
         target_cockpit_api_version: "1.0.0".to_string(),
         widgets: widgets(&cameras),
         actions: actions(&cameras),
+        joystick_suggestions: joystick_suggestions(&cameras),
     };
 
     let json = serde_json::to_string_pretty(&cockpit_extras).unwrap();
@@ -117,4 +160,46 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
             }]
         })
         .collect()
+}
+
+fn joystick_suggestions(_cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
+    let id = "RadCam Manager";
+    vec![
+        JoystickMapSuggestion {
+            id: id.to_string(),
+            protocol: JoystickProtocol::DataLakeVariable,
+            action_name: "Camera focus decrease".to_string(),
+            action_id: "camera-focus-decrease".to_string(),
+            button: 6,
+            modifier: CockpitModifierKeyOption::Regular,
+            description: Some("Decrease camera focus distance".to_string()),
+        },
+        JoystickMapSuggestion {
+            id: id.to_string(),
+            protocol: JoystickProtocol::DataLakeVariable,
+            action_name: "Camera focus increase".to_string(),
+            action_id: "camera-focus-increase".to_string(),
+            button: 7,
+            modifier: CockpitModifierKeyOption::Regular,
+            description: Some("Increase camera focus distance".to_string()),
+        },
+        JoystickMapSuggestion {
+            id: id.to_string(),
+            protocol: JoystickProtocol::DataLakeVariable,
+            action_name: "Camera zoom decrease".to_string(),
+            action_id: "camera-zoom-decrease".to_string(),
+            button: 6,
+            modifier: CockpitModifierKeyOption::Shift,
+            description: Some("Decrease camera zoom level".to_string()),
+        },
+        JoystickMapSuggestion {
+            id: id.to_string(),
+            protocol: JoystickProtocol::DataLakeVariable,
+            action_name: "Camera zoom increase".to_string(),
+            action_id: "camera-zoom-increase".to_string(),
+            button: 7,
+            modifier: CockpitModifierKeyOption::Shift,
+            description: Some("Increase camera zoom level".to_string()),
+        },
+    ]
 }
