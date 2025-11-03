@@ -343,8 +343,8 @@ pub const CLOSEST_POINTS: &[api::FocusZoomPoint] = &[
         focus: 949,
     },
     api::FocusZoomPoint {
-        zoom: 928,
-        focus: 956,
+        zoom: 986,
+        focus: 975,
     },
     api::FocusZoomPoint {
         zoom: 1191,
@@ -375,15 +375,15 @@ pub const CLOSEST_POINTS: &[api::FocusZoomPoint] = &[
 pub const FURTHEST_POINTS: &[api::FocusZoomPoint] = &[
     api::FocusZoomPoint {
         zoom: 870,
-        focus: 862,
+        focus: 834,
     },
     api::FocusZoomPoint {
-        zoom: 928,
-        focus: 872,
+        zoom: 986,
+        focus: 905,
     },
     api::FocusZoomPoint {
         zoom: 1191,
-        focus: 1012,
+        focus: 1011,
     },
     api::FocusZoomPoint {
         zoom: 1413,
@@ -395,14 +395,14 @@ pub const FURTHEST_POINTS: &[api::FocusZoomPoint] = &[
     },
     api::FocusZoomPoint {
         zoom: 1771,
-        focus: 1564,
+        focus: 1571,
     },
     api::FocusZoomPoint {
         zoom: 1831,
-        focus: 1698,
+        focus: 1699,
     },
     api::FocusZoomPoint {
         zoom: 1951,
-        focus: 2155,
+        focus: 2159,
     },
 ];
