@@ -803,15 +803,6 @@ const defaultFocusAndZoomParams = ref<ActuatorsParametersConfig>({
   tilt_mnt_pitch_max: null,
 })
 const hasUnsavedVideoChanges = ref<boolean>(false)
-const tempVideoChanges = ref<{
-  pic_width: number | null
-  pic_height: number | null
-  bitrate: number | null
-}>({
-  pic_width: null,
-  pic_height: null,
-  bitrate: null,
-})
 const processingWhiteBalance = ref(false)
 
 const resolutionOptions = ref([
@@ -1388,13 +1379,6 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
       }
     }
   }
-
-  // Clear temp changes
-  tempVideoChanges.value = {
-    pic_width: null,
-    pic_height: null,
-    bitrate: null,
-  }
 }
 
 const doWhiteBalance = async () => {
@@ -1455,20 +1439,15 @@ const doRestart = () => {
 const saveVideoDataAndRestart = async (): Promise<void> => {
   if (!props.selectedCameraUuid) return
 
-  const videoPartial: Partial<VideoParameterSettings> = {}
   const curr = selectedVideoParameters.value
-  const tmp  = tempVideoChanges.value
+  const newWidth = selectedVideoResolution.value?.width ?? null
+  const newHeight = selectedVideoResolution.value?.height ?? null
+  const newBitrate = selectedVideoBitrate.value
 
-  type VideoMutableKeys = 'pic_width' | 'pic_height' | 'bitrate'
-  const videoKeys: VideoMutableKeys[] = ['pic_width', 'pic_height', 'bitrate']
-
-  videoKeys.forEach((k) => {
-    const newVal: number | null = tmp[k]
-    const currVal: number | null | undefined = (curr as Record<VideoMutableKeys, number | null | undefined>)[k]
-    if (newVal !== null && newVal !== currVal) {
-      ;(videoPartial as Record<VideoMutableKeys, number>)[k] = newVal
-    }
-  })
+  const videoPartial: Partial<VideoParameterSettings> = {}
+  if (newWidth !== null && newWidth !== curr.pic_width) videoPartial.pic_width = newWidth
+  if (newHeight !== null && newHeight !== curr.pic_height) videoPartial.pic_height = newHeight
+  if (newBitrate !== null && newBitrate !== curr.bitrate) videoPartial.bitrate = newBitrate
 
   if (Object.keys(videoPartial).length > 0) {
     await updateVideoParameters(videoPartial)
@@ -1476,7 +1455,6 @@ const saveVideoDataAndRestart = async (): Promise<void> => {
     Object.assign(selectedVideoParameters.value, videoPartial)
   }
 
-  tempVideoChanges.value = { pic_width: null, pic_height: null, bitrate: null }
   hasUserEditedVideo.value = false
   hasUnsavedVideoChanges.value = false
 }
