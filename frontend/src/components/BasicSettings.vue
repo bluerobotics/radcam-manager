@@ -1042,9 +1042,10 @@ const getActuatorsConfig = () => {
         currentFocusAndZoomParams.value = { ...newParams }
 
         // Only update intended if user hasn't made changes
-        if (!hasUnsavedChanges.value) {
+        if (intendedFocusAndZoomParams.value.camera_id === null) {
           intendedFocusAndZoomParams.value = { ...newParams }
         }
+        currentFocusAndZoomParams.value = { ...newParams }
       } else {
         console.warn("Received null 'parameters' from response:", response.data)
       }
