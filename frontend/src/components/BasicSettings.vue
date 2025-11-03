@@ -991,7 +991,7 @@ const formatTiltValue = (angle: number): string => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || isLoading.value) {
     return
   }
 
@@ -1016,7 +1016,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
 }
 
 const getActuatorsConfig = () => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || isLoading.value) {
     return
   }
 
@@ -1064,7 +1064,7 @@ const checkIfConfigured = (error: any) => {
 
 const getActuatorsDefaultConfig = () => {
   // Only fetch once: if we don't have defaults yet
-  if (!props.selectedCameraUuid || defaultFocusAndZoomParams.value.camera_id !== null) {
+  if (!props.selectedCameraUuid || isLoading.value || defaultFocusAndZoomParams.value.camera_id !== null) {
     return
   }
 
@@ -1097,7 +1097,7 @@ const getActuatorsDefaultConfig = () => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: any) => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || isLoading.value) {
     return
   }
 
@@ -1125,7 +1125,7 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
 }
 
 const getActuatorsState = () => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || isLoading.value) {
     return
   }
 
@@ -1151,7 +1151,7 @@ const getActuatorsState = () => {
 }
 
 const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
-  if (!props.selectedCameraUuid) return
+  if (!props.selectedCameraUuid || isLoading.value) return
 
   const payload: ActuatorsControl = {
     camera_uuid: props.selectedCameraUuid,
@@ -1219,7 +1219,7 @@ const availableServoChannelOptions = computed(() => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const handleChannelChanges = (param: keyof ActuatorsParametersConfig, value: any): void => {
-  if (!props.selectedCameraUuid) return
+  if (!props.selectedCameraUuid || isLoading.value) return
 
   // Optional: prevent duplicates (though UI should disable them)
   const isAlreadySelected = Object.entries(intendedFocusAndZoomParams.value).some(
@@ -1236,7 +1236,7 @@ const handleChannelChanges = (param: keyof ActuatorsParametersConfig, value: any
 
 
 const getVideoParameters = (update: boolean) => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || isLoading.value) {
     return
   }
 
@@ -1268,7 +1268,7 @@ const getVideoParameters = (update: boolean) => {
 }
 
 const getBaseParameters = () => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || isLoading.value) {
     return
   }
 
@@ -1288,7 +1288,7 @@ const getBaseParameters = () => {
 }
 
 const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void => {
-  if (!props.selectedCameraUuid) return
+  if (!props.selectedCameraUuid || isLoading.value) return
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
@@ -1311,7 +1311,7 @@ const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void =
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const handleVideoChanges = (what: 'resolution' | 'bitrate', value: any): void => {
-  if (!props.selectedCameraUuid) return
+  if (!props.selectedCameraUuid || isLoading.value) return
 
   hasUserEditedVideo.value = true
 
@@ -1324,7 +1324,7 @@ const handleVideoChanges = (what: 'resolution' | 'bitrate', value: any): void =>
     }
   } else if (what === 'bitrate') {
     selectedVideoBitrate.value = value as number
-  }
+  }    
 
   // Compute unsaved state
   const currentResolution = selectedVideoParameters.value.pic_width && selectedVideoParameters.value.pic_height
@@ -1382,7 +1382,7 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
 }
 
 const doWhiteBalance = async () => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || isLoading.value) {
     return
   }
 
@@ -1408,7 +1408,7 @@ const doWhiteBalance = async () => {
 }
 
 const doRestart = () => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || isLoading.value) {
     return
   }
 
@@ -1437,7 +1437,7 @@ const doRestart = () => {
 }
 
 const saveVideoDataAndRestart = async (): Promise<void> => {
-  if (!props.selectedCameraUuid) return
+  if (!props.selectedCameraUuid || isLoading.value) return
 
   const curr = selectedVideoParameters.value
   const newWidth = selectedVideoResolution.value?.width ?? null
@@ -1460,7 +1460,7 @@ const saveVideoDataAndRestart = async (): Promise<void> => {
 }
 
 const saveHardwareSetup = async (): Promise<void> => {
-  if (!props.selectedCameraUuid || !defaultFocusAndZoomParams.value.camera_id || !intendedFocusAndZoomParams.value) return
+  if (!props.selectedCameraUuid || isLoading.value || !defaultFocusAndZoomParams.value.camera_id || !intendedFocusAndZoomParams.value) return
 
   if (!isHardwareSetupComplete.value) {
     console.error('All channel selections are required')
@@ -1505,7 +1505,7 @@ const saveHardwareSetup = async (): Promise<void> => {
 }
 
 const resetToRecommendedDefaults = async (): Promise<void> => {
-  if (!props.selectedCameraUuid) return
+  if (!props.selectedCameraUuid || isLoading.value) return
   
   isLoading.value = true
 
