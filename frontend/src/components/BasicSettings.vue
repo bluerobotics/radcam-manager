@@ -847,25 +847,6 @@ const whiteBalanceModeButtonItems = computed(() => [
 ])
 
 
-const hasUnsavedChanges = computed(() => {
-  const current = currentFocusAndZoomParams.value
-  const intended = intendedFocusAndZoomParams.value
-
-  // Compare every field
-  for (const key in current) {
-    if (Object.prototype.hasOwnProperty.call(current, key)) {
-      const currentVal = current[key as keyof ActuatorsParametersConfig]
-      const intendedVal = intended[key as keyof ActuatorsParametersConfig]
-
-      // Handle null/undefined equality
-      if (currentVal !== intendedVal) {
-        return true
-      }
-    }
-  }
-  return false
-})
-
 const channelErrors = computed(() => {
   const errors: Record<keyof Pick<ActuatorsParametersConfig, 'focus_channel' | 'zoom_channel' | 'tilt_channel' | 'script_channel'>, string | null> = {
     focus_channel: null,
