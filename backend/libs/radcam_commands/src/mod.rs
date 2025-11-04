@@ -45,6 +45,9 @@ pub enum Action {
     SetVideoParameterSettings(VideoParameterSettings),
     #[serde(rename = "restart")]
     Restart,
+    /// Important: This is a wrapper, not part of the camera protocol
+    #[serde(rename = "setRecommendedSettings")]
+    SetRecommendedSettings,
 }
 
 impl std::fmt::Display for Action {
@@ -59,6 +62,14 @@ fn control_inner(
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send>> {
     Box::pin(async move {
         debug!("Got control query: {camera_control:#?}");
+
+        // Special case for command wrappers:
+        match &camera_control.action {
+            Action::SetRecommendedSettings => {
+                return apply_recommended_settings(camera_control.camera_uuid).await;
+            }
+            _ => (),
+        }
 
         let action_value = serde_json::to_value(&camera_control.action).unwrap();
         let action_map = action_value.as_object().unwrap();
@@ -153,6 +164,125 @@ pub async fn list() -> impl IntoResponse {
     };
 
     json.into_response()
+}
+
+#[instrument(level = "debug")]
+pub async fn apply_recommended_settings(camera_uuid: Uuid) -> Result<serde_json::Value> {
+    let mut errors = vec![];
+
+    info!("Applying recommended settings to camera {camera_uuid:?}");
+
+    // Set main channel to 4k@30fps, and unused channels to 480p@5fps
+    {
+        use protocol::video::video_parameters::*;
+
+        let channel_configs = vec![
+            CameraControl {
+                camera_uuid,
+                action: Action::SetVideoParameterSettings(VideoParameterSettings {
+                    channel: Some(VideoChannelValue::MainStream),
+                    encode_profile: Some(VideoEncodingProfileValue::HighProfile),
+                    encode_type: Some(VideoEncodeTypeValue::H264),
+                    pic_width: Some(3840),
+                    pic_height: Some(2160),
+                    rc_mode: Some(VideoRcModeValue::ConstantBitRate),
+                    bitrate: Some(16384),
+                    frame_rate: Some(30),
+                    gop: Some(60),
+                    ..Default::default()
+                }),
+            },
+            CameraControl {
+                camera_uuid,
+                action: Action::SetVideoParameterSettings(VideoParameterSettings {
+                    channel: Some(VideoChannelValue::AuxiliaryStream),
+                    encode_profile: Some(VideoEncodingProfileValue::Baseline),
+                    encode_type: Some(VideoEncodeTypeValue::H264),
+                    pic_width: Some(640),
+                    pic_height: Some(480),
+                    rc_mode: Some(VideoRcModeValue::ConstantBitRate),
+                    bitrate: Some(32),
+                    frame_rate: Some(5),
+                    gop: Some(60),
+                    ..Default::default()
+                }),
+            },
+            CameraControl {
+                camera_uuid,
+                action: Action::SetVideoParameterSettings(VideoParameterSettings {
+                    channel: Some(VideoChannelValue::ThirdStream),
+                    encode_profile: Some(VideoEncodingProfileValue::Baseline),
+                    encode_type: Some(VideoEncodeTypeValue::H264),
+                    pic_width: Some(640),
+                    pic_height: Some(480),
+                    rc_mode: Some(VideoRcModeValue::ConstantBitRate),
+                    bitrate: Some(32),
+                    frame_rate: Some(5),
+                    gop: Some(60),
+                    ..Default::default()
+                }),
+            },
+        ];
+
+        for camera_control in channel_configs {
+            if let Err(error) = control_inner(Json(camera_control)).await {
+                let message = format!(
+                    "Failed applying recommended settings for VideoParameterSettings: {error:?}"
+                );
+                error!(message);
+                errors.push(message);
+            }
+        }
+    }
+
+    {
+        use protocol::display::base_display::*;
+
+        let action = Action::SetImageAdjustment(BaseParameterSetting {
+            set_default: Some(1),
+            ..Default::default()
+        });
+
+        let camera_control = CameraControl {
+            camera_uuid,
+            action,
+        };
+
+        if let Err(error) = control_inner(Json(camera_control)).await {
+            let message =
+                format!("Failed applying recommended settings for BaseParameterSetting: {error:?}");
+            error!(message);
+            errors.push(message);
+        }
+    }
+
+    {
+        use protocol::display::advanced_display::*;
+
+        let action = Action::SetImageAdjustmentEx(AdvancedParameterSetting {
+            set_default: Some(1),
+            ..Default::default()
+        });
+
+        let camera_control = CameraControl {
+            camera_uuid,
+            action,
+        };
+
+        if let Err(error) = control_inner(Json(camera_control)).await {
+            let message = format!(
+                "Failed applying recommended settings for AdvancedParameterSetting: {error:?}"
+            );
+            error!(message);
+            errors.push(message);
+        }
+    }
+
+    match errors.len() {
+        0 => Ok(serde_json::Value::Null),
+        1 => Err(anyhow::anyhow!("{}", errors[0])),
+        _ => Err(anyhow::anyhow!("Multiple errors happened: {errors:?}")),
+    }
 }
 
 #[instrument(level = "debug")]
