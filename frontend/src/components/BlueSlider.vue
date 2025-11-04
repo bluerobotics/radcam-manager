@@ -15,11 +15,6 @@
         class="relative overflow-visible rounded-[6px] elevation-1"
         :class="[theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]', disabled ? 'opacity-50' : '']"
         :style="{ width: width || '100%', height: height || '30px', cursor: disabled ? 'not-allowed' : 'pointer' }"
-        @mousedown="startSliding"
-        @mouseup="stopSliding"
-        @mouseleave="stopSliding"
-        @touchstart="startSliding"
-        @touchend="stopSliding"
       >
         <div class="absolute inset-x-[18%] top-1/2 -translate-y-1/2 flex justify-between pointer-events-none">
           <div
@@ -204,7 +199,7 @@ const sendValue = (val: number) => {
 const onSliderInput = (): void => {
   const clamped = Math.min(Math.max(currentSliderValue.value, props.min), props.max)
   currentSliderValue.value = clamped
-  if (!isSliding) sendValue(clamped)
+  throttleSendValue(clamped)
 }
 
 // Handle double-click edit start
@@ -229,25 +224,13 @@ const clampEditedValue = () => {
   editedDisplayValue.value = Math.min(Math.max(editedDisplayValue.value, displayMin.value), displayMax.value)
 }
 
-// Sliding logic (for continuous updates)
-let sliderInterval: number | null = null
-let isSliding = false
-const startSliding = (): void => {
-  isSliding = true
-  if (!sliderInterval) {
-    sliderInterval = window.setInterval(() => {
-      if (isSliding) sendValue(currentSliderValue.value)
-    }, 500)
-  }
-}
-
-const stopSliding = (): void => {
-  isSliding = false
-  if (sliderInterval) {
-    clearInterval(sliderInterval)
-    sliderInterval = null
-  }
-  sendValue(currentSliderValue.value)
+let throttleTimeout: number | null = null
+const throttleSendValue = (val: number) => {
+  if (throttleTimeout) return
+  sendValue(val)
+  throttleTimeout = window.setTimeout(() => {
+    throttleTimeout = null
+  }, 500)
 }
 
 // Keyboard handling
@@ -283,6 +266,6 @@ watch(isEditingCurrentSliderValue, (isEditing) => {
 })
 
 onBeforeUnmount(() => {
-  if (sliderInterval) clearInterval(sliderInterval)
+  if (throttleTimeout) clearTimeout(throttleTimeout)
 })
 </script>
