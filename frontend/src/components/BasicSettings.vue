@@ -89,8 +89,8 @@
         :format-display="formatFocusValue"
         :scale-fn="scaleFocus"
         :unscale-fn="unscaleFocus"
-        label-min="0.5m"
-        label-max="∞"
+        label-min="Close"
+        label-max="Far"
         width="400px"
         theme="dark"
         @update:model-value="updateActuatorsState('focus', $event as number)"
@@ -921,30 +921,12 @@ const mountTypeOptions = [
   { name: 'Brushless PWM', value: 'BrushlessPWM' },
 ] satisfies { name: string; value: MountType }[];
 
-// Focus: raw [0–100] → distance [0.5 – 50]
-const scaleFocus = (raw: number): number => {
-  const ratio = raw / 100
-  const distance = (0.5 / (1 - ratio))
-  return Math.min(distance, 50)
-}
 
-const unscaleFocus = (scaled: number): number => {
-  return 100 * (1 - 0.5 / scaled)
-}
+const scaleFocus = (raw: number): number => raw / 10
+const unscaleFocus = (scaled: number): number => scaled * 10
 
-const formatFocusValue = (distance: number): string => {
-  if (distance >= 50) {
-    return '50m+'
-  }
-
-  if (distance < 1) {
-    return `${distance.toFixed(2)}m`
-  }
-  if (distance < 10) {
-    return `${distance.toFixed(1)}m`
-  } else {
-    return `${Math.round(distance)}m`
-  }
+const formatFocusValue = (scaled: number): string => {
+  return `${scaled.toFixed(1)}`
 }
 
 const scaleZoom = (raw: number): number => 1.0 + (raw / 100) * 1.0
