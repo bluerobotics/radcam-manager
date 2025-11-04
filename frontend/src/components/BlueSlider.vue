@@ -157,15 +157,19 @@ const scaledValue = computed(() =>
 )
 
 const labelMinDisplay = computed(() =>
-  props.formatDisplay 
-    ? props.formatDisplay(props.scaleFn ? props.scaleFn(props.min) : props.min)
-    : props.labelMin || props.min
+  props.labelMin 
+    ? props.labelMin 
+    : props.formatDisplay 
+      ? props.formatDisplay(props.scaleFn ? props.scaleFn(props.min) : props.min)
+      : props.min
 )
 
 const labelMaxDisplay = computed(() =>
-  props.formatDisplay 
-    ? props.formatDisplay(props.scaleFn ? props.scaleFn(props.max) : props.max)
-    : props.labelMax || props.max
+  props.labelMax 
+    ? props.labelMax 
+    : props.formatDisplay 
+      ? props.formatDisplay(props.scaleFn ? props.scaleFn(props.max) : props.max)
+      : props.max
 )
 
 const displayValue = computed(() => {
