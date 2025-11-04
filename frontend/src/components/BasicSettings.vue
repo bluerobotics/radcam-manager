@@ -108,7 +108,7 @@
         :scale-fn="scaleZoom"
         :unscale-fn="unscaleZoom"
         label-min="1x"
-        label-max="3x"
+        label-max="2x"
         width="400px"
         theme="dark"
         class="mt-6"
@@ -947,8 +947,8 @@ const formatFocusValue = (distance: number): string => {
   }
 }
 
-const scaleZoom = (raw: number): number => 1.0 + (raw / 100) * 2.0
-const unscaleZoom = (scaled: number): number => ((scaled - 1.0) / 2.0) * 100
+const scaleZoom = (raw: number): number => 1.0 + (raw / 100) * 1.0
+const unscaleZoom = (scaled: number): number => ((scaled - 1.0) / 1.0) * 100
 const formatZoomValue = (zoomLevel: number): string => {
   return `${zoomLevel.toFixed(1)}x`
 }
