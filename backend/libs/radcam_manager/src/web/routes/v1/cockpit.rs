@@ -193,44 +193,290 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
         .collect()
 }
 
-fn joystick_suggestions(_cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
-    let id = "RadCam Manager";
-    vec![
-        JoystickMapSuggestion {
-            id: id.to_string(),
-            protocol: JoystickProtocol::DataLakeVariable,
+fn joystick_suggestions(cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
+    let mappings = vec![
+        // === Regular modifier ===
+        ButtonMappingSuggestion {
+            id: "shift".to_string(),
+            action_protocol: JoystickProtocol::CockpitModifierKey,
+            action_name: "Shift".to_string(),
+            action_id: "shift".to_string(),
+            button: 0,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Enable shift modifier".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Mode-manual".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Mode manual".to_string(),
+            action_id: "Mode manual".to_string(),
+            button: 1,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Switch to manual flight mode".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Mode-depth-hold".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Mode depth hold".to_string(),
+            action_id: "Mode depth hold".to_string(),
+            button: 2,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Switch to depth hold mode".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Mode-stabilize".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Mode stabilize".to_string(),
+            action_id: "Mode stabilize".to_string(),
+            button: 3,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Switch to stabilize mode".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Mount-tilt-down".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Camera Mount Tilt Down".to_string(),
+            action_id: "Mount tilt down".to_string(),
+            button: 4,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Move camera mount down".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Mount-tilt-up".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Camera Mount Tilt Up".to_string(),
+            action_id: "Mount tilt up".to_string(),
+            button: 5,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Move camera mount up".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "camera-focus-decrease".to_string(),
+            action_protocol: JoystickProtocol::DataLakeVariable,
             action_name: "Camera focus decrease".to_string(),
             action_id: "camera-focus-decrease".to_string(),
             button: 6,
-            modifier: CockpitModifierKeyOption::Regular,
+            modifier_key: CockpitModifierKeyOption::Regular,
             description: Some("Decrease camera focus distance".to_string()),
         },
-        JoystickMapSuggestion {
-            id: id.to_string(),
-            protocol: JoystickProtocol::DataLakeVariable,
+        ButtonMappingSuggestion {
+            id: "camera-focus-increase".to_string(),
+            action_protocol: JoystickProtocol::DataLakeVariable,
             action_name: "Camera focus increase".to_string(),
             action_id: "camera-focus-increase".to_string(),
             button: 7,
-            modifier: CockpitModifierKeyOption::Regular,
+            modifier_key: CockpitModifierKeyOption::Regular,
             description: Some("Increase camera focus distance".to_string()),
         },
-        JoystickMapSuggestion {
-            id: id.to_string(),
-            protocol: JoystickProtocol::DataLakeVariable,
+        ButtonMappingSuggestion {
+            id: "Disarm".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Disarm".to_string(),
+            action_id: "Disarm".to_string(),
+            button: 8,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Disarm vehicle".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Arm".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Arm".to_string(),
+            action_id: "Arm".to_string(),
+            button: 9,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Arm vehicle".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "toggle_recording_all_streams".to_string(),
+            action_protocol: JoystickProtocol::CockpitAction,
+            action_name: "Toggle recording all streams".to_string(),
+            action_id: "toggle_recording_all_streams".to_string(),
+            button: 11,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Toggle recording all streams".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Gain-inc".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Gain inc".to_string(),
+            action_id: "Gain inc".to_string(),
+            button: 12,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Increase gain".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Gain-dec".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Gain dec".to_string(),
+            action_id: "Gain dec".to_string(),
+            button: 13,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Decrease gain".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Lights1-dimmer".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Lights1 dimmer".to_string(),
+            action_id: "Lights1 dimmer".to_string(),
+            button: 14,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Dim lights".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Lights1-brighter".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Lights1 brighter".to_string(),
+            action_id: "Lights1 brighter".to_string(),
+            button: 15,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Brighten lights".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "toggle_bottom_bar".to_string(),
+            action_protocol: JoystickProtocol::CockpitAction,
+            action_name: "Toggle bottom bar".to_string(),
+            action_id: "toggle_bottom_bar".to_string(),
+            button: 16,
+            modifier_key: CockpitModifierKeyOption::Regular,
+            description: Some("Toggle bottom UI bar".to_string()),
+        },
+        // === Shift modifier ===
+        ButtonMappingSuggestion {
+            id: "take_snapshot".to_string(),
+            action_protocol: JoystickProtocol::CockpitAction,
+            action_name: "Take a Snapshot".to_string(),
+            action_id: "take_snapshot".to_string(),
+            button: 2,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Take a snapshot".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Mode-acro".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Mode acro".to_string(),
+            action_id: "Mode acro".to_string(),
+            button: 3,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Switch to acro flight mode".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "camera-zoom-decrease".to_string(),
+            action_protocol: JoystickProtocol::DataLakeVariable,
             action_name: "Camera zoom decrease".to_string(),
             action_id: "camera-zoom-decrease".to_string(),
             button: 6,
-            modifier: CockpitModifierKeyOption::Shift,
+            modifier_key: CockpitModifierKeyOption::Shift,
             description: Some("Decrease camera zoom level".to_string()),
         },
-        JoystickMapSuggestion {
-            id: id.to_string(),
-            protocol: JoystickProtocol::DataLakeVariable,
+        ButtonMappingSuggestion {
+            id: "camera-zoom-increase".to_string(),
+            action_protocol: JoystickProtocol::DataLakeVariable,
             action_name: "Camera zoom increase".to_string(),
             action_id: "camera-zoom-increase".to_string(),
             button: 7,
-            modifier: CockpitModifierKeyOption::Shift,
+            modifier_key: CockpitModifierKeyOption::Shift,
             description: Some("Increase camera zoom level".to_string()),
         },
-    ]
+        ButtonMappingSuggestion {
+            id: "Trim-pitch-inc".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Trim pitch inc".to_string(),
+            action_id: "Trim pitch inc".to_string(),
+            button: 12,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Increase pitch trim".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Trim-pitch-dec".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Trim pitch dec".to_string(),
+            action_id: "Trim pitch dec".to_string(),
+            button: 13,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Decrease pitch trim".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Trim-roll-dec".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Trim roll dec".to_string(),
+            action_id: "Trim roll dec".to_string(),
+            button: 14,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Decrease roll trim".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Trim-roll-inc".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Trim roll inc".to_string(),
+            action_id: "Trim roll inc".to_string(),
+            button: 15,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Increase roll trim".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "toggle_top_bar".to_string(),
+            action_protocol: JoystickProtocol::CockpitAction,
+            action_name: "Toggle top bar".to_string(),
+            action_id: "toggle_top_bar".to_string(),
+            button: 16,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Toggle top UI bar".to_string()),
+        },
+    ];
+
+    let mut mappings_with_gripper = mappings.clone();
+    mappings_with_gripper.extend_from_slice(&[
+        ButtonMappingSuggestion {
+            id: "Actuator-1-max-momentary".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Open Gripper".to_string(),
+            action_id: "Actuator 1 max momentary".to_string(),
+            button: 4,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Open gripper".to_string()),
+        },
+        ButtonMappingSuggestion {
+            id: "Actuator-1-min-momentary".to_string(),
+            action_protocol: JoystickProtocol::MavlinkManualControl,
+            action_name: "Close Gripper".to_string(),
+            action_id: "Actuator 1 min momentary".to_string(),
+            button: 5,
+            modifier_key: CockpitModifierKeyOption::Shift,
+            description: Some("Close gripper".to_string()),
+        },
+    ]);
+
+    let mut suggestions = vec![
+        JoystickMapSuggestion {
+            id: "radcam-only".to_string(),
+            name: "RadCam only".to_string(),
+            button_mapping_suggestions: mappings,
+            // version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+        JoystickMapSuggestion {
+            id: "radcam-with-gripper".to_string(),
+            name: "RadCam with gripper".to_string(),
+            button_mapping_suggestions: mappings_with_gripper,
+            // version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+    ];
+
+    for (camera_uuid, _camera) in cameras {
+        suggestions.push(JoystickMapSuggestion {
+            id: format!("RadCam-{camera_uuid}"),
+            name: format!("RadCam (camera {camera_uuid})"),
+            button_mapping_suggestions: vec![ButtonMappingSuggestion {
+                id: format!("radcam_white_balance_{camera_uuid}"),
+                action_protocol: JoystickProtocol::CockpitAction,
+                action_name: format!("RadCam One-Push White Balance ({})", _camera.hostname),
+                action_id: format!("radcam_white_balance_{camera_uuid}"),
+                button: 10,
+                modifier_key: CockpitModifierKeyOption::Regular,
+                description: Some("Run One-Push White Balance once".to_string()),
+            }],
+            // version: env!("CARGO_PKG_VERSION").to_string(),
+        });
+    }
+
+    suggestions
 }
