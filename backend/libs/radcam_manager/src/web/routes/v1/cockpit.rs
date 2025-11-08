@@ -6,39 +6,54 @@ use radcam_commands::{
 use serde::Serialize;
 use serde_json::json;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct CockpitExtras {
     pub target_system: String,
     pub target_cockpit_api_version: String,
-    pub widgets: Vec<CockpitWidget>,
+    pub widgets: Vec<CockpitIframeWidget>,
     pub actions: Vec<CockpitAction>,
     pub joystick_suggestions: Vec<JoystickMapSuggestion>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct CockpitWidget {
+/// Widget configuration object as received from BlueOS or another external source
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CockpitIframeWidget {
+    /// Name of the widget, this is displayed on edit mode widget browser
     pub name: String,
-    pub config_iframe_url: Option<String>,
+    /// The URL at which the widget is located. Whether this is a relative or absolute path depends on the use_vehicle_address_as_base_url field
     pub iframe_url: String,
+    /// The icon of the widget, this is displayed on the widget browser
     pub iframe_icon: String,
-    pub version: String,
+    /// The name of the collapsed container, this is displayed on the widget browser
+    pub collapsible_container_name: String,
+    /// Version of the widget (optional)
+    pub version: Option<String>,
+    /// Whether the widget should start collapsed (optional)
+    pub start_collapsed: bool,
+    /// Whether to use vehicle address as base URL for the widget (optional)
+    pub use_vehicle_address_as_base_url: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct CockpitAction {
     pub id: String,
     pub name: String,
     #[serde(flatten)]
     pub action_type: CockpitActionType,
+    // /// Version of this Action
+    // pub version: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(tag = "type", content = "config", rename_all = "kebab-case")]
 pub enum CockpitActionType {
     HttpRequest(HttpRequestAction),
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequestAction {
     name: String,
@@ -49,7 +64,7 @@ pub struct HttpRequestAction {
     body: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, Copy)]
 pub enum HttpRequestMethod {
     GET,
     POST,
@@ -60,13 +75,26 @@ pub enum HttpRequestMethod {
 
 /// Joystick map suggestion from BlueOS extensions
 /// Example of use: https://github.com/rafaellehmkuhl/MockBlueOsExtension/blob/913eb0a978159bdb2c4e4b610044f1c8082755ab/src/backend/main.py#L147
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct JoystickMapSuggestion {
-    /// Unique identifier for this suggestion
+    /// ID for this suggestion
+    pub id: String,
+    /// Name for this suggestion
+    pub name: String,
+    /// List of the button mapping suggestions
+    pub button_mapping_suggestions: Vec<ButtonMappingSuggestion>,
+    // /// Version of this Joystick Map Suggestion
+    // pub version: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ButtonMappingSuggestion {
+    /// ID for this button suggestion
     pub id: String,
     /// Protocol that holds the action
-    pub protocol: JoystickProtocol,
+    pub action_protocol: JoystickProtocol,
     /// Human-readable name of the action to be mapped
     pub action_name: String,
     /// Unique identifier for the action to be mapped
@@ -74,12 +102,12 @@ pub struct JoystickMapSuggestion {
     /// The button number (in Cockpit standard mapping) to map the action to
     pub button: u32,
     /// The modifier key for this suggestion (regular or shift)
-    pub modifier: CockpitModifierKeyOption,
+    pub modifier_key: CockpitModifierKeyOption,
     /// Optional description of what the action does
     pub description: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
 /// Available joystick protocols.
 /// Each protocol is expected to have it's own way of doing thing, including mapping, limiting, communicating, etc.
@@ -91,7 +119,7 @@ pub enum JoystickProtocol {
     Other,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
 /// Modifier keys
 pub enum CockpitModifierKeyOption {
@@ -115,15 +143,17 @@ pub async fn cockpit_extras() -> impl IntoResponse {
     json.into_response()
 }
 
-fn widgets(cameras: &Cameras) -> Vec<CockpitWidget> {
+fn widgets(cameras: &Cameras) -> Vec<CockpitIframeWidget> {
     cameras
         .iter()
-        .map(|(camera_uuid, camera)| CockpitWidget {
+        .map(|(camera_uuid, camera)| CockpitIframeWidget {
             name: format!("RadCam ({})", camera.hostname),
-            config_iframe_url: None,
-            iframe_url: format!("#/?uuid={camera_uuid}&cockpit_mode=true"),
+            iframe_url: format!("/#/?uuid={camera_uuid}&cockpit_mode=true"),
             iframe_icon: "/assets/logo.svg".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            collapsible_container_name: format!("RadCam ({})", camera.hostname),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            start_collapsed: true,
+            use_vehicle_address_as_base_url: true,
         })
         .collect()
 }
@@ -135,7 +165,7 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
             let name: String = format!("RadCam One-Push White Balance ({})", camera.hostname);
 
             vec![CockpitAction {
-                id: format!("radcam-white-balance-{camera_uuid}"),
+                id: format!("radcam_white_balance_{camera_uuid}"),
                 name: name.clone(),
                 action_type: CockpitActionType::HttpRequest(HttpRequestAction {
                     name,
@@ -157,6 +187,7 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
                     })
                     .to_string(),
                 }),
+                // version: env!("CARGO_PKG_VERSION").to_string(),
             }]
         })
         .collect()
