@@ -41,17 +41,17 @@
               class="font-bold select-none"
               draggable="false"
             >
-              {{ formatDisplay ? formatDisplay(scaledValue) : (step && step < 1 ? scaledValue?.toFixed(1) || '0' : scaledValue.toFixed(0)) }}
+              {{ formatDisplay ? formatDisplay(scaledValue) : scaledValue.toFixed(defaultDecimals) }}
             </p>
           </div>
           <div v-else>
             <input
               ref="editInput"
-              v-model.number="scaledValueForEdit"
+              v-model.number="editedDisplayValue"
               type="number"
               :min="displayMin"
               :max="displayMax"
-              :step="step || 0.1"
+              :step="displayStep"
               autofocus
               class="bg-white border border-gray-300 rounded px-1 py-0.5"
               @input="clampEditedValue"
@@ -68,7 +68,7 @@
           style="width: 95%; left: 2.5%"
           :min="min"
           :max="max"
-          :step="step || 0.1"
+          :step="rawStep"
           :disabled="disabled || isEditingCurrentSliderValue"
           @input="onSliderInput"
           @dblclick="isEditingCurrentSliderValue = true"
@@ -137,13 +137,23 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: number | null): void
 }>()
 
+const decimalsFromStep = (step: number): number => {
+  if (!Number.isFinite(step) || step <= 0) return 0
+  const s = step.toString()
+  if (s.includes('e-')) {
+    const exponent = parseInt(s.split('e-')[1] ?? '0', 10)
+    return Math.min(6, Math.max(0, exponent))
+  }
+  const [, frac = ''] = s.split('.')
+  return Math.min(6, frac.length)
+}
+
 // Raw value (internal logic always uses this)
 const currentSliderValue = ref<number>(props.modelValue ?? props.min)
 const lastSentValue = ref<number>(currentSliderValue.value)
 
 // Editing state
 const isEditingCurrentSliderValue = ref(false)
-const scaledValueForEdit = ref(0)
 const editedDisplayValue = ref<number>(0)
 
 // Derived display values
@@ -175,6 +185,17 @@ const displayValue = computed(() => {
 const displayMin = computed(() => props.scaleFn ? props.scaleFn(props.min) : props.min)
 const displayMax = computed(() => props.scaleFn ? props.scaleFn(props.max) : props.max)
 
+const rawStep = computed(() => props.step ?? 0.1)
+const displayStep = computed(() => {
+  if (!props.scaleFn) return rawStep.value
+  const a = props.scaleFn(props.min)
+  const b = props.scaleFn(props.min + rawStep.value)
+  const delta = Math.abs(b - a)
+  return delta > 0 ? delta : rawStep.value
+})
+
+const defaultDecimals = computed(() => decimalsFromStep(displayStep.value))
+
 // Pill position logic
 const fillWidth = computed(() => {
   const val = currentSliderValue.value
@@ -202,23 +223,6 @@ const onSliderInput = (): void => {
   throttleSendValue(clamped)
 }
 
-// Handle double-click edit start
-watch(isEditingCurrentSliderValue, (v) => {
-  if (v) {
-    staticFillWidth.value = fillWidth.value
-    editedDisplayValue.value = displayValue.value
-  } else {
-    // Commit edited value
-    if (props.unscaleFn) {
-      const raw = props.unscaleFn(editedDisplayValue.value)
-      currentSliderValue.value = Math.min(Math.max(raw, props.min), props.max)
-    } else {
-      currentSliderValue.value = Math.min(Math.max(editedDisplayValue.value, props.min), props.max)
-    }
-    sendValue(currentSliderValue.value)
-  }
-})
-
 // Clamp during input
 const clampEditedValue = () => {
   editedDisplayValue.value = Math.min(Math.max(editedDisplayValue.value, displayMin.value), displayMax.value)
@@ -237,6 +241,7 @@ const throttleSendValue = (val: number) => {
 const handleValueChange = (e: KeyboardEvent): void => {
   if (e.key === 'Escape') {
     isEditingCurrentSliderValue.value = false
+    editedDisplayValue.value = props.scaleFn ? props.scaleFn(lastSentValue.value) : lastSentValue.value
     currentSliderValue.value = lastSentValue.value
   } else if (e.key === 'Enter') {
     isEditingCurrentSliderValue.value = false
@@ -252,15 +257,11 @@ watch(
 
 watch(isEditingCurrentSliderValue, (isEditing) => {
   if (isEditing) {
-    scaledValueForEdit.value = scaledValue.value
+    editedDisplayValue.value = displayValue.value
     staticFillWidth.value = fillWidth.value
   } else {
-    if (props.unscaleFn) {
-      const raw = props.unscaleFn(scaledValueForEdit.value)
-      currentSliderValue.value = Math.min(Math.max(raw, props.min), props.max)
-    } else {
-      currentSliderValue.value = Math.min(Math.max(scaledValueForEdit.value, props.min), props.max)
-    }
+    const raw = props.unscaleFn ? props.unscaleFn(editedDisplayValue.value) : editedDisplayValue.value
+    currentSliderValue.value = Math.min(Math.max(raw, props.min), props.max)
     sendValue(currentSliderValue.value)
   }
 })
