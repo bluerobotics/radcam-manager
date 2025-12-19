@@ -69,8 +69,14 @@ async fn main() -> Result<()> {
         }
     });
 
+    let radcam_manager_initialization_task =
+        tokio::spawn(
+            async move { radcam_manager::initialization::camera_initialization_task().await },
+        );
+
     web::run(cli::web_server().await, cli::default_api_version()).await;
 
+    radcam_manager_initialization_task.abort();
     autopilot_startup_task.abort();
     mcm_client_startup_task.abort();
 
