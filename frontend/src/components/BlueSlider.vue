@@ -73,6 +73,9 @@
           @input="onSliderInput"
           @change="onSliderChange"
           @pointerdown="startInteracting"
+          @keydown="onRangeKeydown"
+          @keyup="onRangeKeyup"
+          @blur="endInteracting"
           @dblclick="isEditingCurrentSliderValue = true"
         >
         <p
@@ -156,6 +159,7 @@ const lastSentValue = ref<number>(currentSliderValue.value)
 
 // Editing state
 const isEditingCurrentSliderValue = ref(false)
+const isInteracting = ref(false)
 const editedDisplayValue = ref<number>(0)
 
 // Derived display values
@@ -198,6 +202,11 @@ const displayStep = computed(() => {
 
 const defaultDecimals = computed(() => decimalsFromStep(displayStep.value))
 
+const approxEqual = (a: number, b: number): boolean => {
+  const epsilon = Math.max(rawStep.value / 10, 1e-4)
+  return Math.abs(a - b) <= epsilon
+}
+
 // Pill position logic
 const fillWidth = computed(() => {
   const val = currentSliderValue.value
@@ -218,6 +227,31 @@ const sendValue = (val: number) => {
   emit('update:modelValue', val)
 }
 
+const commitLockValue = ref<number | null>(null)
+let commitLockTimeout: number | null = null
+const commitLockUntilMs = ref<number>(0)
+
+const clearCommitLock = (): void => {
+  commitLockValue.value = null
+  commitLockUntilMs.value = 0
+  if (commitLockTimeout) {
+    clearTimeout(commitLockTimeout)
+    commitLockTimeout = null
+  }
+}
+
+const setCommitLock = (val: number): void => {
+  const lockMs = 2000
+  commitLockValue.value = val
+  commitLockUntilMs.value = Date.now() + lockMs
+  if (commitLockTimeout) clearTimeout(commitLockTimeout)
+  commitLockTimeout = window.setTimeout(() => {
+    commitLockTimeout = null
+    commitLockValue.value = null
+    commitLockUntilMs.value = 0
+  }, lockMs)
+}
+
 // Slider input → update raw
 const onSliderInput = (): void => {
   const clamped = Math.min(Math.max(currentSliderValue.value, props.min), props.max)
@@ -226,10 +260,7 @@ const onSliderInput = (): void => {
 }
 
 const onSliderChange = (): void => {
-  const clamped = Math.min(Math.max(currentSliderValue.value, props.min), props.max)
-  currentSliderValue.value = clamped
-  flushPendingValue()
-  sendValue(clamped)
+  endInteracting()
 }
 
 // Clamp during input
@@ -268,10 +299,43 @@ const flushPendingValue = (): void => {
   sendValue(toSend)
 }
 
+const endInteracting = (): void => {
+  isInteracting.value = false
+
+  const clamped = Math.min(Math.max(currentSliderValue.value, props.min), props.max)
+  currentSliderValue.value = clamped
+  pendingValue = clamped
+  flushPendingValue()
+  sendValue(clamped)
+  setCommitLock(clamped)
+}
+
+const handlePointerUp = (): void => endInteracting()
+const handlePointerCancel = (): void => endInteracting()
+
 const startInteracting = (): void => {
   if (props.disabled || isEditingCurrentSliderValue.value) return
-  window.addEventListener('pointerup', flushPendingValue, { once: true })
-  window.addEventListener('pointercancel', flushPendingValue, { once: true })
+  isInteracting.value = true
+  clearCommitLock()
+  window.addEventListener('pointerup', handlePointerUp, { once: true })
+  window.addEventListener('pointercancel', handlePointerCancel, { once: true })
+}
+
+const isArrowKey = (key: string): boolean =>
+  key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown'
+
+const onRangeKeydown = (e: KeyboardEvent): void => {
+  if (props.disabled || isEditingCurrentSliderValue.value) return
+  if (!isArrowKey(e.key)) return
+  if (!isInteracting.value) {
+    isInteracting.value = true
+    clearCommitLock()
+  }
+}
+
+const onRangeKeyup = (e: KeyboardEvent): void => {
+  if (!isArrowKey(e.key)) return
+  endInteracting()
 }
 
 // Keyboard handling
@@ -288,7 +352,18 @@ const handleValueChange = (e: KeyboardEvent): void => {
 // Sync from parent
 watch(
   () => props.modelValue,
-  (v) => (currentSliderValue.value = v ?? props.min),
+  (v) => {
+    const next = v ?? props.min
+    if (isEditingCurrentSliderValue.value || isInteracting.value) return
+    if (
+      commitLockValue.value !== null &&
+      Date.now() < commitLockUntilMs.value &&
+      !approxEqual(next, commitLockValue.value)
+    ) {
+      return
+    }
+    currentSliderValue.value = next
+  },
   { immediate: true }
 )
 
@@ -300,12 +375,14 @@ watch(isEditingCurrentSliderValue, (isEditing) => {
     const raw = props.unscaleFn ? props.unscaleFn(editedDisplayValue.value) : editedDisplayValue.value
     currentSliderValue.value = Math.min(Math.max(raw, props.min), props.max)
     sendValue(currentSliderValue.value)
+    setCommitLock(currentSliderValue.value)
   }
 })
 
 onBeforeUnmount(() => {
   if (throttleTimeout) clearTimeout(throttleTimeout)
-  window.removeEventListener('pointerup', flushPendingValue)
-  window.removeEventListener('pointercancel', flushPendingValue)
+  if (commitLockTimeout) clearTimeout(commitLockTimeout)
+  window.removeEventListener('pointerup', handlePointerUp)
+  window.removeEventListener('pointercancel', handlePointerCancel)
 })
 </script>
