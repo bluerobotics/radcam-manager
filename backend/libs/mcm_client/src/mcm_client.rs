@@ -68,7 +68,12 @@ impl MCMClient {
             .get_video_sources()
             .await?
             .into_iter()
-            .filter(|source| source.name.eq("HDIPC - IPCamera (IPCamera)"))
+            .filter(|source| {
+                // Firmware <= v11
+                source.name.eq("HDIPC - IPCamera (IPCamera)")
+                // Firmware >= v13
+                    || source.name.eq("UnderwaterCam - IPCamera (UnderwaterCam)")
+            })
             .collect();
 
         Ok(sources)
@@ -95,8 +100,13 @@ impl MCMClient {
                     return None;
                 };
 
+                // Firmware <= v11
                 if name.ne("HDIPC - IPCamera (IPCamera)")
                     || model.ne("HDIPC")
+                    || manufacturer.ne("IPCamera")
+                // Firmware >= v13
+                || name.ne("UnderwaterCam - IPCamera (UnderwaterCam)")
+                    || model.ne("UnderwaterCam")
                     || manufacturer.ne("IPCamera")
                 {
                     return None;
