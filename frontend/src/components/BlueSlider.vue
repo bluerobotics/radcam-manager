@@ -71,6 +71,8 @@
           :step="rawStep"
           :disabled="disabled || isEditingCurrentSliderValue"
           @input="onSliderInput"
+          @change="onSliderChange"
+          @pointerdown="startInteracting"
           @dblclick="isEditingCurrentSliderValue = true"
         >
         <p
@@ -223,18 +225,53 @@ const onSliderInput = (): void => {
   throttleSendValue(clamped)
 }
 
+const onSliderChange = (): void => {
+  const clamped = Math.min(Math.max(currentSliderValue.value, props.min), props.max)
+  currentSliderValue.value = clamped
+  flushPendingValue()
+  sendValue(clamped)
+}
+
 // Clamp during input
 const clampEditedValue = () => {
   editedDisplayValue.value = Math.min(Math.max(editedDisplayValue.value, displayMin.value), displayMax.value)
 }
 
 let throttleTimeout: number | null = null
+let pendingValue: number | null = null
+
 const throttleSendValue = (val: number) => {
+  pendingValue = val
   if (throttleTimeout) return
-  sendValue(val)
+
+  const leading = pendingValue
+  pendingValue = null
+  sendValue(leading)
+
   throttleTimeout = window.setTimeout(() => {
     throttleTimeout = null
+    if (pendingValue === null) return
+    const trailing = pendingValue
+    pendingValue = null
+    sendValue(trailing)
   }, 500)
+}
+
+const flushPendingValue = (): void => {
+  if (throttleTimeout) {
+    clearTimeout(throttleTimeout)
+    throttleTimeout = null
+  }
+  if (pendingValue === null) return
+  const toSend = pendingValue
+  pendingValue = null
+  sendValue(toSend)
+}
+
+const startInteracting = (): void => {
+  if (props.disabled || isEditingCurrentSliderValue.value) return
+  window.addEventListener('pointerup', flushPendingValue, { once: true })
+  window.addEventListener('pointercancel', flushPendingValue, { once: true })
 }
 
 // Keyboard handling
@@ -268,5 +305,7 @@ watch(isEditingCurrentSliderValue, (isEditing) => {
 
 onBeforeUnmount(() => {
   if (throttleTimeout) clearTimeout(throttleTimeout)
+  window.removeEventListener('pointerup', flushPendingValue)
+  window.removeEventListener('pointercancel', flushPendingValue)
 })
 </script>
