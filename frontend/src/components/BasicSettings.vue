@@ -85,7 +85,7 @@
         label="Focus"
         :min="0"
         :max="100"
-        :step="1"
+        :step="0.1"
         :format-display="formatFocusValue"
         :scale-fn="scaleFocus"
         :unscale-fn="unscaleFocus"
@@ -926,7 +926,7 @@ const scaleFocus = (raw: number): number => raw / 10
 const unscaleFocus = (scaled: number): number => scaled * 10
 
 const formatFocusValue = (scaled: number): string => {
-  return `${scaled.toFixed(1)}`
+  return `${scaled.toFixed(2)}`
 }
 
 const scaleZoom = (raw: number): number => 1.0 + (raw / 100) * 1.0
