@@ -649,7 +649,6 @@ import Loading from './Loading.vue'
 import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, BaseAutoWhiteBalanceSceneValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
 import axios from 'axios'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
-import { applyNonNull } from '@/utils/jsonUtils'
 import ErrorDialog from './ErrorDialog.vue'
 import WelcomeDialog from './WelcomeDialog.vue'
 import { OneMoreTime } from '@/utils/oneMoreTime'
@@ -743,6 +742,30 @@ const actuatorsState = ref<ActuatorsState>({
   focus: 0,
   zoom: 0,
   tilt: 0,
+})
+type ActuatorKey = keyof ActuatorsState
+
+const approxEqual = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-3
+
+// Tracks the last user-requested value per actuator. While a key is pending, we do not let
+// periodic polling overwrite the UI with intermediate/stale values.
+const desiredActuatorsState = ref<Record<ActuatorKey, number | null>>({
+  focus: null,
+  zoom: null,
+  tilt: null,
+})
+
+// Coalesce actuator set requests so only one request per actuator can be in-flight, always
+// sending the most recent value (prevents request pile-up).
+const actuatorsSetInFlight = ref<Record<ActuatorKey, boolean>>({
+  focus: false,
+  zoom: false,
+  tilt: false,
+})
+const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
+  focus: null,
+  zoom: null,
+  tilt: null,
 })
 const isConfigured = ref<boolean>(true)
 const showWelcomeDialog = ref<boolean>(true)
@@ -1103,7 +1126,23 @@ const getActuatorsState = () => {
     .then((response) => {
       const state = response.data as ActuatorsState
 
-      applyNonNull(actuatorsState.value, state)
+      ;(['focus', 'zoom', 'tilt'] as const).forEach((key) => {
+        const desired = desiredActuatorsState.value[key]
+        const received = state[key]
+
+        // If we have a desired value in flight, only accept feedback once it converges.
+        if (desired !== null) {
+          if (received !== null && received !== undefined && approxEqual(received, desired)) {
+            desiredActuatorsState.value[key] = null
+            actuatorsState.value[key] = received
+          }
+          return
+        }
+
+        if (received !== null && received !== undefined) {
+          actuatorsState.value[key] = received
+        }
+      })
       console.log(state)
       isConfigured.value = true
     })
@@ -1114,28 +1153,54 @@ const getActuatorsState = () => {
     })
 }
 
-const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
+const sendQueuedActuatorState = (param: ActuatorKey): void => {
   if (!props.selectedCameraUuid || isLoading.value) return
+  if (actuatorsSetInFlight.value[param]) return
+
+  const value = actuatorsSetQueued.value[param]
+  if (value === null) return
+
+  actuatorsSetQueued.value[param] = null
+  actuatorsSetInFlight.value[param] = true
 
   const payload: ActuatorsControl = {
     camera_uuid: props.selectedCameraUuid,
     action: "setActuatorsState",
-    json: { [param]: value } as ActuatorsState
+    json: { [param]: value } as ActuatorsState,
   }
 
   axios
     .post(`${props.backendApi}/autopilot/control`, payload)
-    .then((response) => { 
-      const state = response.data as ActuatorsState;
-
-      applyNonNull(actuatorsState.value, state)
-      console.log(state)
-    })
     .catch((error) => {
       const message = `Error updating ${param}`
       console.log(message, error.message)
       showWarningToast(message, error)
     })
+    .finally(() => {
+      actuatorsSetInFlight.value[param] = false
+
+      // If a newer value was queued while this request was in-flight, send it now.
+      if (actuatorsSetQueued.value[param] !== null) {
+        sendQueuedActuatorState(param)
+      }
+    })
+}
+
+const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
+  if (!props.selectedCameraUuid || isLoading.value) return
+
+  const key = param as ActuatorKey
+
+  // Optimistic UI update: do not wait for feedback to reflect user input.
+  actuatorsState.value[key] = value
+  desiredActuatorsState.value[key] = value
+
+  // Coalesce requests per actuator to prevent backlog.
+  const existingQueued = actuatorsSetQueued.value[key]
+  if (existingQueued === null || !approxEqual(existingQueued, value)) {
+    actuatorsSetQueued.value[key] = value
+  }
+  sendQueuedActuatorState(key)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
