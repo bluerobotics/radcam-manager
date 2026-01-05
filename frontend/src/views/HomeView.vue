@@ -34,6 +34,11 @@
                   Update Lua script
                 </v-list-item-title>
               </v-list-item>
+              <v-list-item @click="applyRecommendedSettings">
+                <v-list-item-title class="flex">
+                  Apply Recommended Settings
+                </v-list-item-title>
+              </v-list-item>
               <v-divider />
               <v-divider />
             </v-list>
@@ -240,6 +245,28 @@ const updateLuaScript = (): void => {
     })
     .catch((error) => {
       console.error(`Error sending exportLuaScript request:`, error.message)
+    })
+}
+
+const applyRecommendedSettings = (): void => {
+  if (!selectedCameraUUID.value) return
+
+  const payload = {
+    camera_uuid: selectedCameraUUID.value,
+    action: 'setRecommendedSettings',
+  }
+
+  console.log(payload)
+
+  axios
+    .post(`${backendAPI.value}/camera/control`, payload)
+    .then((response) => {
+      console.log(`Recommended settings applied:`, response)
+      snackbarMessage.value = `Recommended settings applied.`
+      showSnackbar.value = true
+    })
+    .catch((error) => {
+      console.error(`Error sending setRecommendedSettings request:`, error.message)
     })
 }
 
