@@ -101,14 +101,15 @@ impl MCMClient {
                 };
 
                 // Firmware <= v11
-                if name.ne("HDIPC - IPCamera (IPCamera)")
-                    || model.ne("HDIPC")
-                    || manufacturer.ne("IPCamera")
+                let is_old_firmware = name.eq("HDIPC - IPCamera (IPCamera)")
+                    && model.eq("HDIPC")
+                    && manufacturer.eq("IPCamera");
                 // Firmware >= v13
-                || name.ne("UnderwaterCam - IPCamera (UnderwaterCam)")
-                    || model.ne("UnderwaterCam")
-                    || manufacturer.ne("IPCamera")
-                {
+                let is_new_firmware = name.eq("UnderwaterCam - IPCamera (UnderwaterCam)")
+                    && model.eq("UnderwaterCam")
+                    && manufacturer.eq("IPCamera");
+
+                if !(is_old_firmware || is_new_firmware) {
                     return None;
                 }
 
