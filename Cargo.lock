@@ -166,7 +166,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "autopilot"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "axum",
@@ -280,7 +280,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bindings"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "autopilot",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "blueos_client"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -2522,7 +2522,7 @@ dependencies = [
 
 [[package]]
 name = "mcm_client"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "indexmap 2.10.0",
@@ -3039,7 +3039,7 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "radcam-manager"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "autopilot",
@@ -3059,7 +3059,7 @@ dependencies = [
 
 [[package]]
 name = "radcam_commands"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "axum",
@@ -3084,7 +3084,7 @@ dependencies = [
 
 [[package]]
 name = "radcam_manager"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "autopilot",
@@ -3572,7 +3572,7 @@ dependencies = [
 
 [[package]]
 name = "settings"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4448,7 +4448,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utils"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "serde",
@@ -4654,7 +4654,7 @@ dependencies = [
 
 [[package]]
 name = "web_client"
-version = "0.2.0-beta.13"
+version = "0.2.0-beta.14"
 dependencies = [
  "anyhow",
  "reqwest",
