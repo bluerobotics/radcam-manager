@@ -124,6 +124,8 @@ const props = defineProps<{
   name: string
   /** Step increment (default 1). */
   step?: number
+  /** Keyboard arrow step multiplier (default 3). */
+  keyboardStepMultiplierLimit?: number
   /** 'light' or 'dark' theme. (default 'light')*/
   theme?: 'light' | 'dark' | 'transparent'
   /** Container width (default '100%'). */
@@ -192,6 +194,48 @@ const displayMin = computed(() => props.scaleFn ? props.scaleFn(props.min) : pro
 const displayMax = computed(() => props.scaleFn ? props.scaleFn(props.max) : props.max)
 
 const rawStep = computed(() => props.step ?? 0.1)
+
+const keyboardStepMultiplier = computed(() => {
+  const multiplier = props.keyboardStepMultiplierLimit ?? 3
+  return Number.isFinite(multiplier) && multiplier >= 1 ? multiplier : 3
+})
+
+// Ballistic keyboard stepping:
+// Start at 1x step and ease up toward `keyboardStepMultiplier` while
+// the user keeps pressing/holding an arrow key.
+const keyboardBallisticLastTs = ref<number>(0)
+const keyboardBallisticStreak = ref<number>(0)
+const keyboardBallisticDirection = ref<number>(0)
+
+const resetKeyboardBallistics = (): void => {
+  keyboardBallisticLastTs.value = 0
+  keyboardBallisticStreak.value = 0
+  keyboardBallisticDirection.value = 0
+}
+
+const ballisticMultiplier = (direction: number): number => {
+  const now = Date.now()
+  const max = keyboardStepMultiplier.value
+
+  // A new burst starts if the user pauses or changes direction.
+  const sameBurst =
+    keyboardBallisticDirection.value === direction &&
+    now - keyboardBallisticLastTs.value <= 250
+
+  if (!sameBurst) keyboardBallisticStreak.value = 0
+
+  keyboardBallisticStreak.value += 1
+  keyboardBallisticLastTs.value = now
+  keyboardBallisticDirection.value = direction
+
+  // Ramp to max over a handful of repeats, with an ease-out curve.
+  const rampRepeats = 6
+  const t = Math.min(1, (keyboardBallisticStreak.value - 1) / rampRepeats)
+  const eased = 1 - Math.pow(1 - t, 2)
+
+  return 1 + eased * (max - 1)
+}
+
 const displayStep = computed(() => {
   if (!props.scaleFn) return rawStep.value
   const a = props.scaleFn(props.min)
@@ -327,6 +371,31 @@ const isArrowKey = (key: string): boolean =>
 const onRangeKeydown = (e: KeyboardEvent): void => {
   if (props.disabled || isEditingCurrentSliderValue.value) return
   if (!isArrowKey(e.key)) return
+
+  // Override native range keyboard step so we can apply ballistics.
+  e.preventDefault()
+
+  const direction = (e.key === 'ArrowRight' || e.key === 'ArrowUp') ? 1 : -1
+  const step = rawStep.value
+
+  if (!Number.isFinite(step) || step <= 0) return
+
+  const multiplier = ballisticMultiplier(direction)
+  const keyboardStep = step * multiplier
+
+  const next = currentSliderValue.value + direction * keyboardStep
+  const clamped = Math.min(Math.max(next, props.min), props.max)
+
+  // Align to step grid to avoid float drift.
+  const stepsFromMin = Math.round((clamped - props.min) / step)
+  const aligned = Math.min(
+    Math.max(props.min + stepsFromMin * step, props.min),
+    props.max,
+  )
+
+  currentSliderValue.value = aligned
+  throttleSendValue(aligned)
+
   if (!isInteracting.value) {
     isInteracting.value = true
     clearCommitLock()
@@ -335,6 +404,7 @@ const onRangeKeydown = (e: KeyboardEvent): void => {
 
 const onRangeKeyup = (e: KeyboardEvent): void => {
   if (!isArrowKey(e.key)) return
+  resetKeyboardBallistics()
   endInteracting()
 }
 
