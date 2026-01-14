@@ -43,8 +43,8 @@ pub struct CockpitAction {
     pub name: String,
     #[serde(flatten)]
     pub action_type: CockpitActionType,
-    // /// Version of this Action
-    // pub version: String,
+    /// Version of this Action
+    pub version: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -187,7 +187,7 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
                     })
                     .to_string(),
                 }),
-                // version: env!("CARGO_PKG_VERSION").to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
             }]
         })
         .collect()
