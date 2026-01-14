@@ -199,7 +199,7 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
                     })
                     .to_string(),
                 }),
-                version: env!("CARGO_PKG_VERSION").to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
             }]
         })
         .collect()
@@ -481,15 +481,17 @@ fn joystick_suggestions(cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
             id: "radcam-for-bluerov".to_string(),
             name: "RadCam on BlueROV".to_string(),
             target_vehicle_types: vec![TargetVehicleType::MavTypeSubmarine],
-            button_mapping_suggestions: mappings,
-            // version: env!("CARGO_PKG_VERSION").to_string(),
+            description: "RadCam buttons mapping for BlueROV without gripper".to_string(),
+            button_mapping_suggestions: mappings_rov,
+            version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
         },
         JoystickMapSuggestion {
             id: "radcam-for-bluerov-with-gripper".to_string(),
             name: "RadCam on BlueROV with gripper".to_string(),
             target_vehicle_types: vec![TargetVehicleType::MavTypeSubmarine],
-            button_mapping_suggestions: mappings_with_gripper,
-            // version: env!("CARGO_PKG_VERSION").to_string(),
+            description: "RadCam buttons mapping for BlueROV with gripper".to_string(),
+            button_mapping_suggestions: mappings_rov_with_gripper,
+            version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
         },
         JoystickMapSuggestion {
             id: "radcam-for-any-vehicle-types".to_string(),
@@ -499,25 +501,5 @@ fn joystick_suggestions(cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
             button_mapping_suggestions: mappings_for_anys,
             version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
         },
-    ];
-
-    for (camera_uuid, _camera) in cameras {
-        suggestions.push(JoystickMapSuggestion {
-            id: format!("RadCam-{camera_uuid}"),
-            name: format!("RadCam (camera {camera_uuid})"),
-            vehicle_type: vec![], // any vehicle
-            button_mapping_suggestions: vec![ButtonMappingSuggestion {
-                id: format!("radcam_white_balance_{camera_uuid}"),
-                action_protocol: JoystickProtocol::CockpitAction,
-                action_name: format!("RadCam One-Push White Balance ({})", _camera.hostname),
-                action_id: format!("radcam_white_balance_{camera_uuid}"),
-                button: 10,
-                modifier_key: CockpitModifierKeyOption::Regular,
-                description: Some("Run One-Push White Balance once".to_string()),
-            }],
-            // version: env!("CARGO_PKG_VERSION").to_string(),
-        });
-    }
-
-    suggestions
+    ]
 }
