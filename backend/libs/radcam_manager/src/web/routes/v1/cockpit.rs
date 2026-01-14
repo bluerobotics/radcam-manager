@@ -84,8 +84,8 @@ pub struct JoystickMapSuggestion {
     pub name: String,
     /// List of the button mapping suggestions
     pub button_mapping_suggestions: Vec<ButtonMappingSuggestion>,
-    // /// Version of this Joystick Map Suggestion
-    // pub version: String,
+    /// Version of this Joystick Map Suggestion
+    pub version: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -187,7 +187,7 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
                     })
                     .to_string(),
                 }),
-                version: env!("CARGO_PKG_VERSION").to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
             }]
         })
         .collect()
@@ -451,13 +451,13 @@ fn joystick_suggestions(cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
             id: "radcam-only".to_string(),
             name: "RadCam only".to_string(),
             button_mapping_suggestions: mappings,
-            // version: env!("CARGO_PKG_VERSION").to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
         },
         JoystickMapSuggestion {
             id: "radcam-with-gripper".to_string(),
             name: "RadCam with gripper".to_string(),
             button_mapping_suggestions: mappings_with_gripper,
-            // version: env!("CARGO_PKG_VERSION").to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
         },
     ];
 
@@ -474,7 +474,7 @@ fn joystick_suggestions(cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
                 modifier_key: CockpitModifierKeyOption::Regular,
                 description: Some("Run One-Push White Balance once".to_string()),
             }],
-            // version: env!("CARGO_PKG_VERSION").to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
         });
     }
 
