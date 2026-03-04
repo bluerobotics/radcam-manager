@@ -6,7 +6,8 @@
       :class="[
         theme === 'dark' ? 'bg-[#363636]' : 'bg-[#F5F5F5]',
         {
-          'transparent-card': isCockpitMode,
+          'transparent-card mb-10': isCockpitMode,
+          'mt-6': !isCockpitMode,
         },
       ]"
     >
