@@ -43,18 +43,24 @@ assert(#furthest_points >= 2, "furthest_points requires at least 2 points")
 -- Function to set focus and zoom to trim level
 local function set_zoom_focus_to_trim()
     local focus_channel = SRV_Channels:find_channel(K_FOCUS)
+    if focus_channel == nil then return false end
     local focus_max = param:get("SERVO" .. focus_channel + 1 .. "_MAX")
     local focus_min = param:get("SERVO" .. focus_channel + 1 .. "_MIN")
     local focus_trim = param:get("SERVO" .. focus_channel + 1 .. "_TRIM")
+    if focus_max == nil or focus_min == nil or focus_trim == nil then return false end
     local focus_scaled = 1000 * (focus_trim - focus_min) / (focus_max - focus_min)
     SRV_Channels:set_output_scaled(K_FOCUS, focus_scaled)
 
     local zoom_channel = SRV_Channels:find_channel(K_ZOOM)
+    if zoom_channel == nil then return false end
     local zoom_max = param:get("SERVO" .. zoom_channel + 1 .. "_MAX")
     local zoom_min = param:get("SERVO" .. zoom_channel + 1 .. "_MIN")
     local zoom_trim = param:get("SERVO" .. zoom_channel + 1 .. "_TRIM")
+    if zoom_max == nil or zoom_min == nil or zoom_trim == nil then return false end
     local zoom_scaled = 1000 * (zoom_trim - zoom_min) / (zoom_max - zoom_min)
     SRV_Channels:set_output_scaled(K_ZOOM, zoom_scaled)
+
+    return true
 end
 
 -- Linear interpolation function
@@ -113,6 +119,11 @@ function update()
     -- Retrieve user-controlled focus and zoom
     local focus_input = SRV_Channels:get_output_pwm(K_FOCUS)
     local zoom_input = SRV_Channels:get_output_pwm(K_ZOOM)
+
+    if enable_focus_and_zoom_correlation == nil or margin_gain == nil
+        or focus_input == nil or zoom_input == nil then
+        return update, 100
+    end
 
     -- Computes the output focus
     local focus_output
