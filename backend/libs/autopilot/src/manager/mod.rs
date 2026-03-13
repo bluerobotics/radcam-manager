@@ -14,6 +14,7 @@ use tokio::sync::RwLock;
 use tracing::*;
 use uuid::Uuid;
 
+use script::ScriptHealthTracker;
 use settings::MANAGER as SETTINGS_MANAGER;
 
 use crate::{
@@ -29,6 +30,7 @@ pub struct Manager {
     pub mavlink: MavlinkComponent,
     pub autopilot_scripts_file: String,
     pub settings: State,
+    pub(crate) script_health: ScriptHealthTracker,
 }
 
 #[derive(Debug)]
@@ -141,6 +143,8 @@ impl Manager {
     ) -> Result<api::ActuatorsState> {
         use ::mavlink::ardupilotmega::{COMMAND_LONG_DATA, CameraZoomType, MavCmd, SetFocusType};
 
+        let focus_was_set = new_state.focus.is_some();
+
         if let Some(focus) = new_state.focus {
             self.mavlink
                 .send_command(COMMAND_LONG_DATA {
@@ -174,6 +178,10 @@ impl Manager {
         }
 
         let _ = self.get_state(camera_uuid).await;
+
+        if focus_was_set {
+            self.check_focus_script_health(camera_uuid).await;
+        }
 
         Ok(*new_state)
     }
@@ -273,18 +281,24 @@ pub async fn init(
 
     let settings = State::from_settings().await?;
 
+    let script_health = ScriptHealthTracker::default();
+
     MANAGER.get_or_init(|| {
         RwLock::new(Manager {
             mavlink,
             autopilot_scripts_file,
             settings,
+            script_health,
         })
     });
 
     Ok(())
 }
 
-fn get_output_raw_from_channel(data: &SERVO_OUTPUT_RAW_DATA, channel: ServoChannel) -> Option<u16> {
+pub(super) fn get_output_raw_from_channel(
+    data: &SERVO_OUTPUT_RAW_DATA,
+    channel: ServoChannel,
+) -> Option<u16> {
     match channel {
         ServoChannel::SERVO1 => Some(data.servo1_raw),
         ServoChannel::SERVO2 => Some(data.servo2_raw),

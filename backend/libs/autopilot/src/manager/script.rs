@@ -6,12 +6,14 @@ use uuid::Uuid;
 
 use crate::{
     CameraActuators, api, generate_update_channel_param_function,
-    manager::Manager,
+    manager::{Manager, get_output_raw_from_channel},
     parameters::{ChannelFunction, ParamType},
 };
 
 const PARAM_TABLE_KEY_BASE: u8 = 73;
 pub const PARAM_PREFIX: &str = "RCAM";
+
+const SCRIPT_HEALTH_STALE_THRESHOLD: u8 = 3;
 
 impl Manager {
     #[instrument(level = "debug", skip(self))]
@@ -297,6 +299,80 @@ impl Manager {
         UINT16,
         script_channel
     );
+
+    pub async fn check_focus_script_health(&mut self, camera_uuid: &Uuid) {
+        let Some(actuators) = self.settings.actuators.get(camera_uuid) else {
+            return;
+        };
+
+        if !actuators.parameters.enable_focus_and_zoom_correlation {
+            return;
+        }
+
+        let servo_output_raw = match self.mavlink.request_servo_output_raw().await {
+            Ok(data) => data,
+            Err(_) => return,
+        };
+
+        // script_channel (e.g. SERVO12) = CameraFocus = input to the Lua script
+        let script_input_raw =
+            get_output_raw_from_channel(&servo_output_raw, actuators.parameters.script_channel);
+        // focus_channel (e.g. SERVO10) = Script1 = output from the Lua script
+        let script_output_raw =
+            get_output_raw_from_channel(&servo_output_raw, actuators.parameters.focus_channel);
+
+        if let (Some(input_raw), Some(output_raw)) = (script_input_raw, script_output_raw) {
+            if self.script_health.update(input_raw, output_raw) {
+                warn!("Attempting Lua script reload due to stale focus output");
+                if let Err(error) = self.mavlink.reload_lua_scripts(true).await {
+                    error!("Failed to reload Lua scripts: {error:?}");
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ScriptHealthTracker {
+    last_input_raw: Option<u16>,
+    last_output_raw: Option<u16>,
+    stale_count: u8,
+}
+
+impl ScriptHealthTracker {
+    /// Checks whether the Lua script appears stuck by comparing its input
+    /// (CameraFocus on script_channel) against its output (Script1 on focus_channel).
+    /// Returns `true` when the output has been frozen for several consecutive
+    /// readings while the input kept changing, indicating a reload is needed.
+    fn update(&mut self, input_raw: u16, output_raw: u16) -> bool {
+        let prev_input = self.last_input_raw.replace(input_raw);
+        let prev_output = self.last_output_raw.replace(output_raw);
+
+        let Some((prev_input, prev_output)) = prev_input.zip(prev_output) else {
+            return false;
+        };
+
+        let input_changed = input_raw.abs_diff(prev_input) > 10;
+        let output_stuck = output_raw == prev_output;
+
+        if !input_changed || !output_stuck {
+            self.stale_count = 0;
+            return false;
+        }
+
+        self.stale_count = self.stale_count.saturating_add(1);
+        if self.stale_count < SCRIPT_HEALTH_STALE_THRESHOLD {
+            return false;
+        }
+
+        warn!(
+            "Lua script appears stuck: input changed ({prev_input} -> {input_raw}) \
+             but output is frozen at {output_raw} for {count} consecutive readings",
+            count = self.stale_count,
+        );
+        self.stale_count = 0;
+        true
+    }
 }
 
 fn generate_lua_script(config: &CameraActuators) -> Result<String> {
