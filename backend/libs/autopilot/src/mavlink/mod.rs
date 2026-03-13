@@ -300,11 +300,20 @@ impl MavlinkComponent {
                                 && command_ack.command == command.command
                             {
                                 return match command_ack.result {
-                                    MavResult::MAV_RESULT_ACCEPTED => Ok(()),
-                                    reason => Err(anyhow!(
-                                        "Command {:?} rejected: {reason:?}",
-                                        command_ack.command
-                                    )),
+                                    MavResult::MAV_RESULT_ACCEPTED => {
+                                        debug!("Command {:?} accepted", command_ack.command);
+                                        Ok(())
+                                    }
+                                    reason => {
+                                        warn!(
+                                            "Command {:?} rejected: {reason:?}",
+                                            command_ack.command
+                                        );
+                                        Err(anyhow!(
+                                            "Command {:?} rejected: {reason:?}",
+                                            command_ack.command
+                                        ))
+                                    }
                                 };
                             }
                         }
