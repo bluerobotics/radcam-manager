@@ -487,6 +487,8 @@ impl ComponentInner {
                 .await
                 .context("Failed to send initial heartbeat")?;
 
+            connection.set_reconnect_heartbeat(header, heartbeat).await;
+
             info!("Initial heartbeat sent.");
         }
 

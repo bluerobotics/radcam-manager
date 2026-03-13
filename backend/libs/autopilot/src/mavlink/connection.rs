@@ -17,6 +17,7 @@ pub struct Connection {
     inner: Arc<RwLock<Box<dyn AsyncMavConnection<MavMessage> + Sync + Send>>>,
     coordinator: Arc<ReconnectCoordinator>,
     sender: broadcast::Sender<Message>,
+    reconnect_heartbeat: Arc<RwLock<Option<(MavHeader, MavMessage)>>>,
 }
 
 #[derive(Default)]
@@ -45,7 +46,12 @@ impl Connection {
             inner,
             coordinator,
             sender,
+            reconnect_heartbeat: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub async fn set_reconnect_heartbeat(&self, header: MavHeader, message: MavMessage) {
+        *self.reconnect_heartbeat.write().await = Some((header, message));
     }
 
     #[instrument(level = "debug")]
@@ -128,6 +134,16 @@ impl Connection {
         }
 
         *self.inner.write().await = Self::connect(&self.address).await;
+
+        if let Some((header, message)) = self.reconnect_heartbeat.read().await.as_ref() {
+            let conn = self.inner.read().await;
+            match conn.send(header, message).await {
+                Ok(_) => {
+                    info!("Post-reconnect heartbeat sent (conntrack + camera re-registration)")
+                }
+                Err(error) => warn!("Failed to send post-reconnect heartbeat: {error:?}"),
+            }
+        }
 
         coordinator.is_running.store(false, Ordering::Release);
         coordinator.notify.notify_waiters();
