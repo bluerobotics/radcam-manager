@@ -331,7 +331,14 @@ impl MavlinkComponent {
 
             match tokio::time::timeout(tokio::time::Duration::from_secs(1), wait_command_ack).await
             {
-                Ok(res) => return res,
+                Ok(Ok(())) => return Ok(()),
+                Ok(Err(err)) => {
+                    if err.to_string().contains("MAV_RESULT_UNSUPPORTED") {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        continue;
+                    }
+                    return Err(err);
+                }
                 Err(_) => {
                     warn!("Timeout for command {:?}, retrying", command.command);
                 }
