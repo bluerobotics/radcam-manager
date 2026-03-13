@@ -338,7 +338,10 @@ impl MavlinkComponent {
             }
         }
 
-        Ok(())
+        Err(anyhow!(
+            "Command {:?} timed out after {max_retries} retries",
+            command.command
+        ))
     }
 
     pub async fn request_servo_output_raw(&self) -> Result<SERVO_OUTPUT_RAW_DATA> {
