@@ -1,5 +1,4 @@
 <template>
-  <div class="min-w-[650px] border-[1px] border-[#ffffff22] rounded-[8px]">
     <v-container
       no-gutters
       class="max-w-[800px] text-white pa-0  rounded-[8px] elevation-5 no-user-select"
@@ -12,7 +11,7 @@
       ]"
     >
       <div
-        class="flex  items-center justify-between rounded-t-[8px]"
+        class="flex items-center justify-between rounded-t-[8px]"
         :class="isCockpitMode ? 'bg-[#2C2C2C88]' : 'bg-[#15151577]'"
       >
         <div class="flex items-center justify-around w-[400px] pl-5 border-b-[1px] border-[#ffffff88]">
@@ -70,7 +69,7 @@
         />
       </div>
       <div
-        class="transition-all duration-300 ease-in-out"
+        class="min-w-[650px] transition-all duration-300 ease-in-out"
       >
         <div v-if="configMode === 'basic'">
           <BasicSettings
@@ -120,7 +119,6 @@
         </div>
       </div>
     </v-container>
-  </div>
   <v-snackbar
     v-model="showSnackbar"
     :timeout="3000"
