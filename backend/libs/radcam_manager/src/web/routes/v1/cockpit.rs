@@ -164,7 +164,7 @@ fn widgets(cameras: &Cameras) -> Vec<CockpitIframeWidget> {
             icon_url: "/assets/logo.svg".to_string(),
             collapsible_container_name: format!("RadCam ({})", camera.hostname),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            start_collapsed: true,
+            start_collapsed: false,
             use_extension_path_as_base_url: true,
         })
         .collect()
