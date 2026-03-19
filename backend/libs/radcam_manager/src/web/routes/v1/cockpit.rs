@@ -22,18 +22,18 @@ pub struct CockpitExtras {
 pub struct CockpitIframeWidget {
     /// Name of the widget, this is displayed on edit mode widget browser
     pub name: String,
-    /// The URL at which the widget is located. Whether this is a relative or absolute path depends on the use_vehicle_address_as_base_url field
+    /// The URL at which the widget is located. Whether this is a relative or absolute path depends on the use_extension_path_as_base_url field
     pub iframe_url: String,
-    /// The icon of the widget, this is displayed on the widget browser
-    pub iframe_icon: String,
+    /// The icon URL of the widget, this is displayed on the widget browser
+    pub icon_url: String,
     /// The name of the collapsed container, this is displayed on the widget browser
     pub collapsible_container_name: String,
     /// Version of the widget (optional)
     pub version: Option<String>,
     /// Whether the widget should start collapsed (optional)
     pub start_collapsed: bool,
-    /// Whether to use vehicle address as base URL for the widget (optional)
-    pub use_vehicle_address_as_base_url: bool,
+    /// Whether to use extension path as base URL for the widget (optional)
+    pub use_extension_path_as_base_url: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -161,11 +161,11 @@ fn widgets(cameras: &Cameras) -> Vec<CockpitIframeWidget> {
         .map(|(camera_uuid, camera)| CockpitIframeWidget {
             name: format!("RadCam ({})", camera.hostname),
             iframe_url: format!("/#/?uuid={camera_uuid}&cockpit_mode=true"),
-            iframe_icon: "/assets/logo.svg".to_string(),
+            icon_url: "/assets/logo.svg".to_string(),
             collapsible_container_name: format!("RadCam ({})", camera.hostname),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
             start_collapsed: true,
-            use_vehicle_address_as_base_url: true,
+            use_extension_path_as_base_url: true,
         })
         .collect()
 }
