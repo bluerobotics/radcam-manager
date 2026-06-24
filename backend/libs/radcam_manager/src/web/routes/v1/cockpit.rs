@@ -171,7 +171,7 @@ fn widgets(cameras: &Cameras) -> Vec<CockpitIframeWidget> {
 }
 
 fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
-    cameras
+    let mut actions = cameras
         .iter()
         .flat_map(|(camera_uuid, camera)| {
             let name: String = format!("RadCam One-Push White Balance ({})", camera.hostname);
@@ -202,10 +202,35 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
                 version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
             }]
         })
-        .collect()
+        .collect::<Vec<CockpitAction>>();
+
+    actions.insert(
+        0,
+        CockpitAction {
+            id: "radcam_white_balance_all".to_string(),
+            name: "RadCam One-Push White Balance (All)".to_string(),
+            action_type: CockpitActionType::HttpRequest(HttpRequestAction {
+                name: "RadCam One-Push White Balance (All)".to_string(),
+                url: "http://{{ vehicle-address }}/extensionv2/radcammanager/v1/camera/control"
+                    .to_string(),
+                method: HttpRequestMethod::POST,
+                headers: json!({
+                    "Content-Type": "application/json",
+                }),
+                url_params: json!({}),
+                body: json!({
+                    "action": "setImageAdjustmentExAll",
+                    "json": { "onceAWB": 1 },
+                })
+                .to_string(),
+            }),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+    );
+    actions
 }
 
-fn joystick_suggestions(cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
+fn joystick_suggestions(_cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
     let mut mappings_rov = vec![
         // === Regular modifier ===
         ButtonMappingSuggestion {
@@ -413,7 +438,7 @@ fn joystick_suggestions(cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
         },
     ]);
 
-    let mut mappings_for_anys = vec![
+    let mappings_for_anys = vec![
         ButtonMappingSuggestion {
             id: "camera-zoom-decrease".to_string(),
             action_protocol: JoystickProtocol::DataLakeVariable,
@@ -459,19 +484,16 @@ fn joystick_suggestions(cameras: &Cameras) -> Vec<JoystickMapSuggestion> {
             modifier_key: CockpitModifierKeyOption::Regular,
             description: Some("Toggle recording all streams".to_string()),
         },
-    ];
-
-    for (camera_uuid, _camera) in cameras {
-        mappings_for_anys.push(ButtonMappingSuggestion {
-            id: format!("radcam_white_balance_{camera_uuid}"),
+        ButtonMappingSuggestion {
+            id: "radcam_white_balance_all".to_string(),
             action_protocol: JoystickProtocol::CockpitAction,
-            action_name: format!("RadCam One-Push White Balance ({})", _camera.hostname),
-            action_id: format!("radcam_white_balance_{camera_uuid}"),
+            action_name: "RadCam One-Push White Balance (All)".to_string(),
+            action_id: "radcam_white_balance_all".to_string(),
             button: 10,
             modifier_key: CockpitModifierKeyOption::Regular,
-            description: Some("Run One-Push White Balance once".to_string()),
-        })
-    }
+            description: Some("Run One-Push White Balance on all RadCam devices".to_string()),
+        },
+    ];
 
     mappings_rov.extend_from_slice(&mappings_for_anys);
     mappings_rov_with_gripper.extend_from_slice(&mappings_for_anys);
