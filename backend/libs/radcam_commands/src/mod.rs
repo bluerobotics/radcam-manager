@@ -19,6 +19,7 @@ pub mod protocol;
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 // #[tsync] // FIXME: Disabled for now, see https://github.com/Wulf/tsync/issues/58
 pub struct CameraControl {
+    #[serde(default)]
     #[ts(as = "String")]
     pub camera_uuid: Uuid,
     #[serde(flatten)]
@@ -41,6 +42,9 @@ pub enum Action {
     SetImageAdjustment(BaseParameterSetting),
     #[serde(rename = "setImageAdjustmentEx")]
     SetImageAdjustmentEx(AdvancedParameterSetting),
+    /// Important: This is a wrapper, not part of the camera protocol
+    #[serde(rename = "setImageAdjustmentExAll")]
+    SetImageAdjustmentExAll(AdvancedParameterSetting),
     #[serde(rename = "setVencConf")]
     SetVideoParameterSettings(VideoParameterSettings),
     #[serde(rename = "restart")]
@@ -67,6 +71,9 @@ fn control_inner(
         match &camera_control.action {
             Action::SetRecommendedSettings => {
                 return apply_recommended_settings(camera_control.camera_uuid).await;
+            }
+            Action::SetImageAdjustmentExAll(params) => {
+                return apply_set_image_adjustment_ex_all(params).await;
             }
             _ => (),
         }
@@ -164,6 +171,33 @@ pub async fn list() -> impl IntoResponse {
     };
 
     json.into_response()
+}
+
+#[instrument(level = "debug")]
+async fn apply_set_image_adjustment_ex_all(
+    params: &AdvancedParameterSetting,
+) -> Result<serde_json::Value> {
+    let cameras = mcm_client::cameras().await;
+    let mut errors = vec![];
+
+    for (camera_uuid, camera) in &cameras {
+        let camera_control = CameraControl {
+            camera_uuid: *camera_uuid,
+            action: Action::SetImageAdjustmentEx(params.clone()),
+        };
+
+        if let Err(error) = control_inner(Json(camera_control)).await {
+            let message = format!("{}: {error:?}", camera.hostname);
+            error!(message);
+            errors.push(message);
+        }
+    }
+
+    match errors.len() {
+        0 => Ok(serde_json::Value::Null),
+        1 => Err(anyhow::anyhow!("{}", errors[0])),
+        _ => Err(anyhow::anyhow!("Multiple errors happened: {errors:?}")),
+    }
 }
 
 #[instrument(level = "debug")]
