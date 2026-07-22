@@ -127,13 +127,14 @@
         </div>
       </div>
     </v-container>
-  <v-snackbar
-    v-model="showSnackbar"
-    :timeout="3000"
-    color="green"
-  >
-    {{ snackbarMessage }}
-  </v-snackbar>
+  <Loading
+    :is-loading="menuActionLoading"
+    :message="menuActionMessage"
+  />
+  <ErrorDialog
+    :message="errorDialogMessage"
+    @close="errorDialogMessage = null"
+  />
 </template>
 
 <script setup lang="ts">
@@ -146,6 +147,8 @@ import BasicSettings from '@/components/BasicSettings.vue'
 import BlueButtonGroup from '@/components/BlueButtonGroup.vue'
 import ImageTab from '@/components/ImageTab.vue'
 import StreamsTab from '@/components/StreamsTab.vue'
+import { formatRequestError } from '@/utils/formatRequestError'
+import { endMinLoading, startMinLoading } from '@/utils/minLoadingDuration'
 
 const tab = ref(null)
 // const backendAPI = ref(`http://192.168.2.2:<radcam-extension-port>/v1`) // For local frontend development:
@@ -158,8 +161,9 @@ const desiredCameraUuid = useRouteQuery<string | null>('uuid', null)
 const theme = ref<'light' | 'dark'>('dark')
 const configMode = ref<'basic' | 'advanced'>('basic')
 const cameraControls = ref<InstanceType<typeof BasicSettings> | null>(null)
-const showSnackbar = ref(false)
-const snackbarMessage = ref('')
+const menuActionLoading = ref(false)
+const menuActionMessage = ref('Applying settings…')
+const errorDialogMessage = ref<string | null>(null)
 const isCockpitMode = useRouteQuery<string, boolean>('cockpit_mode', 'false', {
   transform: {
     get: (v: string) => v === 'true',
@@ -236,64 +240,73 @@ const isCamera = (data: unknown): data is Omit<Camera, 'uuid'> => {
 const updateLuaScript = (): void => {
   if (!selectedCameraUUID.value) return
 
-  const payload = {
-    camera_uuid: selectedCameraUUID.value,
-    action: 'exportLuaScript',
+  if (cameraControls.value) {
+    cameraControls.value.updateLuaScript()
+    return
   }
 
-  console.log(payload)
-
-  axios
-    .post(`${backendAPI.value}/autopilot/control`, payload)
-    .then((response) => {
-      console.log(`Lua script download initiated:`, response)
-      snackbarMessage.value = `Lua script updated.`
-      showSnackbar.value = true
-    })
-    .catch((error) => {
-      console.error(`Error sending exportLuaScript request:`, error.message)
-    })
+  runAutopilotControl('exportLuaScript', 'Failed to update Lua script', 'Updating Lua script…')
 }
 
 const applyRecommendedSettings = (): void => {
-  if (!selectedCameraUUID.value) return
-
-  const payload = {
-    camera_uuid: selectedCameraUUID.value,
-    action: 'setRecommendedSettings',
+  if (cameraControls.value) {
+    cameraControls.value.applyRecommendedSettings()
+    return
   }
 
-  console.log(payload)
-
-  axios
-    .post(`${backendAPI.value}/camera/control`, payload)
-    .then((response) => {
-      console.log(`Recommended settings applied:`, response)
-      snackbarMessage.value = `Recommended settings applied.`
-      showSnackbar.value = true
-    })
-    .catch((error) => {
-      console.error(`Error sending setRecommendedSettings request:`, error.message)
-    })
+  runCameraControl('setRecommendedSettings', 'Failed to apply recommended settings', 'Applying recommended settings…')
 }
 
 const rebootCamera = (): void => {
   if (!selectedCameraUUID.value) return
 
-  const payload = {
-    camera_uuid: selectedCameraUUID.value,
-    action: 'restart',
+  if (cameraControls.value) {
+    cameraControls.value.rebootCamera()
+    return
   }
 
+  runCameraControl('restart', 'Failed to reboot camera', 'Rebooting camera…')
+}
+
+const runAutopilotControl = (action: string, errorMessage: string, loadingMessage: string): void => {
+  if (!selectedCameraUUID.value || menuActionLoading.value) return
+
+  menuActionMessage.value = loadingMessage
+  const startedAt = startMinLoading(menuActionLoading)
+
   axios
-    .post(`${backendAPI.value}/camera/control`, payload)
+    .post(`${backendAPI.value}/autopilot/control`, {
+      camera_uuid: selectedCameraUUID.value,
+      action,
+    })
     .then((response) => {
-      console.log('Camera reboot initiated:', response)
-      snackbarMessage.value = 'Camera reboot initiated.'
-      showSnackbar.value = true
+      console.log(response)
+      endMinLoading(menuActionLoading, startedAt)
     })
     .catch((error) => {
-      console.error('Error sending camera reboot request:', error.message)
+      errorDialogMessage.value = `${errorMessage}: ${formatRequestError(error)}`
+      endMinLoading(menuActionLoading, startedAt, true)
+    })
+}
+
+const runCameraControl = (action: string, errorMessage: string, loadingMessage: string): void => {
+  if (!selectedCameraUUID.value || menuActionLoading.value) return
+
+  menuActionMessage.value = loadingMessage
+  const startedAt = startMinLoading(menuActionLoading)
+
+  axios
+    .post(`${backendAPI.value}/camera/control`, {
+      camera_uuid: selectedCameraUUID.value,
+      action,
+    })
+    .then((response) => {
+      console.log(response)
+      endMinLoading(menuActionLoading, startedAt)
+    })
+    .catch((error) => {
+      errorDialogMessage.value = `${errorMessage}: ${formatRequestError(error)}`
+      endMinLoading(menuActionLoading, startedAt, true)
     })
 }
 
