@@ -5,7 +5,7 @@
     width="400px"
     @click:outside="close"
   >
-    <div class="error-card flex flex-col items-center justify-center pt-[10px] rounded-lg">
+    <div class="error-card flex flex-col items-center pt-[10px] rounded-lg">
       <img
         src="../../public/assets/logo.svg"
         class="w-[120px] h-[120px] mb-1"
@@ -58,7 +58,8 @@ const close = () => {
   backdrop-filter: blur(5px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0px 4px 4px 0px #00000033, 0px 8px 12px 6px #00000026;
-  min-height: 280px;
+  max-height: 90vh;
+  overflow-y: auto;
   width: 100%;
 }
 </style>
