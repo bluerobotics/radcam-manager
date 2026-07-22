@@ -1,39 +1,59 @@
 <template>
-  <transition name="slide-fade">
-    <div
-      v-if="message"
-      class="warning-toast fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50"
-    >
-      <v-card
-        class="bg-[#363636dd] backdrop-blur-sm border border-[#ffffff22] text-white px-4 py-2 rounded-md shadow-lg"
-        theme="dark"
+  <Teleport to="body">
+    <Transition name="toast-fade">
+      <div
+        v-if="message"
+        class="warning-toast"
       >
-        <v-icon
-          icon="mdi-alert-circle-outline"
-          class="mr-2"
-        />
-        <span class="text-sm">{{ message }}</span>
-      </v-card>
-    </div>
-  </transition>
+        <v-card
+          class="bg-[#363636dd] backdrop-blur-sm border border-[#ffffff22] text-white px-4 py-2 rounded-md shadow-lg"
+          theme="dark"
+        >
+          <v-icon
+            :icon="icon"
+            class="mr-2"
+          />
+          <span class="text-sm break-words">{{ message }}</span>
+        </v-card>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-defineProps<{
-  message: string | null
-}>()
+withDefaults(
+  defineProps<{
+    message: string | null
+    icon?: string
+  }>(),
+  {
+    icon: 'mdi-alert-circle-outline',
+  },
+)
 </script>
 
 <style scoped>
-.slide-fade-enter-active {
-  transition: all 0.3s ease-out;
+.warning-toast {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  z-index: 9999;
+  max-width: min(90vw, 640px);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
-.slide-fade-leave-active {
-  transition: all 0.2s ease-in;
+
+.warning-toast :deep(.v-card) {
+  pointer-events: auto;
 }
-.slide-fade-enter-from,
-.slide-fade-leave-to {
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(10px);
 }
 </style>
