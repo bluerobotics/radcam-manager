@@ -39,6 +39,14 @@
                   Apply Recommended Settings
                 </v-list-item-title>
               </v-list-item>
+              <v-list-item
+                :disabled="selectedCameraUUID == null"
+                @click="rebootCamera"
+              >
+                <v-list-item-title class="flex">
+                  Reboot Camera
+                </v-list-item-title>
+              </v-list-item>
               <v-divider />
               <v-divider />
             </v-list>
@@ -266,6 +274,26 @@ const applyRecommendedSettings = (): void => {
     })
     .catch((error) => {
       console.error(`Error sending setRecommendedSettings request:`, error.message)
+    })
+}
+
+const rebootCamera = (): void => {
+  if (!selectedCameraUUID.value) return
+
+  const payload = {
+    camera_uuid: selectedCameraUUID.value,
+    action: 'restart',
+  }
+
+  axios
+    .post(`${backendAPI.value}/camera/control`, payload)
+    .then((response) => {
+      console.log('Camera reboot initiated:', response)
+      snackbarMessage.value = 'Camera reboot initiated.'
+      showSnackbar.value = true
+    })
+    .catch((error) => {
+      console.error('Error sending camera reboot request:', error.message)
     })
 }
 
