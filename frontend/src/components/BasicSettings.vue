@@ -634,7 +634,10 @@
     :show="(!isConfigured) && showWelcomeDialog"
     @close="showWelcomeDialog = false"
   />
-  <Loading :is-loading="isLoading" />
+  <Loading
+    :is-loading="isLoading"
+    :message="loadingMessage"
+  />
   <ErrorDialog
     :message="errorDialogMessage"
     @close="errorDialogMessage = null"
@@ -656,6 +659,8 @@ import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, Actu
 import ErrorDialog from './ErrorDialog.vue'
 import WelcomeDialog from './WelcomeDialog.vue'
 import { OneMoreTime } from '@/utils/oneMoreTime'
+import { formatRequestError } from '@/utils/formatRequestError'
+import { endMinLoading, startMinLoading } from '@/utils/minLoadingDuration'
 
 
 const props = defineProps<{
@@ -773,7 +778,9 @@ const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
 })
 const isConfigured = ref<boolean>(true)
 const showWelcomeDialog = ref<boolean>(true)
+const isCameraRebooting = ref<boolean>(false)
 const isLoading = ref<boolean>(false)
+const loadingMessage = ref('Applying settings…')
 const errorDialogMessage = ref<string | null>(null)
 const warningToastMessage = ref<string | null>(null)
 const showAdvancedHardware = ref(false)
@@ -1042,7 +1049,7 @@ const getActuatorsConfig = () => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const checkIfConfigured = (error: any) => {
-  const details = error.response?.data?.message || error.response?.data || error.response || error.message || 'Unknown error'
+  const details = formatRequestError(error)
 
     if (typeof details === 'string' && details.toLowerCase().includes('actuators not configured')) {
       isConfigured.value = false
@@ -1211,16 +1218,37 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
 const showErrorDialog = (message: string, error: any) => {
   if (error.response?.status === 404 || !checkIfConfigured(error)) return
 
-  const details = error.response?.data?.message || error.response?.data || error.response || error.message || error || 'Unknown error'
-  errorDialogMessage.value = `${message}: ${details}`
+  errorDialogMessage.value = `${message}: ${formatRequestError(error)}`
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const showWarningToast = (message: string, error: any) => {
+  if (isCameraRebooting.value) return
   if (error.response?.status === 404 || !checkIfConfigured(error)) return
-  
-  const details = error.response?.data?.message || error.response?.data || error.response || error.message || error || 'Unknown error'
-  warningToastMessage.value = `${message}: ${details}`
+
+  warningToastMessage.value = `${message}: ${formatRequestError(error)}`
+}
+
+const REBOOT_GRACE_MS = 90_000
+let rebootGraceTimeout: ReturnType<typeof setTimeout> | undefined
+
+const clearRebootGraceTimeout = () => {
+  if (rebootGraceTimeout) {
+    clearTimeout(rebootGraceTimeout)
+    rebootGraceTimeout = undefined
+  }
+}
+
+const endCameraReboot = () => {
+  isCameraRebooting.value = false
+  clearRebootGraceTimeout()
+}
+
+const beginCameraReboot = () => {
+  isCameraRebooting.value = true
+  warningToastMessage.value = null
+  clearRebootGraceTimeout()
+  rebootGraceTimeout = setTimeout(endCameraReboot, REBOOT_GRACE_MS)
 }
 
 const isHardwareSetupComplete = computed<boolean>(() => {
@@ -1290,6 +1318,9 @@ const getVideoParameters = (update: boolean) => {
 
       if (update) {
         update_video_parameter_values(settings)
+      }
+      if (isCameraRebooting.value) {
+        endCameraReboot()
       }
     })
     .catch((error) => {
@@ -1445,9 +1476,9 @@ const doRestart = () => {
     return
   }
 
-  console.log("Restarting...")
-
-  isLoading.value = true
+  beginCameraReboot()
+  loadingMessage.value = 'Rebooting camera…'
+  const startedAt = startMinLoading(isLoading)
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
@@ -1458,14 +1489,12 @@ const doRestart = () => {
     .post(`${props.backendApi}/camera/control`, payload)
     .then((response) => {
       console.log("Got an answer from the restarting request", response.data)
+      endMinLoading(isLoading, startedAt)
     })
     .catch((error) => {
-      const message = 'Error sending restart'
-      console.log(message, error.message)
-      showErrorDialog(message, error)
-    })
-    .finally(() => {
-      isLoading.value = false
+      endCameraReboot()
+      showErrorDialog('Failed to reboot camera', error)
+      endMinLoading(isLoading, startedAt, true)
     })
 }
 
@@ -1490,6 +1519,51 @@ const saveVideoDataAndRestart = async (): Promise<void> => {
 
   hasUserEditedVideo.value = false
   hasUnsavedVideoChanges.value = false
+}
+
+const updateLuaScript = (): void => {
+  if (!props.selectedCameraUuid || isLoading.value) return
+
+  loadingMessage.value = 'Updating Lua script…'
+  const startedAt = startMinLoading(isLoading)
+
+  axios
+    .post(`${props.backendApi}/autopilot/control`, {
+      camera_uuid: props.selectedCameraUuid,
+      action: 'exportLuaScript',
+    })
+    .then((response) => {
+      console.log('Lua script download initiated:', response.data)
+      endMinLoading(isLoading, startedAt)
+    })
+    .catch((error) => {
+      showErrorDialog('Failed to update Lua script', error)
+      endMinLoading(isLoading, startedAt, true)
+    })
+}
+
+const applyRecommendedSettings = (): void => {
+  if (!props.selectedCameraUuid || isLoading.value) return
+
+  loadingMessage.value = 'Applying recommended settings…'
+  const startedAt = startMinLoading(isLoading)
+
+  const payload = {
+    camera_uuid: props.selectedCameraUuid,
+    action: 'setRecommendedSettings',
+  }
+
+  axios
+    .post(`${props.backendApi}/camera/control`, payload)
+    .then((response) => {
+      console.log('Recommended settings applied:', response.data)
+      getCameraStates()
+      endMinLoading(isLoading, startedAt)
+    })
+    .catch((error) => {
+      showErrorDialog('Failed to apply recommended settings', error)
+      endMinLoading(isLoading, startedAt, true)
+    })
 }
 
 const saveHardwareSetup = async (): Promise<void> => {
@@ -1576,7 +1650,7 @@ const getCameraStates = () => {
   getBaseParameters()
 }
 
-defineExpose({ getCameraStates: getCameraStates })
+defineExpose({ getCameraStates, updateLuaScript, applyRecommendedSettings, rebootCamera: doRestart })
 
 watch(
   () => props.selectedCameraUuid,

@@ -12,7 +12,7 @@
         class="w-[120px] h-[120px] mb-1"
         alt="logo"
       >              
-      <span class="w-[200px] text-[#e9f5e6] text-center text-lg mb-6">Applying settings…</span>                     
+      <span class="w-[200px] text-[#e9f5e6] text-center text-lg mb-6">{{ message }}</span>                     
       <v-progress-linear
         indeterminate
         color="#FFFFFF44"
@@ -22,8 +22,9 @@
   </v-dialog>   
 </template>
 <script setup lang="ts">
-  const { isLoading } = defineProps<{
+  const { isLoading, message = 'Applying settings…' } = defineProps<{
     isLoading: boolean
+    message?: string
   }>()
 </script>
 <style scoped>
