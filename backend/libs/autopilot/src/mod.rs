@@ -10,7 +10,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
-pub use manager::init;
+pub use manager::{clear_saved_settings, init};
 
 use crate::{
     manager::MANAGER,

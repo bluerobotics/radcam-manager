@@ -57,6 +57,32 @@ impl Manager {
         Ok(true)
     }
 
+    #[instrument(level = "debug", skip(self))]
+    pub async fn remove_script(&self) -> Result<()> {
+        let path = std::path::Path::new(&self.autopilot_scripts_file);
+
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => info!("Removed lua script at {path:?}"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                trace!("No lua script to remove at {path:?}");
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed removing lua script at {path:?}"));
+            }
+        }
+
+        let autopilot_reboot_required = self.mavlink.enable_lua_script(true).await?;
+
+        if !autopilot_reboot_required {
+            self.mavlink.reload_lua_scripts(true).await?;
+        } else {
+            self.mavlink.reboot_autopilot().await?;
+        }
+
+        Ok(())
+    }
+
     #[instrument(level = "debug", skip(self, parameters))]
     pub async fn update_script_parameters(
         &mut self,
