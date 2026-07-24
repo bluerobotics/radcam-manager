@@ -11,7 +11,7 @@ pub use v1::*;
 
 use crate::v0::SettingsDataV0;
 
-pub use manager::{MANAGER, Manager, init};
+pub use manager::{MANAGER, Manager, clear, init};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "version")]

@@ -184,6 +184,15 @@ pub async fn init(settings_file: String, reset: bool) -> Result<()> {
     Ok(())
 }
 
+#[instrument(level = "debug")]
+pub async fn clear() -> Result<()> {
+    let manager = MANAGER.get().context("settings not initialized")?;
+    let mut guard = manager.write().await;
+
+    guard.settings.get_actuators_mut().clear();
+    guard.settings.save().await
+}
+
 // #[cfg(test)]
 // mod tests {
 //     use tempfile::NamedTempFile;
