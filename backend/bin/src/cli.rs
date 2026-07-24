@@ -77,6 +77,10 @@ pub struct Args {
     /// Sets the BlueOS IP address.
     #[arg(long, default_value = "127.0.0.1", value_parser = expand::<String>)]
     blueos_address: String,
+
+    /// Accept any ONVIF device named "hd" without checking hardware ID.
+    #[arg(long, value_parser = expand::<bool>)]
+    mcm_skip_hardware_check: bool,
 }
 
 fn expand<T: std::str::FromStr>(s: &str) -> Result<T, String>
@@ -194,6 +198,11 @@ pub fn mavlink_component_id() -> u8 {
 #[instrument(level = "debug")]
 pub fn default_api_version() -> u8 {
     args().default_api_version
+}
+
+#[instrument(level = "debug")]
+pub fn mcm_skip_hardware_check() -> bool {
+    args().mcm_skip_hardware_check
 }
 
 #[instrument(level = "debug")]

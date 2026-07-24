@@ -13,14 +13,17 @@ use crate::mcm_types::{
 
 use super::{Camera, Credentials, Stream};
 
+const KNOWN_RADCAM_HARDWARE: &[&str] = &["HW0100302", "HW20200610"];
+
 pub struct MCMClient {
     pub address: SocketAddr,
+    skip_hardware_check: bool,
     _info: Info,
 }
 
 impl MCMClient {
     #[instrument(level = "debug")]
-    pub async fn try_new(address: &SocketAddr) -> Result<Self> {
+    pub async fn try_new(address: &SocketAddr, skip_hardware_check: bool) -> Result<Self> {
         let _info = Self::get_info(address).await?;
 
         let version = semver::Version::parse(&_info.version)?;
@@ -34,6 +37,7 @@ impl MCMClient {
 
         Ok(Self {
             address: *address,
+            skip_hardware_check,
             _info,
         })
     }
@@ -52,7 +56,7 @@ impl MCMClient {
     pub async fn get_radcams(&self) -> Result<Vec<Camera>> {
         let devices = self.get_onvif_devices().await?;
 
-        let radcam_devices = radcams_from_onvif_devices(devices);
+        let radcam_devices = radcams_from_onvif_devices(devices, self.skip_hardware_check);
 
         Ok(radcam_devices)
     }
@@ -216,17 +220,24 @@ impl MCMClient {
 
         let devices = web_client::delete(&self.address, "delete_stream", (), data).await?;
 
-        Ok(radcams_from_onvif_devices(devices))
+        Ok(radcams_from_onvif_devices(
+            devices,
+            self.skip_hardware_check,
+        ))
     }
 }
 
-fn radcams_from_onvif_devices(devices: Vec<OnvifDevice>) -> Vec<Camera> {
+fn radcams_from_onvif_devices(devices: Vec<OnvifDevice>, skip_hardware_check: bool) -> Vec<Camera> {
     devices
         .iter()
         .filter_map(|device| {
-            if device.name != Some("hd".to_string())
-                || device.hardware != Some("HW0100302".to_string())
-            {
+            let hardware_ok = skip_hardware_check
+                || device
+                    .hardware
+                    .as_deref()
+                    .is_some_and(|hardware| KNOWN_RADCAM_HARDWARE.contains(&hardware));
+
+            if device.name != Some("hd".to_string()) || !hardware_ok {
                 trace!("Skipping unknown {device:?}");
 
                 return None;

@@ -51,13 +51,15 @@ pub struct Stream {
 
 /// Constructs our manager, Should be done inside main
 #[instrument(level = "debug")]
-pub async fn init(mcm_address: SocketAddr) {
+pub async fn init(mcm_address: SocketAddr, skip_hardware_check: bool) {
     if let Some(manager) = MANAGER.get() {
         let mut lock = manager.write().await;
         lock._authentication_task_handler.abort();
         lock._start_radcams_task_handler.abort();
         lock._authentication_task_handler =
-            tokio::spawn(async move { authenticate_radcams(&mcm_address).await });
+            tokio::spawn(
+                async move { authenticate_radcams(&mcm_address, skip_hardware_check).await },
+            );
         lock._start_radcams_task_handler =
             tokio::spawn(async move { start_radcams_streams(&mcm_address).await });
         return;
@@ -65,7 +67,7 @@ pub async fn init(mcm_address: SocketAddr) {
 
     let cameras = IndexMap::new();
     let _authentication_task_handler =
-        tokio::spawn(async move { authenticate_radcams(&mcm_address).await });
+        tokio::spawn(async move { authenticate_radcams(&mcm_address, skip_hardware_check).await });
     let _start_radcams_task_handler =
         tokio::spawn(async move { start_radcams_streams(&mcm_address).await });
 
@@ -99,13 +101,13 @@ impl Drop for Manager {
 }
 
 #[instrument(level = "debug")]
-async fn authenticate_radcams(mcm_address: &SocketAddr) {
+async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: bool) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
         clear_cameras().await;
 
-        let mcm = match MCMClient::try_new(mcm_address).await {
+        let mcm = match MCMClient::try_new(mcm_address, skip_hardware_check).await {
             Ok(mcm) => mcm,
             Err(error) => {
                 debug!("Failed to create MCM client: {error:?}");
@@ -161,7 +163,7 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        let mcm = match MCMClient::try_new(mcm_address).await {
+        let mcm = match MCMClient::try_new(mcm_address, false).await {
             Ok(mcm) => mcm,
             Err(error) => {
                 debug!("Failed to create MCM client: {error:?}");
@@ -258,10 +260,10 @@ pub async fn clear_cameras() {
 #[tokio::test]
 async fn test_camera_manager_full_cycle() {
     let mcm_address = "127.0.0.1:6021".parse().unwrap();
-    init(mcm_address).await;
-    init(mcm_address).await;
+    init(mcm_address, false).await;
+    init(mcm_address, false).await;
     shutdown().await;
-    init(mcm_address).await;
+    init(mcm_address, false).await;
 
     let test_camera = Camera {
         uuid: "bc071801-c50f-8301-ac36-bc071801c50f".parse().unwrap(),

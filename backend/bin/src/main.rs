@@ -31,7 +31,10 @@ async fn start_application(first_start: bool) -> Result<bool> {
         .await
         .unwrap();
 
-    let mcm_client_startup_task = tokio::spawn(mcm_client::init(cli::mcm_address().await));
+    let mcm_client_startup_task = tokio::spawn(mcm_client::init(
+        cli::mcm_address().await,
+        cli::mcm_skip_hardware_check(),
+    ));
 
     blueos_client::init(cli::blueos_address().await).await;
 
