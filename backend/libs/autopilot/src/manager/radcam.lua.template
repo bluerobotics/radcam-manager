@@ -28,6 +28,28 @@ local GAIN = Parameter() -- this will allow us to move 5% beyeond closest/furthe
 local K_FOCUS = 92
 local K_ZOOM = 180
 local K_SCRIPT = {{ k_script }}
+local MAV_SEVERITY_WARNING = 4
+
+local missing_focus_warned = { false }
+local missing_zoom_warned = { false }
+
+local function warn_missing_servo_function(function_name, warned_flag)
+    if warned_flag[1] then
+        return
+    end
+
+    gcs:send_text(MAV_SEVERITY_WARNING, "RadCam: " .. function_name .. " servo function not found")
+    warned_flag[1] = true
+end
+
+local function find_servo_function(function_id, function_name, warned_flag)
+    local channel = SRV_Channels:find_channel(function_id)
+    if channel == nil then
+        warn_missing_servo_function(function_name, warned_flag)
+    end
+
+    return channel
+end
 
 -- Bind them to physical parameter locations
 assert(ENABLE:init(PARAM_PREFIX .. "ENABLE"), "Failed to init ENABLE")
@@ -42,7 +64,7 @@ assert(#furthest_points >= 2, "furthest_points requires at least 2 points")
 
 -- Function to set focus and zoom to trim level
 local function set_zoom_focus_to_trim()
-    local focus_channel = SRV_Channels:find_channel(K_FOCUS)
+    local focus_channel = find_servo_function(K_FOCUS, "CameraFocus", missing_focus_warned)
     if focus_channel == nil then return false end
     local focus_max = param:get("SERVO" .. focus_channel + 1 .. "_MAX")
     local focus_min = param:get("SERVO" .. focus_channel + 1 .. "_MIN")
@@ -51,7 +73,7 @@ local function set_zoom_focus_to_trim()
     local focus_scaled = 1000 * (focus_trim - focus_min) / (focus_max - focus_min)
     SRV_Channels:set_output_scaled(K_FOCUS, focus_scaled)
 
-    local zoom_channel = SRV_Channels:find_channel(K_ZOOM)
+    local zoom_channel = find_servo_function(K_ZOOM, "CameraZoom", missing_zoom_warned)
     if zoom_channel == nil then return false end
     local zoom_max = param:get("SERVO" .. zoom_channel + 1 .. "_MAX")
     local zoom_min = param:get("SERVO" .. zoom_channel + 1 .. "_MIN")
@@ -119,6 +141,14 @@ function update()
     -- Retrieve user-controlled focus and zoom
     local focus_input = SRV_Channels:get_output_pwm(K_FOCUS)
     local zoom_input = SRV_Channels:get_output_pwm(K_ZOOM)
+
+    if focus_input == nil then
+        warn_missing_servo_function("CameraFocus", missing_focus_warned)
+    end
+
+    if zoom_input == nil then
+        warn_missing_servo_function("CameraZoom", missing_zoom_warned)
+    end
 
     if enable_focus_and_zoom_correlation == nil or margin_gain == nil
         or focus_input == nil or zoom_input == nil then

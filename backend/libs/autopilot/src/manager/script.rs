@@ -442,5 +442,10 @@ mod tests {
         dbg!(&contents);
 
         validate_lua(&contents).unwrap();
+
+        assert!(contents.contains("warn_missing_servo_function"));
+        assert!(contents.contains("find_servo_function(K_FOCUS, \"CameraFocus\""));
+        assert!(contents.contains("find_servo_function(K_ZOOM, \"CameraZoom\""));
+        assert!(contents.contains("servo function not found"));
     }
 }
