@@ -1,12 +1,14 @@
 use anyhow::Result;
 use tracing::*;
 
-use radcam_manager::{logger, web};
+use radcam_manager::{
+    logger,
+    web::{self, ShutdownReason},
+};
 
 pub mod cli;
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
+async fn start_application(first_start: bool) -> Result<bool> {
     cli::init();
 
     logger::init(cli::log_path(), cli::is_verbose(), cli::is_tracing());
@@ -25,7 +27,7 @@ async fn main() -> Result<()> {
     debug!("Command line call: {}", cli::command_line_string());
     debug!("Command line input struct call: {}", cli::command_line());
 
-    settings::init(cli::settings_file(), cli::is_reset())
+    settings::init(cli::settings_file(), first_start && cli::is_reset())
         .await
         .unwrap();
 
@@ -69,10 +71,26 @@ async fn main() -> Result<()> {
         }
     });
 
-    web::run(cli::web_server().await, cli::default_api_version()).await;
+    let shutdown_reason = web::run(cli::web_server().await, cli::default_api_version()).await;
 
     autopilot_startup_task.abort();
     mcm_client_startup_task.abort();
+    mcm_client::shutdown().await;
+
+    if shutdown_reason == ShutdownReason::Signal {
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> Result<()> {
+    let mut first_start = true;
+
+    while start_application(first_start).await? {
+        first_start = false;
+    }
 
     Ok(())
 }
