@@ -16,10 +16,11 @@ use tracing_subscriber::{
 
 static MANAGER: OnceCell<Manager> = OnceCell::new();
 pub static HISTORY: OnceCell<Mutex<History>> = OnceCell::new();
+static SERVER_LOG_TX: OnceCell<Sender<String>> = OnceCell::new();
 
 #[derive(Debug, Default)]
 pub struct Manager {
-    pub process: Option<tokio::task::JoinHandle<()>>,
+    pub process: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 pub struct History {
@@ -81,6 +82,36 @@ impl History {
 
 // Start logger, should be done inside main
 pub fn init(log_path: String, is_verbose: bool, is_tracing: bool) {
+    if let Some(manager) = MANAGER.get() {
+        if let Some(handle) = manager.process.lock().unwrap().take() {
+            handle.abort();
+        }
+
+        if let Some(history) = HISTORY.get() {
+            history.lock().unwrap().history.clear();
+        }
+
+        let mut rx = SERVER_LOG_TX
+            .get()
+            .expect("server log broadcast sender must be initialized")
+            .subscribe();
+        let history = HISTORY.get().unwrap();
+        *manager.process.lock().unwrap() = Some(tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(message) => {
+                        history.lock().unwrap().push(message);
+                    }
+                    Err(_error) => {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                    }
+                }
+            }
+        }));
+
+        return;
+    }
+
     // Redirect all logs from libs using "Log"
     LogTracer::init_with_filter(tracing::log::LevelFilter::Trace).expect("Failed to set logger");
 
@@ -134,6 +165,9 @@ pub fn init(log_path: String, is_verbose: bool, is_tracing: bool) {
         EnvFilter::new(LevelFilter::DEBUG.to_string())
     };
     let (tx, mut rx) = tokio::sync::broadcast::channel(100);
+    SERVER_LOG_TX
+        .set(tx.clone())
+        .expect("server log broadcast sender must only be initialized once");
     let server_layer = fmt::Layer::new()
         .with_writer(BroadcastMakeWriter { sender: tx.clone() })
         .with_ansi(false)
@@ -148,7 +182,7 @@ pub fn init(log_path: String, is_verbose: bool, is_tracing: bool) {
     let history = HISTORY.get_or_init(|| Mutex::new(History::default()));
 
     MANAGER.get_or_init(|| Manager {
-        process: Some(tokio::spawn(async move {
+        process: Mutex::new(Some(tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(message) => {
@@ -159,7 +193,7 @@ pub fn init(log_path: String, is_verbose: bool, is_tracing: bool) {
                     }
                 }
             }
-        })),
+        }))),
     });
 
     // Configure the default subscriber

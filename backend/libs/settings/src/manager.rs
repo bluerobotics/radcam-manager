@@ -174,6 +174,11 @@ pub async fn init(settings_file: String, reset: bool) -> Result<()> {
         }
     };
 
+    if let Some(manager) = MANAGER.get() {
+        manager.write().await.settings = settings;
+        return Ok(());
+    }
+
     MANAGER.get_or_init(|| RwLock::new(Manager { settings }));
 
     Ok(())

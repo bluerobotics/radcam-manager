@@ -52,6 +52,17 @@ pub struct Stream {
 /// Constructs our manager, Should be done inside main
 #[instrument(level = "debug")]
 pub async fn init(mcm_address: SocketAddr) {
+    if let Some(manager) = MANAGER.get() {
+        let mut lock = manager.write().await;
+        lock._authentication_task_handler.abort();
+        lock._start_radcams_task_handler.abort();
+        lock._authentication_task_handler =
+            tokio::spawn(async move { authenticate_radcams(&mcm_address).await });
+        lock._start_radcams_task_handler =
+            tokio::spawn(async move { start_radcams_streams(&mcm_address).await });
+        return;
+    }
+
     let cameras = IndexMap::new();
     let _authentication_task_handler =
         tokio::spawn(async move { authenticate_radcams(&mcm_address).await });
@@ -65,6 +76,16 @@ pub async fn init(mcm_address: SocketAddr) {
             _start_radcams_task_handler,
         })
     });
+}
+
+#[instrument(level = "debug")]
+pub async fn shutdown() {
+    if let Some(manager) = MANAGER.get() {
+        let mut lock = manager.write().await;
+        lock._authentication_task_handler.abort();
+        lock._start_radcams_task_handler.abort();
+        lock.cameras.clear();
+    }
 }
 
 impl Drop for Manager {
@@ -237,6 +258,9 @@ pub async fn clear_cameras() {
 #[tokio::test]
 async fn test_camera_manager_full_cycle() {
     let mcm_address = "127.0.0.1:6021".parse().unwrap();
+    init(mcm_address).await;
+    init(mcm_address).await;
+    shutdown().await;
     init(mcm_address).await;
 
     let test_camera = Camera {

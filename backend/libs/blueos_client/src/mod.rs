@@ -15,6 +15,11 @@ struct Manager {
 /// Constructs our manager, Should be done inside main
 #[instrument(level = "debug")]
 pub async fn init(blueos_address: SocketAddr) {
+    if let Some(manager) = MANAGER.get() {
+        manager.write().await.blueos_address = blueos_address;
+        return;
+    }
+
     MANAGER.get_or_init(|| RwLock::new(Manager { blueos_address }));
 }
 

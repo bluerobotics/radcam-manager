@@ -276,10 +276,17 @@ pub async fn init(
     mavlink_system_id: u8,
     mavlink_component_id: u8,
 ) -> Result<()> {
+    let settings = State::from_settings().await?;
+
+    if let Some(manager) = MANAGER.get() {
+        let mut guard = manager.write().await;
+        guard.autopilot_scripts_file = autopilot_scripts_file;
+        guard.settings = settings;
+        return Ok(());
+    }
+
     let mavlink =
         MavlinkComponent::try_new(mavlink_address, mavlink_system_id, mavlink_component_id).await?;
-
-    let settings = State::from_settings().await?;
 
     let script_health = ScriptHealthTracker::default();
 
