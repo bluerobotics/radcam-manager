@@ -302,6 +302,19 @@ pub async fn init(
     Ok(())
 }
 
+#[instrument(level = "debug")]
+pub async fn clear_saved_settings() -> Result<()> {
+    settings::clear().await?;
+
+    let manager = MANAGER.get().context("Not available")?;
+    let mut guard = manager.write().await;
+    guard.remove_script().await?;
+    guard.script_health = ScriptHealthTracker::default();
+    guard.settings = State::from_settings().await?;
+
+    Ok(())
+}
+
 pub(super) fn get_output_raw_from_channel(
     data: &SERVO_OUTPUT_RAW_DATA,
     channel: ServoChannel,
