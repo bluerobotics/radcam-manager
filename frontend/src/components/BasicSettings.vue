@@ -1542,26 +1542,26 @@ const updateLuaScript = (): void => {
     })
 }
 
-const applyRecommendedSettings = (): void => {
+const applyRecommendedCameraSettings = (): void => {
   if (!props.selectedCameraUuid || isLoading.value) return
 
-  loadingMessage.value = 'Applying recommended settings…'
+  loadingMessage.value = 'Applying recommended camera settings…'
   const startedAt = startMinLoading(isLoading)
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
-    action: 'setRecommendedSettings',
+    action: 'setRecommendedCameraSettings',
   }
 
   axios
     .post(`${props.backendApi}/camera/control`, payload)
     .then((response) => {
-      console.log('Recommended settings applied:', response.data)
+      console.log('Recommended camera settings applied:', response.data)
       getCameraStates()
       endMinLoading(isLoading, startedAt)
     })
     .catch((error) => {
-      showErrorDialog('Failed to apply recommended settings', error)
+      showErrorDialog('Failed to apply recommended camera settings', error)
       endMinLoading(isLoading, startedAt, true)
     })
 }
@@ -1650,7 +1650,7 @@ const getCameraStates = () => {
   getBaseParameters()
 }
 
-defineExpose({ getCameraStates, updateLuaScript, applyRecommendedSettings, rebootCamera: doRestart })
+defineExpose({ getCameraStates, updateLuaScript, applyRecommendedCameraSettings, rebootCamera: doRestart })
 
 watch(
   () => props.selectedCameraUuid,
