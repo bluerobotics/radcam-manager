@@ -34,9 +34,9 @@
                   Update Lua script
                 </v-list-item-title>
               </v-list-item>
-              <v-list-item @click="applyRecommendedSettings">
+              <v-list-item @click="applyRecommendedCameraSettings">
                 <v-list-item-title class="flex">
-                  Apply Recommended Settings
+                  Apply Recommended Camera Settings
                 </v-list-item-title>
               </v-list-item>
               <v-list-item
@@ -248,13 +248,13 @@ const updateLuaScript = (): void => {
   runAutopilotControl('exportLuaScript', 'Failed to update Lua script', 'Updating Lua script…')
 }
 
-const applyRecommendedSettings = (): void => {
+const applyRecommendedCameraSettings = (): void => {
   if (cameraControls.value) {
-    cameraControls.value.applyRecommendedSettings()
+    cameraControls.value.applyRecommendedCameraSettings()
     return
   }
 
-  runCameraControl('setRecommendedSettings', 'Failed to apply recommended settings', 'Applying recommended settings…')
+  runCameraControl('setRecommendedCameraSettings', 'Failed to apply recommended camera settings', 'Applying recommended camera settings…')
 }
 
 const rebootCamera = (): void => {
