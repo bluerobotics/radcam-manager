@@ -50,8 +50,8 @@ pub enum Action {
     #[serde(rename = "restart")]
     Restart,
     /// Important: This is a wrapper, not part of the camera protocol
-    #[serde(rename = "setRecommendedSettings")]
-    SetRecommendedSettings,
+    #[serde(rename = "setRecommendedCameraSettings")]
+    SetRecommendedCameraSettings,
 }
 
 impl std::fmt::Display for Action {
@@ -69,8 +69,8 @@ fn control_inner(
 
         // Special case for command wrappers:
         match &camera_control.action {
-            Action::SetRecommendedSettings => {
-                return apply_recommended_settings(camera_control.camera_uuid).await;
+            Action::SetRecommendedCameraSettings => {
+                return apply_recommended_camera_settings(camera_control.camera_uuid).await;
             }
             Action::SetImageAdjustmentExAll(params) => {
                 return apply_set_image_adjustment_ex_all(params).await;
@@ -201,10 +201,10 @@ async fn apply_set_image_adjustment_ex_all(
 }
 
 #[instrument(level = "debug")]
-pub async fn apply_recommended_settings(camera_uuid: Uuid) -> Result<serde_json::Value> {
+pub async fn apply_recommended_camera_settings(camera_uuid: Uuid) -> Result<serde_json::Value> {
     let mut errors = vec![];
 
-    info!("Applying recommended settings to camera {camera_uuid:?}");
+    info!("Applying recommended camera settings to {camera_uuid:?}");
 
     // Set main channel to 4k@30fps, and unused channels to 480p@5fps
     {
@@ -261,7 +261,7 @@ pub async fn apply_recommended_settings(camera_uuid: Uuid) -> Result<serde_json:
         for camera_control in channel_configs {
             if let Err(error) = control_inner(Json(camera_control)).await {
                 let message = format!(
-                    "Failed applying recommended settings for VideoParameterSettings: {error:?}"
+                    "Failed applying recommended camera settings for VideoParameterSettings: {error:?}"
                 );
                 error!(message);
                 errors.push(message);
@@ -283,8 +283,9 @@ pub async fn apply_recommended_settings(camera_uuid: Uuid) -> Result<serde_json:
         };
 
         if let Err(error) = control_inner(Json(camera_control)).await {
-            let message =
-                format!("Failed applying recommended settings for BaseParameterSetting: {error:?}");
+            let message = format!(
+                "Failed applying recommended camera settings for BaseParameterSetting: {error:?}"
+            );
             error!(message);
             errors.push(message);
         }
@@ -305,7 +306,7 @@ pub async fn apply_recommended_settings(camera_uuid: Uuid) -> Result<serde_json:
 
         if let Err(error) = control_inner(Json(camera_control)).await {
             let message = format!(
-                "Failed applying recommended settings for AdvancedParameterSetting: {error:?}"
+                "Failed applying recommended camera settings for AdvancedParameterSetting: {error:?}"
             );
             error!(message);
             errors.push(message);
