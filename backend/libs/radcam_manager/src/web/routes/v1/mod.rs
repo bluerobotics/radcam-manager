@@ -13,6 +13,7 @@ pub mod camera;
 pub mod cockpit;
 pub mod info;
 pub mod log;
+pub mod settings;
 
 #[instrument(level = "trace")]
 pub fn router() -> Router {
@@ -20,6 +21,7 @@ pub fn router() -> Router {
         .nest("/camera", camera::router())
         .nest("/log", log::router())
         .nest("/info", info::router())
+        .nest("/settings", settings::router())
         .nest("/autopilot", autopilot::router())
         .route("/service/restart", post(restart))
         .route("/register_service", get(blueos::server_metadata))
