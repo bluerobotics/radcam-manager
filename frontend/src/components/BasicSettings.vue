@@ -765,7 +765,10 @@ const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
   zoom: null,
   tilt: null,
 })
-const isConfigured = ref<boolean>(true)
+/** Bumped on camera switch so in-flight actuator POSTs ignore stale `.finally` cleanup. */
+const actuatorsRequestGeneration = ref(0)
+const correlationToggleInFlight = ref(false)
+const isConfigured = ref<boolean>(false)
 const showWelcomeDialog = ref<boolean>(true)
 const showAdvancedHardware = ref(false)
 const intendedFocusAndZoomParams = ref<ActuatorsParametersConfig>({
@@ -828,10 +831,43 @@ watch(
   () => {
     hasUserEditedVideo.value = false
     hasUnsavedVideoChanges.value = false
-    intendedFocusAndZoomParams.value.camera_id = null
+    actuatorsRequestGeneration.value += 1
     inFlightParamWrites.value = 0
+    correlationToggleInFlight.value = false
+    isConfigured.value = false
+    showAdvancedHardware.value = false
+    const emptyParams: ActuatorsParametersConfig = {
+      camera_id: null,
+      focus_channel: null,
+      focus_channel_min: null,
+      focus_channel_trim: null,
+      focus_channel_max: null,
+      focus_margin_gain: null,
+      script_function: null,
+      script_channel: null,
+      script_channel_min: null,
+      script_channel_trim: null,
+      script_channel_max: null,
+      enable_focus_and_zoom_correlation: null,
+      zoom_channel: null,
+      zoom_channel_min: null,
+      zoom_channel_trim: null,
+      zoom_channel_max: null,
+      tilt_channel: null,
+      tilt_channel_min: null,
+      tilt_channel_trim: null,
+      tilt_channel_max: null,
+      tilt_channel_reversed: null,
+      tilt_mnt_type: null,
+      tilt_mnt_pitch_min: null,
+      tilt_mnt_pitch_max: null,
+    }
+    intendedFocusAndZoomParams.value = { ...emptyParams }
+    currentFocusAndZoomParams.value = { ...emptyParams }
+    defaultFocusAndZoomParams.value = { ...emptyParams }
     desiredActuatorsState.value = { focus: null, zoom: null, tilt: null }
     actuatorsSetQueued.value = { focus: null, zoom: null, tilt: null }
+    actuatorsSetInFlight.value = { focus: false, zoom: false, tilt: false }
   },
 )
 
@@ -988,11 +1024,12 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
     return
   }
 
+  const cameraUuid = props.selectedCameraUuid
   baseParams.value = { ...baseParams.value, [param]: value }
   inFlightParamWrites.value++
 
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: 'setImageAdjustment',
     json: {
       [param]: value,
@@ -1002,6 +1039,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       baseParams.value = data as BaseParameterSetting
     })
     .catch((error) => {
@@ -1019,11 +1057,12 @@ const applyActuatorsConfig = (data: ActuatorsConfig) => {
     if (intendedFocusAndZoomParams.value.camera_id === null) {
       intendedFocusAndZoomParams.value = { ...newParams }
     }
-    currentFocusAndZoomParams.value = { ...newParams }
+    if (!correlationToggleInFlight.value) {
+      currentFocusAndZoomParams.value = { ...newParams }
+    }
   } else {
     console.warn("Received null 'parameters' from response:", data)
   }
-  isConfigured.value = true
 }
 
 const applyActuatorsDefaultConfig = (data: ActuatorsConfig) => {
@@ -1053,7 +1092,6 @@ const applyActuatorsState = (state: ActuatorsState) => {
       actuatorsState.value[key] = received
     }
   })
-  isConfigured.value = true
 }
 
 const applyCameraStateEvent = (body: unknown) => {
@@ -1120,8 +1158,23 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
     return
   }
 
+  const cameraUuid = props.selectedCameraUuid
+  const previousCorrelation =
+    param === 'enable_focus_and_zoom_correlation'
+      ? currentFocusAndZoomParams.value.enable_focus_and_zoom_correlation
+      : null
+
+  if (param === 'enable_focus_and_zoom_correlation') {
+    if (correlationToggleInFlight.value) return
+    correlationToggleInFlight.value = true
+    currentFocusAndZoomParams.value = {
+      ...currentFocusAndZoomParams.value,
+      enable_focus_and_zoom_correlation: value,
+    }
+  }
+
   const payload: ActuatorsControl = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setActuatorsConfig",
     json: { "parameters": { [param]: value } as ActuatorsParametersConfig} as ActuatorsConfig
   }
@@ -1129,6 +1182,7 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
   backendClient
     .request('POST', '/autopilot/control', payload)
     .then((data) => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       const newParams = (data as ActuatorsConfig)?.parameters
       if (newParams) {
         currentFocusAndZoomParams.value = { ...newParams }
@@ -1137,8 +1191,22 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
       }
     })
     .catch((error) => {
+      if (
+        param === 'enable_focus_and_zoom_correlation' &&
+        props.selectedCameraUuid === cameraUuid
+      ) {
+        currentFocusAndZoomParams.value = {
+          ...currentFocusAndZoomParams.value,
+          enable_focus_and_zoom_correlation: previousCorrelation,
+        }
+      }
       const message = `Error sending ${String(param)} control with value '${value}'`
       console.log(message, error.message)
+    })
+    .finally(() => {
+      if (param === 'enable_focus_and_zoom_correlation') {
+        correlationToggleInFlight.value = false
+      }
     })
 }
 
@@ -1151,6 +1219,7 @@ const sendQueuedActuatorState = (param: ActuatorKey): void => {
   if (value === null) return
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = actuatorsRequestGeneration.value
   actuatorsSetQueued.value[param] = null
   actuatorsSetInFlight.value[param] = true
 
@@ -1167,13 +1236,12 @@ const sendQueuedActuatorState = (param: ActuatorKey): void => {
       console.log(message, error.message)
     })
     .finally(() => {
-      actuatorsSetInFlight.value[param] = false
-
-      if (props.selectedCameraUuid !== cameraUuid) {
-        actuatorsSetQueued.value[param] = null
-        desiredActuatorsState.value[param] = null
+      // Camera switched while this request was in flight — leave the new camera alone.
+      if (generation !== actuatorsRequestGeneration.value) {
         return
       }
+
+      actuatorsSetInFlight.value[param] = false
 
       // If a newer value was queued while this request was in-flight, send it now.
       if (actuatorsSetQueued.value[param] !== null) {
@@ -1511,6 +1579,8 @@ watch(
   () => selectedVideoResolution.value,
   (newRes) => {
     if (!newRes) return
+    // Only sync the local bitrate picker; never POST from a resolution change
+    // that may have come from camera/state (that races SAVE AND RESTART).
     const key = `${newRes.width}x${newRes.height}`
     const allowed = resolutionsToBitrate[key]
     if (!allowed || allowed.length === 0) {
@@ -1518,8 +1588,7 @@ watch(
       return
     }
     if (!selectedVideoBitrate.value || !allowed.includes(selectedVideoBitrate.value)) {
-      selectedVideoBitrate.value = allowed[0]                                  
-      updateVideoParameters({ bitrate: allowed[0] })                          
+      selectedVideoBitrate.value = allowed[0]
     }
   }
 )

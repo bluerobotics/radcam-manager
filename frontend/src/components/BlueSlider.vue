@@ -293,7 +293,8 @@ const clearCommitLock = (): void => {
 }
 
 const setCommitLock = (val: number): void => {
-  const lockMs = 2000
+  // Short lock: ignore echo of our own commit without freezing correlation-driven updates.
+  const lockMs = 400
   commitLockValue.value = val
   commitLockUntilMs.value = Date.now() + lockMs
   if (commitLockTimeout) clearTimeout(commitLockTimeout)
