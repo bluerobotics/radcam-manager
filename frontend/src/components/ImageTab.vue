@@ -728,12 +728,12 @@ import {
 
 
 import { enumToOptions } from '@/utils/enumUtils'
-import axios from 'axios'
-import { onMounted, ref, watch } from 'vue'
+import { backendClient } from '@/utils/backendClient'
+import { useCameraState } from '@/utils/useCameraState'
+import { ref, toRef } from 'vue'
 
 const props = defineProps<{
   selectedCameraUuid: string | null
-  backendApi: string,
   disabled: boolean
 }>()
 
@@ -848,26 +848,34 @@ const noiseReductionOptions = enumToOptions(AdvancedDisplayNoiseReductionValue)
 const _2dNrLevelOptions = enumToOptions(AdvancedDisplay2dNrLevelValue)
 const antiFlickerOptions = enumToOptions(AdvancedDisplayAntiflickerValue)
 
-onMounted(() => {
-  getBaseParameters()
-  getAdvancedParameters()
-})
+const inFlightParamWrites = ref(0)
 
-watch(
-  () => props.selectedCameraUuid,
-  async (newValue) => {
-    if (newValue) {
-      getBaseParameters()
-      getAdvancedParameters()
-    }
+const applyCameraStateEvent = (body: unknown) => {
+  if (!props.selectedCameraUuid) return
+  if (typeof body !== 'object' || body === null) return
+
+  const data = body as Record<string, unknown>
+  if (data.camera_uuid !== props.selectedCameraUuid) return
+  if (inFlightParamWrites.value > 0) return
+
+  if (data.base_parameters) {
+    baseParams.value = data.base_parameters as BaseParameterSetting
   }
-)
+  if (data.advanced_parameters) {
+    advancedParams.value = data.advanced_parameters as AdvancedParameterSetting
+  }
+}
+
+useCameraState(toRef(props, 'selectedCameraUuid'), applyCameraStateEvent)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   if (!props.selectedCameraUuid) {
     return
   }
+
+  baseParams.value = { ...baseParams.value, [param]: value }
+  inFlightParamWrites.value++
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
@@ -879,12 +887,15 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
 
   console.log(payload)
 
-  axios.post(`${props.backendApi}/camera/control`, payload)
-    .then(response => {
-      baseParams.value = response.data as BaseParameterSetting
+  backendClient.request('POST', '/camera/control', payload)
+    .then(data => {
+      baseParams.value = data as BaseParameterSetting
     })
     .catch(error => {
       console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
+    })
+    .finally(() => {
+      inFlightParamWrites.value = Math.max(0, inFlightParamWrites.value - 1)
     })
 }
 
@@ -898,10 +909,10 @@ const getBaseParameters = () => {
     action: "getImageAdjustment",
   }
 
-  axios.post(`${props.backendApi}/camera/control`, payload)
-    .then(response => {
-      baseParams.value = response.data as BaseParameterSetting
-      console.log(response.data)
+  backendClient.request('POST', '/camera/control', payload)
+    .then(data => {
+      baseParams.value = data as BaseParameterSetting
+      console.log(data)
     })
     .catch(error => {
       console.error(`Error sending getImageAdjustment request:`, error.message)
@@ -925,7 +936,7 @@ const doWhiteBalance = async () => {
     } as AdvancedParameterSetting,
   }
 
-  axios.post(`${props.backendApi}/camera/control`, payload)
+  backendClient.request('POST', '/camera/control', payload)
     .catch(error => {
       console.error("Error sending onceAWB control:", error.message)
     }).finally(() => {
@@ -949,10 +960,10 @@ const doRestoreBase = async () => {
     } as BaseParameterSetting,
   }
 
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then(response => {
-      baseParams.value = response.data as BaseParameterSetting
+  backendClient
+    .request('POST', '/camera/control', payload)
+    .then(data => {
+      baseParams.value = data as BaseParameterSetting
     })
     .catch(error => {
       console.error("Error sending base image restore control:", error.message)
@@ -962,26 +973,12 @@ const doRestoreBase = async () => {
     })
 }
 
-const getAdvancedParameters = () => {
-  if (!props.selectedCameraUuid) return
-
-  const payload = {
-    camera_uuid: props.selectedCameraUuid,
-    action: "getImageAdjustmentEx",
-  }
-
-  axios.post(`${props.backendApi}/camera/control`, payload)
-    .then(response => {
-      advancedParams.value = response.data as AdvancedParameterSetting
-    })
-    .catch(error => {
-      console.error("Error fetching advanced parameters:", error.message)
-    })
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) => {
   if (!props.selectedCameraUuid) return
+
+  advancedParams.value = { ...advancedParams.value, [param]: value }
+  inFlightParamWrites.value++
 
   const payload: CameraControl = {
     camera_uuid: props.selectedCameraUuid,
@@ -989,12 +986,15 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
     json: { [param]: value } as AdvancedParameterSetting
   }
 
-  axios.post(`${props.backendApi}/camera/control`, payload)
-    .then(response => {
-      advancedParams.value = { ...advancedParams.value, ...response.data }
+  backendClient.request('POST', '/camera/control', payload)
+    .then(data => {
+      advancedParams.value = data as AdvancedParameterSetting
     })
     .catch(error => {
       console.error(`Error updating ${param}:`, error.message)
+    })
+    .finally(() => {
+      inFlightParamWrites.value = Math.max(0, inFlightParamWrites.value - 1)
     })
 }
 
@@ -1009,9 +1009,9 @@ const doRestoreAdvanced = async () => {
     json: { set_default: 1 } as AdvancedParameterSetting
   }
 
-  axios.post(`${props.backendApi}/camera/control`, payload)
-    .then(response => {
-      advancedParams.value = response.data as AdvancedParameterSetting
+  backendClient.request('POST', '/camera/control', payload)
+    .then(data => {
+      advancedParams.value = data as AdvancedParameterSetting
     })
     .catch(error => {
       console.error("Error restoring advanced parameters:", error.message)
