@@ -85,7 +85,7 @@ impl Manager {
             .settings
             .actuators
             .get_mut(camera_uuid)
-            .context("Camera's actuators not configured")?;
+            .context(crate::ACTUATORS_NOT_CONFIGURED)?;
 
         let servo_output_raw = self
             .mavlink
@@ -93,44 +93,8 @@ impl Manager {
             .await
             .context("Failed waiting for SERVO_OUTPUT_RAW_DATA message")?;
 
-        let focus = {
-            let (channel, min, max) = if actuators.parameters.enable_focus_and_zoom_correlation {
-                (
-                    actuators.parameters.script_channel,
-                    actuators.parameters.script_channel_min,
-                    actuators.parameters.script_channel_max,
-                )
-            } else {
-                (
-                    actuators.parameters.focus_channel,
-                    actuators.parameters.focus_channel_min,
-                    actuators.parameters.focus_channel_max,
-                )
-            };
-
-            get_output_raw_from_channel(&servo_output_raw, channel)
-                .map(|value| percentage_within_range(value, min, max))
-        };
-
-        let zoom = {
-            let channel = actuators.parameters.zoom_channel;
-            let min = actuators.parameters.zoom_channel_min;
-            let max = actuators.parameters.zoom_channel_max;
-
-            get_output_raw_from_channel(&servo_output_raw, channel)
-                .map(|value| percentage_within_range(value, min, max))
-        };
-
-        let tilt = {
-            let channel = actuators.parameters.tilt_channel;
-            let min = actuators.parameters.tilt_channel_min;
-            let max = actuators.parameters.tilt_channel_max;
-
-            get_output_raw_from_channel(&servo_output_raw, channel)
-                .map(|value| percentage_within_range(value, min, max))
-        };
-
-        actuators.state = api::ActuatorsState { focus, zoom, tilt };
+        let state = actuators_state_from_servo(actuators, &servo_output_raw);
+        actuators.state = state;
 
         Ok(actuators.state)
     }
@@ -177,13 +141,24 @@ impl Manager {
                 .context("Failed sending MAV_CMD_SET_CAMERA_ZOOM command")?;
         }
 
-        let _ = self.get_state(camera_uuid).await;
-
-        if focus_was_set {
-            self.check_focus_script_health(camera_uuid).await;
+        // Prefer measured SERVO positions so the WS stream does not treat the
+        // requested setpoint as authoritative when the autopilot never moved.
+        match self.get_state(camera_uuid).await {
+            Ok(measured) => {
+                if focus_was_set {
+                    self.check_focus_script_health(camera_uuid).await;
+                }
+                Ok(measured)
+            }
+            Err(error) => {
+                debug!("Failed reading actuators after set: {error:?}");
+                if focus_was_set {
+                    self.check_focus_script_health(camera_uuid).await;
+                }
+                // Fall back so the UI stays responsive when the SERVO stream is quiet.
+                Ok(*new_state)
+            }
         }
-
-        Ok(*new_state)
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -299,6 +274,8 @@ pub async fn init(
         })
     });
 
+    crate::actuators_watch::start();
+
     Ok(())
 }
 
@@ -346,4 +323,53 @@ fn percentage_within_range(value: u16, min: u16, max: u16) -> f32 {
     }
     let clamped = value.clamp(min, max);
     (100.0 * ((clamped - min) as f32 / (max - min) as f32)).round()
+}
+
+/// Builds an [`api::ActuatorsState`] from a raw `SERVO_OUTPUT_RAW` sample.
+///
+/// When `enable_focus_and_zoom_correlation` is set, focus is read from the script
+/// channel instead of the dedicated focus channel. Each axis is `None` when its
+/// channel is unmapped.
+pub(crate) fn actuators_state_from_servo(
+    actuators: &CameraActuators,
+    servo_output_raw: &SERVO_OUTPUT_RAW_DATA,
+) -> api::ActuatorsState {
+    let focus = {
+        let (channel, min, max) = if actuators.parameters.enable_focus_and_zoom_correlation {
+            (
+                actuators.parameters.script_channel,
+                actuators.parameters.script_channel_min,
+                actuators.parameters.script_channel_max,
+            )
+        } else {
+            (
+                actuators.parameters.focus_channel,
+                actuators.parameters.focus_channel_min,
+                actuators.parameters.focus_channel_max,
+            )
+        };
+
+        get_output_raw_from_channel(servo_output_raw, channel)
+            .map(|value| percentage_within_range(value, min, max))
+    };
+
+    let zoom = {
+        let channel = actuators.parameters.zoom_channel;
+        let min = actuators.parameters.zoom_channel_min;
+        let max = actuators.parameters.zoom_channel_max;
+
+        get_output_raw_from_channel(servo_output_raw, channel)
+            .map(|value| percentage_within_range(value, min, max))
+    };
+
+    let tilt = {
+        let channel = actuators.parameters.tilt_channel;
+        let min = actuators.parameters.tilt_channel_min;
+        let max = actuators.parameters.tilt_channel_max;
+
+        get_output_raw_from_channel(servo_output_raw, channel)
+            .map(|value| percentage_within_range(value, min, max))
+    };
+
+    api::ActuatorsState { focus, zoom, tilt }
 }

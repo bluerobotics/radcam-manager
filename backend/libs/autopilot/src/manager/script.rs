@@ -22,7 +22,7 @@ impl Manager {
             .settings
             .actuators
             .get(camera_uuid)
-            .context("Camera's actuators not configured")?;
+            .context(crate::ACTUATORS_NOT_CONFIGURED)?;
         let path = &self.autopilot_scripts_file;
 
         let contents = generate_lua_script(camera_actuators)?;
