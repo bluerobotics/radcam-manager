@@ -285,6 +285,7 @@ dependencies = [
  "anyhow",
  "autopilot",
  "mcm_client",
+ "radcam_api",
  "radcam_commands",
  "regex",
  "ts-rs",
@@ -3058,6 +3059,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "radcam_api"
+version = "0.2.0-beta.14"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
 name = "radcam_commands"
 version = "0.2.0-beta.14"
 dependencies = [
@@ -3098,6 +3111,7 @@ dependencies = [
  "md-5",
  "mime_guess",
  "once_cell",
+ "radcam_api",
  "radcam_commands",
  "regex",
  "reqwest",
@@ -3117,8 +3131,6 @@ dependencies = [
  "tracing-appender",
  "tracing-log",
  "tracing-subscriber",
- "ts-rs",
- "tsync",
  "url",
  "url_params_serializer",
  "uuid",
