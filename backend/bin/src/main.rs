@@ -79,6 +79,7 @@ async fn start_application(first_start: bool) -> Result<bool> {
     autopilot_startup_task.abort();
     mcm_client_startup_task.abort();
     mcm_client::shutdown().await;
+    autopilot::shutdown_actuators_stream().await;
 
     if shutdown_reason == ShutdownReason::Signal {
         return Ok(false);

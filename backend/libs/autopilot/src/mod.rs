@@ -1,8 +1,8 @@
+mod actuators_watch;
 pub mod api;
 mod manager;
 mod mavlink;
 pub mod parameters;
-pub mod routes;
 mod settings_translations;
 
 use anyhow::{Context, Result};
@@ -10,6 +10,11 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
+pub use actuators_watch::{
+    add_interest as add_actuators_state_interest,
+    remove_interest as remove_actuators_state_interest, shutdown as shutdown_actuators_stream,
+    subscribe as subscribe_actuators_state,
+};
 pub use manager::{clear_saved_settings, init};
 
 use crate::{
@@ -17,7 +22,8 @@ use crate::{
     parameters::{ActuatorsParameters, CLOSEST_POINTS, FURTHEST_POINTS},
 };
 
-pub use routes::router;
+/// Context message when a camera has no actuators entry yet.
+pub const ACTUATORS_NOT_CONFIGURED: &str = "Camera's actuators not configured";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct CameraActuators {
@@ -36,6 +42,17 @@ impl Default for CameraActuators {
             state: api::ActuatorsState::default(),
         }
     }
+}
+
+/// True when `message` (e.g. `format!("{error:?}")`) carries [`ACTUATORS_NOT_CONFIGURED`].
+pub fn error_indicates_actuators_not_configured(message: &str) -> bool {
+    message.contains(ACTUATORS_NOT_CONFIGURED)
+}
+
+/// Shared entry point for REST and WebSocket autopilot control requests.
+#[instrument(level = "debug")]
+pub async fn handle_control(actuators_control: api::ActuatorsControl) -> Result<serde_json::Value> {
+    control_inner(Json(actuators_control)).await
 }
 
 #[instrument(level = "debug")]
@@ -88,7 +105,7 @@ pub(crate) async fn control_inner(
                 .settings
                 .actuators
                 .get(&actuators_control.camera_uuid)
-                .context("Camera's actuators not configured")?
+                .context(crate::ACTUATORS_NOT_CONFIGURED)?
                 .into();
 
             serde_json::to_value(config)?
@@ -120,7 +137,7 @@ pub(crate) async fn control_inner(
                 .settings
                 .actuators
                 .get(&actuators_control.camera_uuid)
-                .context("Camera's actuators not configured")?
+                .context(crate::ACTUATORS_NOT_CONFIGURED)?
                 .into();
 
             serde_json::to_value(config)?
@@ -134,7 +151,7 @@ pub(crate) async fn control_inner(
                 .settings
                 .actuators
                 .get(&actuators_control.camera_uuid)
-                .context("Camera's actuators not configured")?
+                .context(crate::ACTUATORS_NOT_CONFIGURED)?
                 .into();
 
             serde_json::to_value(config)?
@@ -142,4 +159,22 @@ pub(crate) async fn control_inner(
     };
 
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::anyhow;
+
+    use super::{ACTUATORS_NOT_CONFIGURED, error_indicates_actuators_not_configured};
+
+    #[test]
+    fn actuators_not_configured_message_is_stable() {
+        let error = anyhow!("missing entry").context(ACTUATORS_NOT_CONFIGURED);
+        assert!(error_indicates_actuators_not_configured(&format!(
+            "{error:?}"
+        )));
+        assert!(!error_indicates_actuators_not_configured(
+            "Camera actuators unavailable"
+        ));
+    }
 }

@@ -1,0 +1,399 @@
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    time::{Duration, Instant},
+};
+
+use mavlink::{
+    Message as _, MessageData,
+    ardupilotmega::{MavMessage, SERVO_OUTPUT_RAW_DATA},
+};
+use once_cell::sync::OnceCell;
+use tokio::sync::{Notify, broadcast};
+use tracing::*;
+use uuid::Uuid;
+
+use crate::{
+    api,
+    manager::{self, MANAGER},
+    mavlink::Message,
+};
+
+const MIN_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+/// Requesting the stream faster than the UI emit gating would only waste bandwidth.
+const SERVO_STREAM_INTERVAL_US: f32 = MIN_EMIT_INTERVAL.as_micros() as f32;
+/// `MAV_CMD_SET_MESSAGE_INTERVAL` disables a stream when given a negative interval.
+const STREAM_DISABLED_INTERVAL_US: f32 = -1.0;
+const STREAM_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const STREAM_STALE_AFTER: Duration = Duration::from_secs(3);
+const RECEIVER_REOPEN_BACKOFF: Duration = Duration::from_secs(1);
+/// Bound SERVO interval requests so an unresponsive autopilot cannot stall the watcher.
+const SERVO_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+
+static STATE_TX: OnceCell<broadcast::Sender<ActuatorsStateUpdate>> = OnceCell::new();
+static WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
+static INTEREST: AtomicUsize = AtomicUsize::new(0);
+static INTEREST_CHANGED: Notify = Notify::const_new();
+
+/// Actuator positions derived from a MAVLink `SERVO_OUTPUT_RAW` sample.
+#[derive(Debug, Clone)]
+pub struct ActuatorsStateUpdate {
+    /// Camera whose actuators changed.
+    pub camera_uuid: Uuid,
+    /// Latest focus/zoom/tilt percentages.
+    pub state: api::ActuatorsState,
+}
+
+struct EmitGate {
+    last_emitted: HashMap<Uuid, api::ActuatorsState>,
+    last_emit_at: HashMap<Uuid, Instant>,
+    pending: HashMap<Uuid, api::ActuatorsState>,
+}
+
+impl EmitGate {
+    #[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+    fn try_emit(
+        &mut self,
+        camera_uuid: Uuid,
+        state: api::ActuatorsState,
+        sender: &broadcast::Sender<ActuatorsStateUpdate>,
+    ) {
+        if self.last_emitted.get(&camera_uuid) == Some(&state) {
+            self.pending.remove(&camera_uuid);
+            return;
+        }
+
+        let now = Instant::now();
+        if let Some(last_emit) = self.last_emit_at.get(&camera_uuid)
+            && now.duration_since(*last_emit) < MIN_EMIT_INTERVAL
+        {
+            self.pending.insert(camera_uuid, state);
+            return;
+        }
+
+        self.emit(camera_uuid, state, sender, now);
+    }
+
+    #[instrument(level = "debug", skip_all)]
+    fn flush_pending(&mut self, sender: &broadcast::Sender<ActuatorsStateUpdate>) {
+        let now = Instant::now();
+        let pending: Vec<(Uuid, api::ActuatorsState)> = self.pending.drain().collect();
+
+        for (camera_uuid, state) in pending {
+            if self.last_emitted.get(&camera_uuid) == Some(&state) {
+                continue;
+            }
+
+            let Some(last_emit) = self.last_emit_at.get(&camera_uuid) else {
+                self.emit(camera_uuid, state, sender, now);
+                continue;
+            };
+
+            if now.duration_since(*last_emit) >= MIN_EMIT_INTERVAL {
+                self.emit(camera_uuid, state, sender, now);
+            } else {
+                self.pending.insert(camera_uuid, state);
+            }
+        }
+    }
+
+    #[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+    fn emit(
+        &mut self,
+        camera_uuid: Uuid,
+        state: api::ActuatorsState,
+        sender: &broadcast::Sender<ActuatorsStateUpdate>,
+        now: Instant,
+    ) {
+        // Ignore lag when nobody is listening yet.
+        if sender
+            .send(ActuatorsStateUpdate { camera_uuid, state })
+            .is_err()
+        {
+            debug!("No actuators state subscribers");
+        }
+        self.last_emitted.insert(camera_uuid, state);
+        self.last_emit_at.insert(camera_uuid, now);
+        self.pending.remove(&camera_uuid);
+    }
+}
+
+/// Subscribe to throttled actuator state updates from the SERVO stream.
+pub fn subscribe() -> broadcast::Receiver<ActuatorsStateUpdate> {
+    state_sender().subscribe()
+}
+
+/// Start the background SERVO_OUTPUT_RAW watcher once.
+///
+/// The watcher stays idle until [`add_interest`] is called: no high-rate stream
+/// is requested from the autopilot while there are no interested consumers.
+pub fn start() {
+    if WATCHER_STARTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    tokio::spawn(actuators_watcher());
+}
+
+/// Register interest in the SERVO stream, requesting it when the first one arrives.
+///
+/// Every call must be paired with a [`remove_interest`] call.
+#[instrument(level = "debug")]
+pub fn add_interest() {
+    if INTEREST.fetch_add(1, Ordering::SeqCst) == 0 {
+        INTEREST_CHANGED.notify_one();
+    }
+}
+
+/// Release an interest registered with [`add_interest`], disabling the SERVO
+/// stream when the last one is gone.
+#[instrument(level = "debug")]
+pub fn remove_interest() {
+    match INTEREST.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |interests| {
+        interests.checked_sub(1)
+    }) {
+        Ok(1) => INTEREST_CHANGED.notify_one(),
+        Ok(_) => (),
+        Err(_current) => warn!("Unbalanced remove_interest call, no interest registered"),
+    }
+}
+
+/// Disable the high-rate SERVO stream before process exit.
+///
+/// Safe to call with outstanding interest; clears the interest count and asks the
+/// autopilot to stop streaming `SERVO_OUTPUT_RAW`. Bounded so an unreachable
+/// autopilot cannot stall process exit for the full MAVLink ACK retry budget.
+#[instrument(level = "debug")]
+pub async fn shutdown() {
+    INTEREST.store(0, Ordering::SeqCst);
+    INTEREST_CHANGED.notify_waiters();
+    if tokio::time::timeout(
+        SERVO_REQUEST_TIMEOUT,
+        request_servo_stream(STREAM_DISABLED_INTERVAL_US),
+    )
+    .await
+    .is_err()
+    {
+        warn!("Timed out disabling SERVO_OUTPUT_RAW during shutdown");
+    }
+}
+
+fn state_sender() -> &'static broadcast::Sender<ActuatorsStateUpdate> {
+    STATE_TX.get_or_init(|| {
+        let (sender, _) = broadcast::channel(64);
+        sender
+    })
+}
+
+#[instrument(level = "debug", skip_all)]
+async fn actuators_watcher() {
+    let sender = state_sender().clone();
+
+    let mut gate = EmitGate {
+        last_emitted: HashMap::new(),
+        last_emit_at: HashMap::new(),
+        pending: HashMap::new(),
+    };
+
+    let mut refresh = tokio::time::interval(STREAM_REFRESH_INTERVAL);
+    refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut last_servo_at = Instant::now();
+
+    loop {
+        let (mut receiver, target_system) = match open_receiver().await {
+            Some(pair) => pair,
+            None => {
+                tokio::time::sleep(STREAM_REFRESH_INTERVAL).await;
+                continue;
+            }
+        };
+
+        if INTEREST.load(Ordering::SeqCst) > 0 {
+            // Best-effort; refresh tick retries if the autopilot is quiet.
+            let _ = tokio::time::timeout(
+                SERVO_REQUEST_TIMEOUT,
+                request_servo_stream(SERVO_STREAM_INTERVAL_US),
+            )
+            .await;
+        }
+
+        loop {
+            tokio::select! {
+                message = receiver.recv() => {
+                    match message {
+                        Ok(Message::Received((header, message)))
+                            if header.system_id == target_system
+                                && header.component_id
+                                    == mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8
+                                && message.message_id() == SERVO_OUTPUT_RAW_DATA::ID =>
+                        {
+                            let MavMessage::SERVO_OUTPUT_RAW(servo_output_raw) = message else {
+                                continue;
+                            };
+
+                            if servo_output_raw.port != 0 {
+                                continue;
+                            }
+
+                            last_servo_at = Instant::now();
+
+                            let Some(manager) = MANAGER.get() else {
+                                continue;
+                            };
+
+                            let mut manager = manager.write().await;
+                            for (camera_uuid, actuators) in &mut manager.settings.actuators {
+                                let state =
+                                    manager::actuators_state_from_servo(actuators, &servo_output_raw);
+                                actuators.state = state;
+                                gate.try_emit(*camera_uuid, state, &sender);
+                            }
+                            drop(manager);
+
+                            gate.flush_pending(&sender);
+                        }
+                        Ok(_) => continue,
+                        Err(broadcast::error::RecvError::Closed) => {
+                            debug!("MAVLink receiver closed; reopening actuators watcher");
+                            tokio::time::sleep(RECEIVER_REOPEN_BACKOFF).await;
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(samples)) => {
+                            debug!("Actuators watcher lagged by {samples} MAVLink messages");
+                        }
+                    }
+                }
+                _ = refresh.tick() => {
+                    // Flush throttle-stranded samples even when SERVO goes quiet.
+                    gate.flush_pending(&sender);
+                    if INTEREST.load(Ordering::SeqCst) > 0 && last_servo_at.elapsed() >= STREAM_STALE_AFTER {
+                        debug!("SERVO_OUTPUT_RAW stale; re-requesting message interval");
+                        // Best-effort; next tick retries if the autopilot is quiet.
+                        let _ = tokio::time::timeout(
+                            SERVO_REQUEST_TIMEOUT,
+                            request_servo_stream(SERVO_STREAM_INTERVAL_US),
+                        )
+                        .await;
+                    }
+                }
+                _ = INTEREST_CHANGED.notified() => {
+                    if INTEREST.load(Ordering::SeqCst) > 0 {
+                        // Best-effort; refresh tick retries if the autopilot is quiet.
+                        let _ = tokio::time::timeout(
+                            SERVO_REQUEST_TIMEOUT,
+                            request_servo_stream(SERVO_STREAM_INTERVAL_US),
+                        )
+                        .await;
+                        last_servo_at = Instant::now();
+                    } else {
+                        // Best-effort disable; shutdown() also times this out.
+                        let _ = tokio::time::timeout(
+                            SERVO_REQUEST_TIMEOUT,
+                            request_servo_stream(STREAM_DISABLED_INTERVAL_US),
+                        )
+                        .await;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[instrument(level = "debug", skip_all)]
+async fn open_receiver() -> Option<(broadcast::Receiver<Message>, u8)> {
+    let manager = MANAGER.get()?.read().await;
+    let receiver = manager.mavlink.get_receiver().await;
+    let target_system = manager.mavlink.inner.system_id;
+    Some((receiver, target_system))
+}
+
+#[instrument(level = "debug")]
+async fn request_servo_stream(interval_us: f32) {
+    let Some(manager) = MANAGER.get() else {
+        return;
+    };
+    let manager = manager.read().await;
+    if let Err(error) = manager
+        .mavlink
+        .set_message_interval(SERVO_OUTPUT_RAW_DATA::ID, interval_us)
+        .await
+    {
+        debug!("Failed setting SERVO_OUTPUT_RAW stream interval: {error:?}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn emit_gate_dedups_identical_state() {
+        let (sender, mut receiver) = broadcast::channel(8);
+        let mut gate = EmitGate {
+            last_emitted: HashMap::new(),
+            last_emit_at: HashMap::new(),
+            pending: HashMap::new(),
+        };
+        let camera_uuid = Uuid::nil();
+        let state = api::ActuatorsState {
+            focus: Some(10.0),
+            zoom: Some(20.0),
+            tilt: Some(30.0),
+        };
+
+        gate.try_emit(camera_uuid, state, &sender);
+        gate.try_emit(camera_uuid, state, &sender);
+
+        assert!(receiver.try_recv().is_ok());
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn interest_refcount_saturates_at_zero() {
+        add_interest();
+        add_interest();
+        assert_eq!(INTEREST.load(Ordering::SeqCst), 2);
+
+        remove_interest();
+        remove_interest();
+        remove_interest();
+        assert_eq!(INTEREST.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn emit_gate_queues_when_throttled() {
+        let (sender, mut receiver) = broadcast::channel(8);
+        let mut gate = EmitGate {
+            last_emitted: HashMap::new(),
+            last_emit_at: HashMap::new(),
+            pending: HashMap::new(),
+        };
+        let camera_uuid = Uuid::nil();
+        let first = api::ActuatorsState {
+            focus: Some(1.0),
+            zoom: None,
+            tilt: None,
+        };
+        let second = api::ActuatorsState {
+            focus: Some(2.0),
+            zoom: None,
+            tilt: None,
+        };
+
+        gate.try_emit(camera_uuid, first, &sender);
+        gate.try_emit(camera_uuid, second, &sender);
+        assert!(receiver.try_recv().is_ok());
+        assert!(receiver.try_recv().is_err());
+        assert!(gate.pending.contains_key(&camera_uuid));
+
+        // Pretend enough time passed.
+        gate.last_emit_at
+            .insert(camera_uuid, Instant::now() - MIN_EMIT_INTERVAL);
+        gate.flush_pending(&sender);
+        let update = receiver.try_recv().expect("pending flush");
+        assert_eq!(update.state.focus, Some(2.0));
+    }
+}
