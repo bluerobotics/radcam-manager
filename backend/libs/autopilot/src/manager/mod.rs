@@ -151,12 +151,11 @@ impl Manager {
                 Ok(measured)
             }
             Err(error) => {
-                debug!("Failed reading actuators after set: {error:?}");
                 if focus_was_set {
                     self.check_focus_script_health(camera_uuid).await;
                 }
-                // Fall back so the UI stays responsive when the SERVO stream is quiet.
-                Ok(*new_state)
+                // Do not fall back to the unverified setpoint — that lied to the UI.
+                Err(error)
             }
         }
     }

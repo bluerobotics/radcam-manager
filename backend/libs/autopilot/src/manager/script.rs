@@ -222,7 +222,7 @@ impl Manager {
                 current_parameters.enable_focus_and_zoom_correlation = new_value;
             }
             Err(error) => {
-                warn!("Failed setting parameter: {error:?}")
+                return Err(error).context(format!("Failed setting parameter {param_name}"));
             }
         }
 
@@ -275,7 +275,7 @@ impl Manager {
                 current_parameters.focus_margin_gain = new_value;
             }
             Err(error) => {
-                warn!("Failed setting parameter: {error:?}")
+                return Err(error).context(format!("Failed setting parameter {param_name}"));
             }
         }
 
@@ -347,12 +347,12 @@ impl Manager {
         let script_output_raw =
             get_output_raw_from_channel(&servo_output_raw, actuators.parameters.focus_channel);
 
-        if let (Some(input_raw), Some(output_raw)) = (script_input_raw, script_output_raw) {
-            if self.script_health.update(input_raw, output_raw) {
-                warn!("Attempting Lua script reload due to stale focus output");
-                if let Err(error) = self.mavlink.reload_lua_scripts(true).await {
-                    error!("Failed to reload Lua scripts: {error:?}");
-                }
+        if let (Some(input_raw), Some(output_raw)) = (script_input_raw, script_output_raw)
+            && self.script_health.update(input_raw, output_raw)
+        {
+            warn!("Attempting Lua script reload due to stale focus output");
+            if let Err(error) = self.mavlink.reload_lua_scripts(true).await {
+                error!("Failed to reload Lua scripts: {error:?}");
             }
         }
     }
