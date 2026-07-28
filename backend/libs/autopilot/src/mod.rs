@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use tracing::*;
 
 pub use actuators_watch::{
-    add_interest as add_actuators_state_interest,
-    remove_interest as remove_actuators_state_interest, shutdown as shutdown_actuators_stream,
-    subscribe as subscribe_actuators_state,
+    add_interest as add_actuators_state_interest, cached_actuators_state,
+    interest_count as actuators_interest_count, remove_interest as remove_actuators_state_interest,
+    shutdown as shutdown_actuators_stream, subscribe as subscribe_actuators_state,
 };
 pub use manager::{clear_saved_settings, init};
 
@@ -83,17 +83,24 @@ pub(crate) async fn control_inner(
             serde_json::to_value({})?
         }
         Action::GetActuatorsState => {
-            // Read cached state under a shared lock so we do not block the SERVO
-            // watcher (which needs write) for a one-shot MAVLink wait.
-            let manager = MANAGER.get().context("Not available")?.read().await;
+            // Prefer the SERVO watcher's cache under a shared lock when the stream
+            // is active. With no interest, fall back to a one-shot SERVO wait so
+            // REST callers still get measured positions.
+            if actuators_watch::interest_count() > 0 {
+                let manager = MANAGER.get().context("Not available")?.read().await;
 
-            let actuators = manager
-                .settings
-                .actuators
-                .get(&actuators_control.camera_uuid)
-                .context(crate::ACTUATORS_NOT_CONFIGURED)?;
+                let actuators = manager
+                    .settings
+                    .actuators
+                    .get(&actuators_control.camera_uuid)
+                    .context(crate::ACTUATORS_NOT_CONFIGURED)?;
 
-            serde_json::to_value(actuators.state)?
+                serde_json::to_value(actuators.state)?
+            } else {
+                let mut manager = MANAGER.get().context("Not available")?.write().await;
+                let state = manager.get_state(&actuators_control.camera_uuid).await?;
+                serde_json::to_value(state)?
+            }
         }
         Action::SetActuatorsState(new_state) => {
             let mut manager = MANAGER.get().context("Not available")?.write().await;

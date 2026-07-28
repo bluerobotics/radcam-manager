@@ -257,8 +257,15 @@ fn spawn_lag_recovery(
             let _lag_guard = lag_guard;
             for camera_uuid in camera_state::connection_cameras(connection_id) {
                 let Ok(permit) = snapshot_permits.clone().try_acquire_owned() else {
-                    debug!(%connection_id, %camera_uuid, "No permit for lag-recovery snapshot");
-                    // Slow watcher backfills when permits are exhausted.
+                    debug!(%connection_id, %camera_uuid, "No permit for lag-recovery snapshot; pushing actuators only");
+                    // Slow watcher does not backfill actuators_state; push manager cache.
+                    if let Some(event) =
+                        camera_state::actuators_state_event(camera_uuid).await
+                        && let Some(text) = state_event_text(&event)
+                        && !queue_text(connection_id, &response_tx, &close_notify, text)
+                    {
+                        return;
+                    }
                     continue;
                 };
                 let event = camera_state::snapshot(camera_uuid).await;
@@ -629,11 +636,7 @@ async fn handle_request(request: WsRequest) -> WsResponse {
 
             match control_bridge::camera_control(camera_control).await {
                 Ok(value) => WsResponse::new(id, 200, value),
-                Err(error) => WsResponse::new(
-                    id,
-                    control_bridge::status_for_error(&error),
-                    Value::String(error),
-                ),
+                Err(error) => WsResponse::new(id, error.status, Value::String(error.message)),
             }
         }
         ("POST", "/autopilot/control") => {
@@ -651,11 +654,7 @@ async fn handle_request(request: WsRequest) -> WsResponse {
 
             match control_bridge::autopilot_control(actuators_control).await {
                 Ok(value) => WsResponse::new(id, 200, value),
-                Err(error) => WsResponse::new(
-                    id,
-                    control_bridge::status_for_error(&error),
-                    Value::String(error),
-                ),
+                Err(error) => WsResponse::new(id, error.status, Value::String(error.message)),
             }
         }
         _ => WsResponse::new(id, 404, Value::String("not found".to_string())),

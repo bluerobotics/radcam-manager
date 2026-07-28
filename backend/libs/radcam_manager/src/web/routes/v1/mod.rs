@@ -42,9 +42,9 @@ async fn autopilot_control(Json(actuators_control): Json<ActuatorsControl>) -> i
     match control_bridge::autopilot_control(actuators_control).await {
         Ok(value) => (StatusCode::OK, value.to_string()).into_response(),
         Err(error) => {
-            let status = StatusCode::from_u16(control_bridge::status_for_error(&error))
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            (status, error).into_response()
+            let status =
+                StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            (status, error.message).into_response()
         }
     }
 }
