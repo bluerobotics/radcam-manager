@@ -28,7 +28,7 @@
           />
         </div>
         <div
-          class="absolute translate-y-1/2 bottom-1/2 text-white text-center text-[14px] min-w-[60px] py-[1px] rounded-[6px] elevation-1 z-50 h-3/4"
+          class="absolute translate-y-1/2 bottom-1/2 text-white text-center text-[14px] w-[4.5rem] min-w-[4.5rem] max-w-[4.5rem] shrink-0 py-[1px] rounded-[6px] elevation-1 z-50 h-3/4"
           :class="isEditingCurrentSliderValue ? 'pointer-events-auto' : 'pointer-events-none select-none'"
           :style="{
             left: pillLeft,
@@ -36,15 +36,21 @@
             backgroundColor: color || '#0B5087',
           }"
         >
-          <div v-if="!isEditingCurrentSliderValue">
+          <div
+            v-if="!isEditingCurrentSliderValue"
+            class="flex h-full w-full items-center justify-center"
+          >
             <p
-              class="font-bold select-none"
+              class="font-bold select-none truncate px-0.5"
               draggable="false"
             >
               {{ formatDisplay ? formatDisplay(scaledValue) : scaledValue.toFixed(defaultDecimals) }}
             </p>
           </div>
-          <div v-else>
+          <div
+            v-else
+            class="flex h-full w-full items-center justify-center"
+          >
             <input
               ref="editInput"
               v-model.number="editedDisplayValue"
@@ -53,10 +59,10 @@
               :max="displayMax"
               :step="displayStep"
               autofocus
-              class="bg-white border border-gray-300 rounded px-1 py-0.5"
+              class="box-border h-full w-full min-w-0 bg-white border border-gray-300 rounded px-0.5 py-0 text-center text-black"
               @input="clampEditedValue"
               @keydown="handleValueChange"
-              @blur="isEditingCurrentSliderValue = false"
+              @blur="onEditBlur"
             >
           </div>
         </div>
@@ -143,6 +149,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: number | null): void
 }>()
+
+const editInput = ref<HTMLInputElement | null>(null)
 
 const decimalsFromStep = (step: number): number => {
   if (!Number.isFinite(step) || step <= 0) return 0
@@ -258,9 +266,9 @@ const fillWidth = computed(() => {
 })
 const staticFillWidth = ref<number>(0)
 
-const pillLeft = computed(() =>                      
-  `calc((100% - 70px) * ${                           
-    (isEditingCurrentSliderValue.value               
+const pillLeft = computed(() =>
+  `calc((100% - 4.5rem) * ${
+    (isEditingCurrentSliderValue.value
       ? staticFillWidth.value
       : fillWidth.value) / 100})`
 )
@@ -309,7 +317,11 @@ const onSliderChange = (): void => {
 
 // Clamp during input
 const clampEditedValue = () => {
-  editedDisplayValue.value = Math.min(Math.max(editedDisplayValue.value, displayMin.value), displayMax.value)
+  if (!Number.isFinite(editedDisplayValue.value)) return
+  editedDisplayValue.value = Math.min(
+    Math.max(editedDisplayValue.value, displayMin.value),
+    displayMax.value,
+  )
 }
 
 let throttleTimeout: number | null = null
@@ -408,7 +420,7 @@ const onRangeKeyup = (e: KeyboardEvent): void => {
   endInteracting()
 }
 
-// Keyboard handling
+// Keyboard handling for the edit input.
 const handleValueChange = (e: KeyboardEvent): void => {
   if (e.key === 'Escape') {
     isEditingCurrentSliderValue.value = false
@@ -417,6 +429,15 @@ const handleValueChange = (e: KeyboardEvent): void => {
   } else if (e.key === 'Enter') {
     isEditingCurrentSliderValue.value = false
   }
+}
+
+// Native number spinners fire blur before they apply the step. Defer leaving
+// edit mode long enough for the spinner mouseup/input to update the value.
+const onEditBlur = (): void => {
+  window.setTimeout(() => {
+    if (document.activeElement === editInput.value) return
+    isEditingCurrentSliderValue.value = false
+  }, 150)
 }
 
 // Sync from parent
@@ -442,6 +463,9 @@ watch(isEditingCurrentSliderValue, (isEditing) => {
     editedDisplayValue.value = displayValue.value
     staticFillWidth.value = fillWidth.value
   } else {
+    if (!Number.isFinite(editedDisplayValue.value)) {
+      editedDisplayValue.value = displayValue.value
+    }
     const raw = props.unscaleFn ? props.unscaleFn(editedDisplayValue.value) : editedDisplayValue.value
     currentSliderValue.value = Math.min(Math.max(raw, props.min), props.max)
     sendValue(currentSliderValue.value)
