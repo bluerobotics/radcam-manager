@@ -118,6 +118,22 @@ impl EmitGate {
     }
 }
 
+/// Current interest count for the SERVO stream (WS subscribers / bridges).
+pub fn interest_count() -> usize {
+    INTEREST.load(Ordering::SeqCst)
+}
+
+/// Latest actuators state cached on the manager for `camera_uuid`, if any.
+#[instrument(level = "debug")]
+pub async fn cached_actuators_state(camera_uuid: Uuid) -> Option<api::ActuatorsState> {
+    let manager = MANAGER.get()?.read().await;
+    manager
+        .settings
+        .actuators
+        .get(&camera_uuid)
+        .map(|actuators| actuators.state)
+}
+
 /// Subscribe to throttled actuator state updates from the SERVO stream.
 pub fn subscribe() -> broadcast::Receiver<ActuatorsStateUpdate> {
     state_sender().subscribe()
