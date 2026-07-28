@@ -1,34 +1,20 @@
-import { onMounted, onUnmounted, watch, type Ref } from 'vue'
+import { onUnmounted, type Ref } from 'vue'
 
 import { backendClient } from './backendClient'
 
+/**
+ * Bind a handler to `camera/state` for the selected camera.
+ *
+ * Wire subscribe/unsubscribe is owned by HomeView so tabs do not fight over
+ * refcounts. `selectedCameraUuid` is part of the API for callers that close over it.
+ */
 export function useCameraState(
-  selectedCameraUuid: Ref<string | null>,
+  _selectedCameraUuid: Ref<string | null>,
   handler: (body: unknown) => void,
 ) {
   const unsubscribe = backendClient.onEvent('camera/state', handler)
 
-  const subscribe = () => {
-    if (selectedCameraUuid.value) {
-      backendClient.subscribeCamera(selectedCameraUuid.value)
-    }
-  }
-
-  onMounted(subscribe)
-
   onUnmounted(() => {
     unsubscribe()
-    if (selectedCameraUuid.value) {
-      backendClient.unsubscribeCamera(selectedCameraUuid.value)
-    }
-  })
-
-  watch(selectedCameraUuid, (uuid, previousUuid) => {
-    if (previousUuid) {
-      backendClient.unsubscribeCamera(previousUuid)
-    }
-    if (uuid) {
-      subscribe()
-    }
   })
 }

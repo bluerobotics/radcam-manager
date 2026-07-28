@@ -730,7 +730,7 @@ import {
 import { enumToOptions } from '@/utils/enumUtils'
 import { backendClient } from '@/utils/backendClient'
 import { useCameraState } from '@/utils/useCameraState'
-import { ref, toRef } from 'vue'
+import { ref, toRef, watch } from 'vue'
 
 const props = defineProps<{
   selectedCameraUuid: string | null
@@ -848,7 +848,8 @@ const noiseReductionOptions = enumToOptions(AdvancedDisplayNoiseReductionValue)
 const _2dNrLevelOptions = enumToOptions(AdvancedDisplay2dNrLevelValue)
 const antiFlickerOptions = enumToOptions(AdvancedDisplayAntiflickerValue)
 
-const inFlightParamWrites = ref(0)
+const inFlightBaseWrites = ref(0)
+const inFlightAdvancedWrites = ref(0)
 
 const applyCameraStateEvent = (body: unknown) => {
   if (!props.selectedCameraUuid) return
@@ -856,17 +857,24 @@ const applyCameraStateEvent = (body: unknown) => {
 
   const data = body as Record<string, unknown>
   if (data.camera_uuid !== props.selectedCameraUuid) return
-  if (inFlightParamWrites.value > 0) return
 
-  if (data.base_parameters) {
+  if (data.base_parameters && inFlightBaseWrites.value === 0) {
     baseParams.value = data.base_parameters as BaseParameterSetting
   }
-  if (data.advanced_parameters) {
+  if (data.advanced_parameters && inFlightAdvancedWrites.value === 0) {
     advancedParams.value = data.advanced_parameters as AdvancedParameterSetting
   }
 }
 
 useCameraState(toRef(props, 'selectedCameraUuid'), applyCameraStateEvent)
+
+watch(
+  () => props.selectedCameraUuid,
+  () => {
+    inFlightBaseWrites.value = 0
+    inFlightAdvancedWrites.value = 0
+  },
+)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
@@ -874,11 +882,12 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
     return
   }
 
+  const cameraUuid = props.selectedCameraUuid
   baseParams.value = { ...baseParams.value, [param]: value }
-  inFlightParamWrites.value++
+  inFlightBaseWrites.value++
 
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setImageAdjustment",
     json: {
       [param]: value,
@@ -889,13 +898,14 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       baseParams.value = data as BaseParameterSetting
     })
     .catch(error => {
       console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
     })
     .finally(() => {
-      inFlightParamWrites.value = Math.max(0, inFlightParamWrites.value - 1)
+      inFlightBaseWrites.value = Math.max(0, inFlightBaseWrites.value - 1)
     })
 }
 
@@ -904,13 +914,15 @@ const getBaseParameters = () => {
     return
   }
 
+  const cameraUuid = props.selectedCameraUuid
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "getImageAdjustment",
   }
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       baseParams.value = data as BaseParameterSetting
       console.log(data)
     })
@@ -952,8 +964,9 @@ const doRestoreBase = async () => {
 
   processingBaseRestore.value = true
 
+  const cameraUuid = props.selectedCameraUuid
   const payload: CameraControl = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setImageAdjustment",
     json: {
       set_default: 1,
@@ -963,6 +976,7 @@ const doRestoreBase = async () => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then(data => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       baseParams.value = data as BaseParameterSetting
     })
     .catch(error => {
@@ -977,24 +991,26 @@ const doRestoreBase = async () => {
 const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) => {
   if (!props.selectedCameraUuid) return
 
+  const cameraUuid = props.selectedCameraUuid
   advancedParams.value = { ...advancedParams.value, [param]: value }
-  inFlightParamWrites.value++
+  inFlightAdvancedWrites.value++
 
   const payload: CameraControl = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
     json: { [param]: value } as AdvancedParameterSetting
   }
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       advancedParams.value = data as AdvancedParameterSetting
     })
     .catch(error => {
       console.error(`Error updating ${param}:`, error.message)
     })
     .finally(() => {
-      inFlightParamWrites.value = Math.max(0, inFlightParamWrites.value - 1)
+      inFlightAdvancedWrites.value = Math.max(0, inFlightAdvancedWrites.value - 1)
     })
 }
 
@@ -1003,14 +1019,16 @@ const doRestoreAdvanced = async () => {
 
   processingAdvancedRestore.value = true
 
+  const cameraUuid = props.selectedCameraUuid
   const payload: CameraControl = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
     json: { set_default: 1 } as AdvancedParameterSetting
   }
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       advancedParams.value = data as AdvancedParameterSetting
     })
     .catch(error => {
