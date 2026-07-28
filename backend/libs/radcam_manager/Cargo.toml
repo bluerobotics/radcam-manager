@@ -51,5 +51,8 @@ uuid = { workspace = true }
 ts-rs = { workspace = true }
 tsync = { workspace = true }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+
 [build-dependencies]
 vergen-gix = { workspace = true }
