@@ -210,7 +210,7 @@ class BackendClient {
         this.lastMessageAt = Date.now()
         this.setConnectionState('connected')
         this.startStaleCheck()
-        // Re-subscribe immediately; camera/list also re-queues as a second chance.
+        // Re-subscribe immediately on reconnect (do not wait for camera/list).
         if (this.subscribedCameraUuid) {
           this.queueSubscribe(this.subscribedCameraUuid)
         }
@@ -316,12 +316,6 @@ class BackendClient {
     }
 
     if (message.type === 'event') {
-      // Re-push subscribe when the list arrives so a reconnect during MCM boot
-      // does not leave the client permanently unsubscribed.
-      if (message.event === 'camera/list' && this.subscribedCameraUuid) {
-        this.queueSubscribe(this.subscribedCameraUuid)
-      }
-
       const handlers = this.eventHandlers.get(message.event)
       if (!handlers) return
       for (const handler of handlers) {
@@ -377,9 +371,10 @@ class BackendClient {
 
     for (let attempt = 0; attempt < REQUEST_MAX_ATTEMPTS; attempt++) {
       try {
-        // Let the reconnect timer own the next connect when one is already scheduled.
-        if (this.reconnectTimer !== null && this.ws?.readyState !== WebSocket.OPEN) {
-          throw new Error('WebSocket connection failed')
+        // Promote a scheduled reconnect into an immediate connect attempt.
+        if (this.reconnectTimer !== null) {
+          clearTimeout(this.reconnectTimer)
+          this.reconnectTimer = null
         }
         await this.connect()
         const result = await this.sendRequest<T>(method, path, body)
@@ -432,6 +427,13 @@ class BackendClient {
     // Always send subscribe so the backend re-pushes UI + snapshot for this
     // consumer (refcount > 0 alone used to skip the frame and leave remounts blank).
     this.queueSubscribe(cameraUuid)
+  }
+
+  /** Re-push subscribe for the active camera without changing refcounts (tab remount). */
+  refreshCameraSubscription(): void {
+    if (this.subscribedCameraUuid) {
+      this.queueSubscribe(this.subscribedCameraUuid)
+    }
   }
 
   /** Collapse same-uuid subscribes issued in the same tick into one wire frame. */
@@ -494,9 +496,11 @@ class BackendClient {
       : { type: 'unsubscribe', camera_uuid: cameraUuid }
     const payload = JSON.stringify(message)
     const send = (): void => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(payload)
-      }
+      if (this.ws?.readyState !== WebSocket.OPEN) return
+      // Drop stale deferred sends that no longer match the active subscription.
+      if (type === 'subscribe' && this.subscribedCameraUuid !== cameraUuid) return
+      if (type === 'unsubscribe' && this.subscribedCameraUuid === cameraUuid) return
+      this.ws.send(payload)
     }
 
     if (this.ws?.readyState === WebSocket.OPEN) {

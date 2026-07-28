@@ -836,6 +836,7 @@ watch(
     correlationToggleInFlight.value = false
     isConfigured.value = false
     showAdvancedHardware.value = false
+    processingWhiteBalance.value = false
     const emptyParams: ActuatorsParametersConfig = {
       camera_id: null,
       focus_channel: null,
@@ -1025,6 +1026,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   }
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = actuatorsRequestGeneration.value
   baseParams.value = { ...baseParams.value, [param]: value }
   inFlightParamWrites.value++
 
@@ -1047,6 +1049,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
       console.log(message, error.message)
     })
     .finally(() => {
+      if (generation !== actuatorsRequestGeneration.value) return
       inFlightParamWrites.value = Math.max(0, inFlightParamWrites.value - 1)
     })
 }
@@ -1159,6 +1162,7 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
   }
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = actuatorsRequestGeneration.value
   const previousCorrelation =
     param === 'enable_focus_and_zoom_correlation'
       ? currentFocusAndZoomParams.value.enable_focus_and_zoom_correlation
@@ -1193,7 +1197,8 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
     .catch((error) => {
       if (
         param === 'enable_focus_and_zoom_correlation' &&
-        props.selectedCameraUuid === cameraUuid
+        props.selectedCameraUuid === cameraUuid &&
+        generation === actuatorsRequestGeneration.value
       ) {
         currentFocusAndZoomParams.value = {
           ...currentFocusAndZoomParams.value,
@@ -1204,7 +1209,10 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
       console.log(message, error.message)
     })
     .finally(() => {
-      if (param === 'enable_focus_and_zoom_correlation') {
+      if (
+        param === 'enable_focus_and_zoom_correlation' &&
+        generation === actuatorsRequestGeneration.value
+      ) {
         correlationToggleInFlight.value = false
       }
     })
@@ -1293,13 +1301,15 @@ const getBaseParameters = () => {
     return
   }
 
+  const cameraUuid = props.selectedCameraUuid
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "getImageAdjustment",
   }
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       baseParams.value = data as BaseParameterSetting
       console.log(data)
     })
@@ -1313,14 +1323,16 @@ const updateVideoParameters = async (
 ): Promise<void> => {
   if (!props.selectedCameraUuid || props.disabled) return
 
+  const cameraUuid = props.selectedCameraUuid
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: 'setVencConf',
     json: partial as VideoParameterSettings,
   }
 
   try {
     const data = await backendClient.request('POST', '/camera/control', payload)
+    if (props.selectedCameraUuid !== cameraUuid) return
     const settings = data as VideoParameterSettings
     update_video_parameter_values(settings)
   } catch (error) {
@@ -1411,8 +1423,10 @@ const doWhiteBalance = async () => {
   if (processingWhiteBalance.value) return
   processingWhiteBalance.value = true
 
+  const cameraUuid = props.selectedCameraUuid
+  const generation = actuatorsRequestGeneration.value
   const payload: CameraControl = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
     json: {
       onceAWB: 1,
@@ -1423,18 +1437,22 @@ const doWhiteBalance = async () => {
     .catch(error => {
       console.error("Error sending onceAWB control:", error.message)
     }).finally(() => {
+      if (generation !== actuatorsRequestGeneration.value) return
       processingWhiteBalance.value = false
-      getBaseParameters()
+      if (props.selectedCameraUuid === cameraUuid) {
+        getBaseParameters()
+      }
     })
 }
 
-const doRestart = () => {
-  if (!props.selectedCameraUuid || props.disabled) {
+const doRestart = (cameraUuid?: string) => {
+  const uuid = cameraUuid ?? props.selectedCameraUuid
+  if (!uuid || props.disabled) {
     return
   }
 
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: uuid,
     action: "restart",
   }
 
@@ -1451,6 +1469,7 @@ const doRestart = () => {
 const saveVideoDataAndRestart = async (): Promise<void> => {
   if (!props.selectedCameraUuid || props.disabled) return
 
+  const cameraUuid = props.selectedCameraUuid
   const curr = selectedVideoParameters.value
   const newWidth = selectedVideoResolution.value?.width ?? null
   const newHeight = selectedVideoResolution.value?.height ?? null
@@ -1464,7 +1483,8 @@ const saveVideoDataAndRestart = async (): Promise<void> => {
   if (Object.keys(videoPartial).length > 0) {
     try {
       await updateVideoParameters(videoPartial)
-      doRestart()
+      if (props.selectedCameraUuid !== cameraUuid) return
+      doRestart(cameraUuid)
       Object.assign(selectedVideoParameters.value, videoPartial)
     } catch {
       return
@@ -1517,6 +1537,7 @@ const saveHardwareSetup = async (): Promise<void> => {
     return
   }
 
+  const cameraUuid = props.selectedCameraUuid
   let payloadParams: ActuatorsParametersConfig
   payloadParams = { ...defaultFocusAndZoomParams.value }
   if (showAdvancedHardware.value) {
@@ -1524,7 +1545,7 @@ const saveHardwareSetup = async (): Promise<void> => {
   }
 
   const payload: ActuatorsControl = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setActuatorsConfig",
     json: { parameters: payloadParams } as ActuatorsConfig
   }
@@ -1534,6 +1555,7 @@ const saveHardwareSetup = async (): Promise<void> => {
   backendClient
     .request('POST', '/autopilot/control', payload)
     .then((data) => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       console.log("Got an answer from the setActuatorsConfig request", data)
 
       const newParams = (data as ActuatorsConfig)?.parameters
@@ -1551,14 +1573,16 @@ const saveHardwareSetup = async (): Promise<void> => {
 const resetToRecommendedDefaults = async (): Promise<void> => {
   if (!props.selectedCameraUuid || props.disabled) return
 
+  const cameraUuid = props.selectedCameraUuid
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: 'resetActuatorsConfig',
   }
 
   backendClient
     .request('POST', '/autopilot/control', payload)
     .then((data) => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       console.log("Got an answer from the setActuatorsConfig request", data)
 
       const newParams = (data as ActuatorsConfig)?.parameters

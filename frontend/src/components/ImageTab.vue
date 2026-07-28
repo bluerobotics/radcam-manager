@@ -850,6 +850,7 @@ const antiFlickerOptions = enumToOptions(AdvancedDisplayAntiflickerValue)
 
 const inFlightBaseWrites = ref(0)
 const inFlightAdvancedWrites = ref(0)
+const imageRequestGeneration = ref(0)
 
 const applyCameraStateEvent = (body: unknown) => {
   if (!props.selectedCameraUuid) return
@@ -871,6 +872,7 @@ useCameraState(toRef(props, 'selectedCameraUuid'), applyCameraStateEvent)
 watch(
   () => props.selectedCameraUuid,
   () => {
+    imageRequestGeneration.value += 1
     inFlightBaseWrites.value = 0
     inFlightAdvancedWrites.value = 0
   },
@@ -883,6 +885,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   }
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = imageRequestGeneration.value
   baseParams.value = { ...baseParams.value, [param]: value }
   inFlightBaseWrites.value++
 
@@ -905,6 +908,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
       console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
     })
     .finally(() => {
+      if (generation !== imageRequestGeneration.value) return
       inFlightBaseWrites.value = Math.max(0, inFlightBaseWrites.value - 1)
     })
 }
@@ -940,8 +944,10 @@ const doWhiteBalance = async () => {
   if (processingWhiteBalance.value) return
   processingWhiteBalance.value = true
 
+  const cameraUuid = props.selectedCameraUuid
+  const generation = imageRequestGeneration.value
   const payload: CameraControl = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
     json: {
       onceAWB: 1,
@@ -952,8 +958,11 @@ const doWhiteBalance = async () => {
     .catch(error => {
       console.error("Error sending onceAWB control:", error.message)
     }).finally(() => {
+      if (generation !== imageRequestGeneration.value) return
       processingWhiteBalance.value = false
-      getBaseParameters()
+      if (props.selectedCameraUuid === cameraUuid) {
+        getBaseParameters()
+      }
     })
 }
 
@@ -992,6 +1001,7 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
   if (!props.selectedCameraUuid) return
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = imageRequestGeneration.value
   advancedParams.value = { ...advancedParams.value, [param]: value }
   inFlightAdvancedWrites.value++
 
@@ -1010,6 +1020,7 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
       console.error(`Error updating ${param}:`, error.message)
     })
     .finally(() => {
+      if (generation !== imageRequestGeneration.value) return
       inFlightAdvancedWrites.value = Math.max(0, inFlightAdvancedWrites.value - 1)
     })
 }
