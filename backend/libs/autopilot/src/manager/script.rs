@@ -189,8 +189,6 @@ impl Manager {
             .or_default()
             .parameters;
 
-        let encoding = self.mavlink.encoding().await;
-
         let channel = current_parameters.camera_id as u8;
 
         let param_name = format!("{PARAM_PREFIX}{channel}_ENABLE");
@@ -201,29 +199,31 @@ impl Manager {
             (None, false) => return Ok(()),
         };
 
-        let mut param = self.mavlink.get_param(&param_name, false).await?;
         let old_value = current_parameters.enable_focus_and_zoom_correlation;
+        if !force_apply && old_value == new_value {
+            trace!("Parameter {param_name:?} skipped");
+            return Ok(());
+        }
+
+        let encoding = self.mavlink.encoding().await;
+        let mut param = self.mavlink.get_param(&param_name, false).await?;
         param
             .value
             .set_value(ParamType::UINT8(new_value as u8), encoding)?;
 
-        if (old_value != new_value) || force_apply {
-            match self.mavlink.set_param(param).await {
-                Ok(_) => {
-                    if old_value != new_value {
-                        info!(
-                            "{} changed from {old_value:?} to {new_value:?}",
-                            stringify!(enable_focus_and_zoom_correlation),
-                        );
-                    }
-                    current_parameters.enable_focus_and_zoom_correlation = new_value;
+        match self.mavlink.set_param(param).await {
+            Ok(_) => {
+                if old_value != new_value {
+                    info!(
+                        "{} changed from {old_value:?} to {new_value:?}",
+                        stringify!(enable_focus_and_zoom_correlation),
+                    );
                 }
-                Err(error) => {
-                    warn!("Failed setting parameter: {error:?}")
-                }
+                current_parameters.enable_focus_and_zoom_correlation = new_value;
             }
-        } else {
-            trace!("Parameter {param_name:?} skipped");
+            Err(error) => {
+                warn!("Failed setting parameter: {error:?}")
+            }
         }
 
         Ok(())
@@ -242,8 +242,6 @@ impl Manager {
             .or_default()
             .parameters;
 
-        let encoding = self.mavlink.encoding().await;
-
         let channel = current_parameters.camera_id as u8;
 
         let param_name = format!("{PARAM_PREFIX}{channel}_GAIN");
@@ -254,29 +252,31 @@ impl Manager {
             (None, false) => return Ok(()),
         };
 
-        let mut param = self.mavlink.get_param(&param_name, false).await?;
         let old_value = current_parameters.focus_margin_gain;
+        if !force_apply && old_value == new_value {
+            trace!("Parameter {param_name:?} skipped");
+            return Ok(());
+        }
+
+        let encoding = self.mavlink.encoding().await;
+        let mut param = self.mavlink.get_param(&param_name, false).await?;
         param
             .value
             .set_value(ParamType::UINT8(new_value as u8), encoding)?;
 
-        if (old_value != new_value) || force_apply {
-            match self.mavlink.set_param(param).await {
-                Ok(_) => {
-                    if old_value != new_value {
-                        info!(
-                            "{} changed from {old_value:?} to {new_value:?}",
-                            stringify!(focus_margin_gain),
-                        );
-                    }
-                    current_parameters.focus_margin_gain = new_value;
+        match self.mavlink.set_param(param).await {
+            Ok(_) => {
+                if old_value != new_value {
+                    info!(
+                        "{} changed from {old_value:?} to {new_value:?}",
+                        stringify!(focus_margin_gain),
+                    );
                 }
-                Err(error) => {
-                    warn!("Failed setting parameter: {error:?}")
-                }
+                current_parameters.focus_margin_gain = new_value;
             }
-        } else {
-            trace!("Parameter {param_name:?} skipped");
+            Err(error) => {
+                warn!("Failed setting parameter: {error:?}")
+            }
         }
 
         Ok(())
