@@ -291,6 +291,7 @@ async fn handle_client_text(
             WsClientMessage::Subscribe { camera_uuid } => {
                 if mcm_client::get_camera(&camera_uuid).await.is_none() {
                     warn!(%connection_id, %camera_uuid, "Rejecting subscribe for unknown camera");
+                    // close_notify already woken on Full; read loop exits via the notify arm.
                     let _ = queue_subscribe_rejected(
                         connection_id,
                         response_tx,
@@ -305,6 +306,7 @@ async fn handle_client_text(
                     camera_state::connection_subscribed(connection_id, camera_uuid);
                 if !camera_state::subscribe(connection_id, camera_uuid) {
                     warn!(%connection_id, %camera_uuid, "Rejecting subscribe; at camera cap");
+                    // close_notify already woken on Full; read loop exits via the notify arm.
                     let _ = queue_subscribe_rejected(
                         connection_id,
                         response_tx,
@@ -366,6 +368,14 @@ async fn handle_client_text(
                 camera_state::unsubscribe(connection_id, camera_uuid);
             }
             WsClientMessage::UiDismiss { camera_uuid, field } => {
+                if !camera_state::connection_subscribed(connection_id, camera_uuid) {
+                    debug!(
+                        %connection_id,
+                        %camera_uuid,
+                        "Ignoring ui_dismiss for unsubscribed camera"
+                    );
+                    return;
+                }
                 camera_ui::dismiss(camera_uuid, field);
             }
         }
@@ -619,7 +629,11 @@ async fn handle_request(request: WsRequest) -> WsResponse {
 
             match control_bridge::camera_control(camera_control).await {
                 Ok(value) => WsResponse::new(id, 200, value),
-                Err(error) => WsResponse::new(id, 500, Value::String(error)),
+                Err(error) => WsResponse::new(
+                    id,
+                    control_bridge::status_for_error(&error),
+                    Value::String(error),
+                ),
             }
         }
         ("POST", "/autopilot/control") => {
@@ -637,7 +651,11 @@ async fn handle_request(request: WsRequest) -> WsResponse {
 
             match control_bridge::autopilot_control(actuators_control).await {
                 Ok(value) => WsResponse::new(id, 200, value),
-                Err(error) => WsResponse::new(id, 500, Value::String(error)),
+                Err(error) => WsResponse::new(
+                    id,
+                    control_bridge::status_for_error(&error),
+                    Value::String(error),
+                ),
             }
         }
         _ => WsResponse::new(id, 404, Value::String("not found".to_string())),
