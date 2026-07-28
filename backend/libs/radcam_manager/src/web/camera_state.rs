@@ -205,6 +205,18 @@ pub(crate) fn cached_state_event(camera_uuid: Uuid) -> CameraStateEvent {
     )
 }
 
+/// Actuators-only event from the autopilot manager cache (for lag recovery).
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+pub(crate) async fn actuators_state_event(camera_uuid: Uuid) -> Option<CameraStateEvent> {
+    let state = autopilot::cached_actuators_state(camera_uuid).await?;
+    let actuators_state = serde_json::to_value(state).ok()?;
+    Some(CameraStateEvent {
+        camera_uuid,
+        actuators_state: Some(actuators_state),
+        ..Default::default()
+    })
+}
+
 /// Fetch a full camera snapshot for initial subscribe / lag recovery.
 #[instrument(level = "debug", skip_all, fields(%camera_uuid))]
 pub(crate) async fn snapshot(camera_uuid: Uuid) -> CameraStateEvent {
@@ -529,8 +541,14 @@ fn ensure_actuators_bridge() {
                     break;
                 }
                 Err(broadcast::error::RecvError::Lagged(samples)) => {
-                    debug!("Actuators bridge lagged by {samples} updates; re-pushing cache");
-                    resync_actuators_from_cache();
+                    debug!("Actuators bridge lagged by {samples} updates; re-pushing from manager");
+                    let cameras: Vec<Uuid> = {
+                        let registry = registry().lock().unwrap();
+                        registry.camera_interest.keys().copied().collect()
+                    };
+                    tokio::spawn(async move {
+                        resync_actuators_from_manager(cameras).await;
+                    });
                 }
             }
         }
@@ -695,32 +713,32 @@ async fn slow_state_watcher() {
     }
 }
 
-/// Re-push cached `actuators_state` after the SERVO broadcast lagged.
+/// Re-push manager-cached actuators after the SERVO broadcast lagged.
+///
+/// Uses the autopilot manager (authoritative after the watcher wrote it), not
+/// this module's possibly-stale `last_states`, so EmitGate-deduped positions
+/// still reach clients.
 #[instrument(level = "debug", skip_all)]
-fn resync_actuators_from_cache() {
-    let events: Vec<CameraStateEvent> = {
-        let registry = registry().lock().unwrap();
-        registry
-            .camera_interest
-            .keys()
-            .filter_map(|camera_uuid| {
-                let actuators_state = registry
-                    .last_states
-                    .get(camera_uuid)?
-                    .actuators_state
-                    .clone()?;
-                Some(CameraStateEvent {
-                    camera_uuid: *camera_uuid,
-                    actuators_state: Some(actuators_state),
-                    ..Default::default()
-                })
-            })
-            .collect()
-    };
-
-    for event in events {
-        // Re-record is fine: values match cache; clients need a fresh push after lag.
-        emit(event);
+async fn resync_actuators_from_manager(cameras: Vec<Uuid>) {
+    for camera_uuid in cameras {
+        if !has_interest(camera_uuid) {
+            continue;
+        }
+        let Some(state) = autopilot::cached_actuators_state(camera_uuid).await else {
+            continue;
+        };
+        let actuators_state = match serde_json::to_value(state) {
+            Ok(value) => value,
+            Err(error) => {
+                warn!("Failed serializing actuators state: {error}");
+                continue;
+            }
+        };
+        emit(CameraStateEvent {
+            camera_uuid,
+            actuators_state: Some(actuators_state),
+            ..Default::default()
+        });
     }
 }
 
