@@ -449,10 +449,14 @@ watch(
     if (isEditingCurrentSliderValue.value || isInteracting.value) return
     if (
       commitLockValue.value !== null &&
-      Date.now() < commitLockUntilMs.value &&
-      !approxEqual(next, commitLockValue.value)
+      Date.now() < commitLockUntilMs.value
     ) {
-      return
+      if (approxEqual(next, commitLockValue.value)) {
+        // Echo of our own commit — already showing it.
+        return
+      }
+      // Foreign / correlation-driven update — take it.
+      clearCommitLock()
     }
     currentSliderValue.value = next
   },
