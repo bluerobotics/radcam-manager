@@ -154,6 +154,11 @@ watch(
   () => props.selectedCameraUuid,
   async (newValue) => {
     hasUserEditedVideo.value = false
+    // Remount / switch: wait for first hydrate before latching dirty.
+    suppressUserEditFlag = true
+    queueMicrotask(() => {
+      suppressUserEditFlag = false
+    })
     if (!newValue) return
     // MainStream is pushed on camera/state; other channels still need a fetch.
     const channel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
@@ -249,14 +254,16 @@ const updateVideoParameters = () => {
     return
   }
 
+  const cameraUuid = props.selectedCameraUuid
   processingUpdate.value = true
 
   console.debug(selectedVideoParameters.value)
 
   const video_parameter_settings = selectedVideoParameters.value
+  const shouldRestart = needs_restart.value
 
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "setVencConf",
     json: video_parameter_settings,
   }
@@ -264,7 +271,8 @@ const updateVideoParameters = () => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
-      if (!needs_restart.value) {
+      if (props.selectedCameraUuid !== cameraUuid) return
+      if (!shouldRestart) {
         const settings: VideoParameterSettings =
           data as VideoParameterSettings
         update_video_parameter_values(settings)
@@ -277,16 +285,21 @@ const updateVideoParameters = () => {
       )
     )
     .finally(() => {
-      if (needs_restart.value) {
-        doRestart()
+      if (props.selectedCameraUuid !== cameraUuid) {
+        processingUpdate.value = false
+        return
+      }
+      if (shouldRestart) {
+        doRestart(cameraUuid)
       } else {
         processingUpdate.value = false
       }
     })
 }
 
-const doRestart = () => {
-  if (!props.selectedCameraUuid) {
+const doRestart = (cameraUuid?: string) => {
+  const uuid = cameraUuid ?? props.selectedCameraUuid
+  if (!uuid) {
     return
   }
 
@@ -295,13 +308,14 @@ const doRestart = () => {
   processingUpdate.value = true
 
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: uuid,
     action: "restart",
   }
 
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
+      if (props.selectedCameraUuid !== uuid) return
       console.log("Got an answer from the restarting request", data)
       needs_restart.value = false
     })
@@ -312,7 +326,9 @@ const doRestart = () => {
       )
     )
     .finally(() => {
-      processingUpdate.value = false
+      if (props.selectedCameraUuid === uuid) {
+        processingUpdate.value = false
+      }
     })
 }
 

@@ -357,6 +357,13 @@ watch(selectedCameraUUID, (uuid, previousUuid) => {
   }
 })
 
+// Remounted Basic/Advanced tabs start empty; re-subscribe so the backend re-pushes cache.
+watch([configMode, tab], () => {
+  if (selectedCameraUUID.value) {
+    backendClient.refreshCameraSubscription()
+  }
+})
+
 const dismissErrorDialog = () => {
   if (selectedCameraUUID.value) {
     backendClient.dismissUi(selectedCameraUUID.value, 'error_dialog')
