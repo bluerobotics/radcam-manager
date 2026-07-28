@@ -16,6 +16,14 @@ use web_client::send_request;
 
 pub mod protocol;
 
+/// Number of consecutive transport-level failures needed to consider the camera offline,
+/// so a single flaky timeout doesn't end the offline phase.
+const OFFLINE_CONFIRMATIONS: u8 = 2;
+/// How long to wait for the camera to stop answering after a restart request.
+const REBOOT_OFFLINE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long to wait for the camera to answer again after it went offline.
+const REBOOT_ONLINE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 // #[tsync] // FIXME: Disabled for now, see https://github.com/Wulf/tsync/issues/58
 pub struct CameraControl {
@@ -52,6 +60,17 @@ pub enum Action {
     /// Important: This is a wrapper, not part of the camera protocol
     #[serde(rename = "setRecommendedCameraSettings")]
     SetRecommendedCameraSettings,
+}
+
+/// Outcome of one reachability probe while waiting for a camera reboot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeStatus {
+    /// Camera answered successfully.
+    Reachable,
+    /// Transport-level failure: camera looks offline.
+    Offline,
+    /// Camera answered with a non-transport error; keep waiting.
+    SoftFailure,
 }
 
 impl std::fmt::Display for Action {
@@ -119,21 +138,16 @@ fn control_inner(
             Action::Restart => {
                 let mut camera_control = camera_control.0.clone();
                 camera_control.action = Action::GetSysConfig;
-                let value = Json(camera_control);
+                let probe = Json(camera_control);
 
-                tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
-
-                let mut tries = 20;
-                while tries > 0 {
-                    debug!("Waiting for camera to restart...");
-
-                    tries -= 1;
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-                    if control_inner(value.clone()).await.is_ok() {
-                        break;
+                wait_for_camera_reboot(|| async {
+                    match control_inner(probe.clone()).await {
+                        Ok(_) => ProbeStatus::Reachable,
+                        Err(error) if is_transport_offline(&error) => ProbeStatus::Offline,
+                        Err(_) => ProbeStatus::SoftFailure,
                     }
-                }
+                })
+                .await?;
 
                 Ok(res)
             }
@@ -146,17 +160,21 @@ fn control_inner(
     })
 }
 
+/// Shared entry point for REST and WebSocket camera control requests.
+#[instrument(level = "debug")]
+pub async fn handle_control(camera_control: CameraControl) -> Result<serde_json::Value> {
+    control_inner(Json(camera_control)).await
+}
+
 #[instrument(level = "debug")]
 pub async fn control(camera_control: Json<CameraControl>) -> impl IntoResponse {
-    let res = match control_inner(camera_control).await {
-        Ok(res) => res,
+    match handle_control(camera_control.0).await {
+        Ok(res) => (StatusCode::OK, res.to_string()).into_response(),
         Err(error) => {
             warn!("res from send_request: {error:#?}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}")).into_response();
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}")).into_response()
         }
-    };
-
-    (StatusCode::OK, res.to_string()).into_response()
+    }
 }
 
 #[instrument(level = "debug")]
@@ -361,13 +379,185 @@ pub fn hash_password(password: &str) -> String {
     base16ct::lower::encode_string(&hasher.finalize())
 }
 
+/// Waits for `probe` to report offline (reboot started) then reachable again.
+///
+/// Each phase is wrapped in `timeout` so slow probes cannot push wall time past the budget.
+#[instrument(level = "debug", skip_all)]
+async fn wait_for_camera_reboot<F, Fut>(mut probe: F) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = ProbeStatus>,
+{
+    match tokio::time::timeout(REBOOT_OFFLINE_TIMEOUT, wait_reboot_offline(&mut probe)).await {
+        Ok(()) => {}
+        Err(_) => {
+            warn!(
+                "Camera did not go offline after restart request, it might have already rebooted. Waiting for it to answer again..."
+            );
+        }
+    }
+
+    tokio::time::timeout(REBOOT_ONLINE_TIMEOUT, wait_reboot_online(&mut probe))
+        .await
+        .map_err(|_| anyhow::anyhow!("Camera did not come back online after restart"))?
+}
+
+#[instrument(level = "debug", skip_all)]
+async fn wait_reboot_offline<F, Fut>(probe: &mut F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = ProbeStatus>,
+{
+    let mut consecutive_offline = 0u8;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        match probe().await {
+            ProbeStatus::Reachable => {
+                consecutive_offline = 0;
+                debug!("Waiting for camera to go offline after restart...");
+            }
+            ProbeStatus::SoftFailure => {
+                consecutive_offline = 0;
+                debug!(
+                    "Camera answered with a non-transport error while waiting for it to go offline"
+                );
+            }
+            ProbeStatus::Offline => {
+                consecutive_offline += 1;
+                if consecutive_offline >= OFFLINE_CONFIRMATIONS {
+                    debug!("Camera went offline after restart");
+                    return;
+                }
+                debug!(
+                    "Camera unreachable ({consecutive_offline}/{OFFLINE_CONFIRMATIONS}) after restart"
+                );
+            }
+        }
+    }
+}
+
+#[instrument(level = "debug", skip_all)]
+async fn wait_reboot_online<F, Fut>(probe: &mut F) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = ProbeStatus>,
+{
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        match probe().await {
+            ProbeStatus::Reachable => {
+                debug!("Camera came back online after restart");
+                return Ok(());
+            }
+            ProbeStatus::Offline | ProbeStatus::SoftFailure => {
+                debug!("Waiting for camera to come back online");
+            }
+        }
+    }
+}
+
+/// Tells whether the error means the camera is unreachable at the transport level, which is
+/// the only kind of failure that proves it went offline. Protocol-level failures (HTTP status,
+/// body decoding, URL building, camera not found, etc.) mean the camera is still answering.
+fn is_transport_offline(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(is_transport_error)
+    })
+}
+
+fn is_transport_error(error: &reqwest::Error) -> bool {
+    if error.is_status() || error.is_decode() || error.is_builder() {
+        return false;
+    }
+
+    error.is_timeout() || error.is_connect() || error.is_request()
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
     use serde_json::json;
 
     use utils::deserialize;
 
-    use super::CameraControl;
+    use super::{
+        CameraControl, ProbeStatus, REBOOT_OFFLINE_TIMEOUT, REBOOT_ONLINE_TIMEOUT,
+        is_transport_offline, wait_for_camera_reboot,
+    };
+
+    #[test]
+    fn reboot_budget_fits_under_ui_reboot_grace() {
+        // camera_ui::REBOOT_GRACE is 180s; keep the wait budget strictly below it.
+        assert!(REBOOT_OFFLINE_TIMEOUT + REBOOT_ONLINE_TIMEOUT < Duration::from_secs(180));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reboot_wait_succeeds_when_camera_goes_offline_then_online() {
+        let calls = AtomicUsize::new(0);
+        wait_for_camera_reboot(|| {
+            let call = calls.fetch_add(1, Ordering::SeqCst) + 1;
+            async move {
+                match call {
+                    1 | 2 => ProbeStatus::Reachable,
+                    3 | 4 => ProbeStatus::Offline,
+                    _ => ProbeStatus::Reachable,
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reboot_wait_succeeds_when_camera_never_goes_offline() {
+        wait_for_camera_reboot(|| async { ProbeStatus::Reachable })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reboot_wait_errors_when_camera_never_returns() {
+        let error = wait_for_camera_reboot(|| async { ProbeStatus::Offline })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("did not come back online"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reboot_wait_bounds_wall_time_despite_slow_probes() {
+        let start = tokio::time::Instant::now();
+        let error = wait_for_camera_reboot(|| async {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            ProbeStatus::Offline
+        })
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("did not come back online"));
+        // Without phase timeouts, each 10s probe would push past REBOOT_GRACE (180s).
+        assert!(start.elapsed() <= REBOOT_OFFLINE_TIMEOUT + REBOOT_ONLINE_TIMEOUT);
+    }
+
+    #[test]
+    fn is_transport_offline_test() {
+        // Non-reqwest errors never count as offline, even when their message looks like one
+        let error = anyhow::anyhow!("error trying to connect: connection refused")
+            .context("Failed getting camera settings");
+        assert!(!is_transport_offline(&error));
+
+        // Reqwest errors that aren't transport failures (here, an invalid URL) don't count either
+        let error = anyhow::Error::from(
+            reqwest::Client::new()
+                .post("http:://camera/action/getSysConfig")
+                .build()
+                .unwrap_err(),
+        )
+        .context("Failed getting camera settings");
+        assert!(!is_transport_offline(&error));
+    }
 
     #[test]
     fn action_serde_test() {
