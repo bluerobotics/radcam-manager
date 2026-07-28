@@ -143,7 +143,6 @@
       >
         <div v-if="configMode === 'basic'">
           <BasicSettings
-            :backend-api="backendAPI"
             ref="cameraControls"
             :selected-camera-uuid="selectedCameraUUID"
             :disabled="!backendConnected || selectedCameraUUID == null || uiLoading || uiRebooting"
@@ -174,14 +173,12 @@
           <v-tabs-window v-model="tab">
             <v-tabs-window-item value="image">
               <ImageTab
-                :backend-api="backendAPI"
                 :selected-camera-uuid="selectedCameraUUID"
                 :disabled="!backendConnected || selectedCameraUUID == null || uiLoading || uiRebooting"
               />
             </v-tabs-window-item>
             <v-tabs-window-item value="streams">
               <StreamsTab
-                :backend-api="backendAPI"
                 :selected-camera-uuid="selectedCameraUUID"
                 :disabled="!backendConnected || selectedCameraUUID == null || uiLoading || uiRebooting"
               />
@@ -218,7 +215,6 @@ import { formatRequestError } from '@/utils/formatRequestError'
 const tab = ref(null)
 const cameras = ref<Camera[]>([])
 const selectedCameraUUID = ref<string | null>(null)
-const backendAPI = ref('v1')
 const connectionState = ref<ConnectionState>('disconnected')
 const connectionStats = ref<ConnectionStats | null>(null)
 const disconnectedSince = ref<Date | null>(null)

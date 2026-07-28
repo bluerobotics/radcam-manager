@@ -108,8 +108,9 @@
 </template>
 
 <script setup lang="ts">
-import axios from "axios"
-import { computed, onMounted, ref, watch } from "vue"
+import { backendClient } from '@/utils/backendClient'
+import { useCameraState } from '@/utils/useCameraState'
+import { computed, ref, toRef, watch } from "vue"
 import { enumToOptions } from "@/utils/enumUtils"
 import {
   VideoChannelValue,
@@ -122,7 +123,6 @@ import {
 
 const props = defineProps<{
   selectedCameraUuid: string | null
-  backendApi: string
   disabled: boolean
 }>()
 
@@ -141,18 +141,24 @@ const resolutionOptions = computed(() => {
   )
 })
 
-const selectedVideoParameters = ref<VideoParameterSettings>({})
+const selectedVideoParameters = ref<VideoParameterSettings>({
+  channel: VideoChannelValue.MainStream,
+})
 const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const needs_restart = ref<boolean>(false)
+const hasUserEditedVideo = ref(false)
+let suppressUserEditFlag = false
 
 watch(
   () => props.selectedCameraUuid,
   async (newValue) => {
+    hasUserEditedVideo.value = false
     if (newValue) {
       getVideoParameters(true)
     }
-  }
+  },
+  { immediate: true },
 )
 
 watch(
@@ -199,9 +205,33 @@ watch(
   }
 )
 
-onMounted(() => {
-  getVideoParameters(true)
-})
+watch(
+  [selectedVideoParameters, selectedVideoResolution],
+  () => {
+    if (!suppressUserEditFlag) {
+      hasUserEditedVideo.value = true
+    }
+  },
+  { deep: true },
+)
+
+const applyCameraStateEvent = (body: unknown) => {
+  if (!props.selectedCameraUuid) return
+  if (typeof body !== 'object' || body === null) return
+
+  const data = body as Record<string, unknown>
+  if (data.camera_uuid !== props.selectedCameraUuid) return
+  if (!data.video_parameters) return
+  if (hasUserEditedVideo.value) return
+
+  const settings = data.video_parameters as VideoParameterSettings
+  const currentChannel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
+  if (settings.channel != null && settings.channel !== currentChannel) return
+
+  update_video_parameter_values(settings)
+}
+
+useCameraState(toRef(props, 'selectedCameraUuid'), applyCameraStateEvent)
 
 const adjustedBitrate = computed({
   get: () => selectedVideoParameters.value.bitrate,
@@ -228,12 +258,12 @@ const updateVideoParameters = () => {
     json: video_parameter_settings,
   }
 
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then((response) => {
+  backendClient
+    .request('POST', '/camera/control', payload)
+    .then((data) => {
       if (!needs_restart.value) {
         const settings: VideoParameterSettings =
-          response.data as VideoParameterSettings
+          data as VideoParameterSettings
         update_video_parameter_values(settings)
       }
     })
@@ -266,10 +296,10 @@ const doRestart = () => {
     action: "restart",
   }
 
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then((response) => {
-      console.log("Got an answer from the restarting request", response.data)
+  backendClient
+    .request('POST', '/camera/control', payload)
+    .then((data) => {
+      console.log("Got an answer from the restarting request", data)
       needs_restart.value = false
     })
     .catch((error) =>
@@ -298,22 +328,25 @@ const getVideoParameters = (update: boolean) => {
     json: video_parameter_settings,
   }
 
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then((response) => {
+  backendClient
+    .request('POST', '/camera/control', payload)
+    .then((data) => {
       const settings: VideoParameterSettings =
-        response.data as VideoParameterSettings
+        data as VideoParameterSettings
 
       if (update) {
         update_video_parameter_values(settings)
       }
     })
-    .catch((error) =>
+    .catch((error) => {
       console.error(`Error sending getVencConf request:`, error.message)
-    )
+      // Don't latch the form dirty forever when the initial fetch fails.
+      hasUserEditedVideo.value = false
+    })
 }
 
 const update_video_parameter_values = (settings: VideoParameterSettings) => {
+  suppressUserEditFlag = true
   downloadedVideoParameters.value = { ...settings }
 
   selectedVideoParameters.value = { ...settings }
@@ -323,5 +356,9 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
     width: settings.pic_width!,
     height: settings.pic_height!,
   } as VideoResolutionValue
+  hasUserEditedVideo.value = false
+  queueMicrotask(() => {
+    suppressUserEditFlag = false
+  })
 }
 </script>
