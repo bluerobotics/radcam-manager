@@ -3058,6 +3058,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "radcam_api"
+version = "0.2.0-beta.14"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
 name = "radcam_commands"
 version = "0.2.0-beta.14"
 dependencies = [
