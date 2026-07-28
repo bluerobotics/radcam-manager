@@ -83,11 +83,17 @@ pub(crate) async fn control_inner(
             serde_json::to_value({})?
         }
         Action::GetActuatorsState => {
-            let mut manager = MANAGER.get().context("Not available")?.write().await;
+            // Read cached state under a shared lock so we do not block the SERVO
+            // watcher (which needs write) for a one-shot MAVLink wait.
+            let manager = MANAGER.get().context("Not available")?.read().await;
 
-            let state = manager.get_state(&actuators_control.camera_uuid).await?;
+            let actuators = manager
+                .settings
+                .actuators
+                .get(&actuators_control.camera_uuid)
+                .context(crate::ACTUATORS_NOT_CONFIGURED)?;
 
-            serde_json::to_value(state)?
+            serde_json::to_value(actuators.state)?
         }
         Action::SetActuatorsState(new_state) => {
             let mut manager = MANAGER.get().context("Not available")?.write().await;
