@@ -1,0 +1,893 @@
+//! Lock order: `camera_ui::UI` is always taken before [`REGISTRY`]. Never hold the
+//! `REGISTRY` guard across a call into [`camera_ui`], or the two orders can deadlock.
+
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+
+use futures::stream::{self, StreamExt};
+use once_cell::sync::OnceCell;
+use radcam_api::{CameraStateEvent, CameraUiState};
+use radcam_commands::{
+    Action as CameraAction, CameraControl,
+    protocol::video::video_parameters::{VideoChannelValue, VideoParameterSettings},
+};
+use tokio::sync::broadcast;
+use tracing::*;
+use uuid::Uuid;
+
+use autopilot::api::{Action as AutopilotAction, ActuatorsControl};
+
+use crate::web::camera_ui;
+use crate::web::ws_connections::ConnectionId;
+
+const SLOW_WATCH_INTERVAL: Duration = Duration::from_secs(2);
+/// Cap concurrent slow HTTP fetches so a flood of subscriptions cannot fan out unbounded.
+const SLOW_FETCH_CONCURRENCY: usize = 4;
+/// Cap distinct cameras one WebSocket may subscribe to.
+const MAX_CAMERAS_PER_CONNECTION: usize = 8;
+
+static ACTUATORS_BRIDGE_STARTED: AtomicBool = AtomicBool::new(false);
+static SLOW_WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
+static CAMERA_LIST_WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
+static REGISTRY: OnceCell<Mutex<Registry>> = OnceCell::new();
+static STATE_TX: OnceCell<broadcast::Sender<CameraStateEvent>> = OnceCell::new();
+static ACTUATORS_DEFAULT_CONFIG: tokio::sync::OnceCell<serde_json::Value> =
+    tokio::sync::OnceCell::const_new();
+
+struct Registry {
+    connections: HashMap<ConnectionId, HashSet<Uuid>>,
+    camera_interest: HashMap<Uuid, usize>,
+    last_states: HashMap<Uuid, CameraSnapshot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct CameraSnapshot {
+    actuators_config: Option<serde_json::Value>,
+    actuators_state: Option<serde_json::Value>,
+    actuators_configured: Option<bool>,
+    video_parameters: Option<serde_json::Value>,
+    base_parameters: Option<serde_json::Value>,
+    advanced_parameters: Option<serde_json::Value>,
+}
+
+/// Subscribe to camera state broadcast events.
+#[instrument(level = "debug")]
+pub(crate) fn subscribe_state() -> broadcast::Receiver<CameraStateEvent> {
+    state_sender().subscribe()
+}
+
+/// Emit a UI-only state update for `camera_uuid`.
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+pub(crate) fn emit_ui(camera_uuid: Uuid, ui: CameraUiState) {
+    emit(CameraStateEvent {
+        camera_uuid,
+        ui: Some(ui),
+        ..Default::default()
+    });
+}
+
+/// Returns true when `connection_id` is subscribed to `camera_uuid`.
+pub(crate) fn connection_subscribed(connection_id: ConnectionId, camera_uuid: Uuid) -> bool {
+    registry()
+        .lock()
+        .unwrap()
+        .connections
+        .get(&connection_id)
+        .is_some_and(|cameras| cameras.contains(&camera_uuid))
+}
+
+/// Cameras currently subscribed by `connection_id`.
+pub(crate) fn connection_cameras(connection_id: ConnectionId) -> Vec<Uuid> {
+    registry()
+        .lock()
+        .unwrap()
+        .connections
+        .get(&connection_id)
+        .map(|cameras| cameras.iter().copied().collect())
+        .unwrap_or_default()
+}
+
+/// Idempotently subscribe `connection_id` to `camera_uuid` state updates.
+///
+/// Returns true when the connection is subscribed after this call (including when
+/// it already was — callers re-push UI/snapshot for late remounts). Returns false
+/// when rejected (e.g. at the per-connection camera cap).
+#[instrument(level = "debug")]
+pub(crate) fn subscribe(connection_id: ConnectionId, camera_uuid: Uuid) -> bool {
+    {
+        let mut registry = registry().lock().unwrap();
+        let cameras = registry.connections.entry(connection_id).or_default();
+        if cameras.contains(&camera_uuid) {
+            return true;
+        }
+        if cameras.len() >= MAX_CAMERAS_PER_CONNECTION {
+            warn!(
+                %connection_id,
+                %camera_uuid,
+                limit = MAX_CAMERAS_PER_CONNECTION,
+                "Rejecting subscribe; connection is at the camera cap"
+            );
+            return false;
+        }
+        cameras.insert(camera_uuid);
+
+        let was_empty = registry.camera_interest.is_empty();
+        *registry.camera_interest.entry(camera_uuid).or_insert(0) += 1;
+        // Keep the autopilot interest handoff under the same lock as the registry so a
+        // concurrent last-unsubscribe cannot disable SERVO after we just enabled it.
+        if was_empty {
+            autopilot::add_actuators_state_interest();
+        }
+    }
+
+    ensure_actuators_bridge();
+    ensure_slow_watcher_started();
+    ensure_camera_list_watcher();
+
+    true
+}
+
+/// Idempotently unsubscribe `connection_id` from `camera_uuid`.
+#[instrument(level = "debug")]
+pub(crate) fn unsubscribe(connection_id: ConnectionId, camera_uuid: Uuid) {
+    let mut registry = registry().lock().unwrap();
+    let Some(cameras) = registry.connections.get_mut(&connection_id) else {
+        return;
+    };
+    if !cameras.remove(&camera_uuid) {
+        return;
+    }
+    if cameras.is_empty() {
+        registry.connections.remove(&connection_id);
+    }
+
+    let had_interest = !registry.camera_interest.is_empty();
+    release_interest(&mut registry, camera_uuid);
+    if had_interest && registry.camera_interest.is_empty() {
+        autopilot::remove_actuators_state_interest();
+    }
+}
+
+/// Remove every camera subscription owned by `connection_id`.
+#[instrument(level = "debug")]
+pub(crate) fn unsubscribe_connection(connection_id: ConnectionId) {
+    let mut registry = registry().lock().unwrap();
+    let Some(cameras) = registry.connections.remove(&connection_id) else {
+        return;
+    };
+    let had_interest = !registry.camera_interest.is_empty();
+
+    for camera_uuid in cameras {
+        release_interest(&mut registry, camera_uuid);
+    }
+
+    if had_interest && registry.camera_interest.is_empty() {
+        autopilot::remove_actuators_state_interest();
+    }
+}
+
+/// True when any WebSocket connection is interested in `camera_uuid`.
+pub(crate) fn has_interest(camera_uuid: Uuid) -> bool {
+    registry()
+        .lock()
+        .unwrap()
+        .camera_interest
+        .contains_key(&camera_uuid)
+}
+
+/// Last known state for `camera_uuid`, without hitting the camera.
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+pub(crate) fn cached_state_event(camera_uuid: Uuid) -> CameraStateEvent {
+    snapshot_to_event(
+        camera_uuid,
+        last_state(camera_uuid),
+        ACTUATORS_DEFAULT_CONFIG.get().cloned(),
+    )
+}
+
+/// Fetch a full camera snapshot for initial subscribe / lag recovery.
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+pub(crate) async fn snapshot(camera_uuid: Uuid) -> CameraStateEvent {
+    let baseline = last_state(camera_uuid);
+    let fetched = fetch_snapshot(camera_uuid, &baseline).await;
+    let snapshot =
+        commit_fetched_snapshot(camera_uuid, &baseline, fetched.clone()).unwrap_or(fetched);
+
+    snapshot_to_event(camera_uuid, snapshot, actuators_default_config().await)
+}
+
+/// Push camera-control side effects into the shared state stream.
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+pub(crate) fn emit_camera_control_update(
+    camera_uuid: Uuid,
+    action: &CameraAction,
+    result: &serde_json::Value,
+) {
+    let mut event = CameraStateEvent {
+        camera_uuid,
+        ..Default::default()
+    };
+
+    match action {
+        CameraAction::SetImageAdjustment(_) => event.base_parameters = Some(result.clone()),
+        CameraAction::SetImageAdjustmentEx(_) => event.advanced_parameters = Some(result.clone()),
+        CameraAction::SetVideoParameterSettings(settings) => {
+            // Cache only MainStream; other channels share the same event field.
+            if !matches!(settings.channel, None | Some(VideoChannelValue::MainStream)) {
+                return;
+            }
+            event.video_parameters = Some(result.clone());
+        }
+        CameraAction::SetRecommendedCameraSettings
+        | CameraAction::Restart
+        | CameraAction::SetImageAdjustmentExAll(_) => {
+            tokio::spawn(reconcile_snapshot(camera_uuid).instrument(Span::current()));
+            return;
+        }
+        _ => return,
+    }
+
+    emit(event);
+}
+
+/// Push autopilot-control side effects into the shared state stream.
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+pub(crate) fn emit_autopilot_control_update(
+    camera_uuid: Uuid,
+    action: &AutopilotAction,
+    result: &serde_json::Value,
+) {
+    let mut event = CameraStateEvent {
+        camera_uuid,
+        ..Default::default()
+    };
+
+    match action {
+        AutopilotAction::SetActuatorsState(_) => event.actuators_state = Some(result.clone()),
+        AutopilotAction::SetActuatorsConfig(_) | AutopilotAction::ResetActuatorsConfig => {
+            event.actuators_config = Some(result.clone());
+            event.actuators_configured = Some(true);
+        }
+        _ => return,
+    }
+
+    emit(event);
+}
+
+/// Re-fetch and emit changed camera fields after disruptive actions.
+#[instrument(level = "debug")]
+pub(crate) async fn reconcile_snapshot(camera_uuid: Uuid) {
+    if !has_interest(camera_uuid) {
+        return;
+    }
+
+    let baseline = last_state(camera_uuid);
+    let fetched = fetch_snapshot(camera_uuid, &baseline).await;
+    if fetched == baseline {
+        return;
+    }
+
+    let Some(merged) = commit_fetched_snapshot(camera_uuid, &baseline, fetched) else {
+        return;
+    };
+
+    emit(snapshot_to_event(camera_uuid, merged, None));
+}
+
+/// Apply `fetched` into the cache for fields that were not updated concurrently since
+/// `baseline` was read. Returns the merged snapshot, or `None` when nobody is interested.
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+fn commit_fetched_snapshot(
+    camera_uuid: Uuid,
+    baseline: &CameraSnapshot,
+    fetched: CameraSnapshot,
+) -> Option<CameraSnapshot> {
+    let mut registry = registry().lock().unwrap();
+    if !registry.camera_interest.contains_key(&camera_uuid) {
+        return None;
+    }
+
+    let current = registry.last_states.entry(camera_uuid).or_default();
+    take_if_unchanged(
+        &mut current.actuators_config,
+        &baseline.actuators_config,
+        fetched.actuators_config,
+    );
+    take_if_unchanged(
+        &mut current.actuators_state,
+        &baseline.actuators_state,
+        fetched.actuators_state,
+    );
+    take_if_unchanged(
+        &mut current.actuators_configured,
+        &baseline.actuators_configured,
+        fetched.actuators_configured,
+    );
+    take_if_unchanged(
+        &mut current.video_parameters,
+        &baseline.video_parameters,
+        fetched.video_parameters,
+    );
+    take_if_unchanged(
+        &mut current.base_parameters,
+        &baseline.base_parameters,
+        fetched.base_parameters,
+    );
+    take_if_unchanged(
+        &mut current.advanced_parameters,
+        &baseline.advanced_parameters,
+        fetched.advanced_parameters,
+    );
+
+    Some(current.clone())
+}
+
+fn take_if_unchanged<T: Clone + PartialEq>(
+    current: &mut Option<T>,
+    baseline: &Option<T>,
+    fetched: Option<T>,
+) {
+    if current == baseline {
+        *current = fetched;
+    }
+}
+
+/// Last cached snapshot for `camera_uuid`, used as the fallback for failed fetches.
+fn last_state(camera_uuid: Uuid) -> CameraSnapshot {
+    registry()
+        .lock()
+        .unwrap()
+        .last_states
+        .get(&camera_uuid)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Drop one interest count for `camera_uuid`, forgetting its cached state when it reaches zero.
+fn release_interest(registry: &mut Registry, camera_uuid: Uuid) {
+    let Some(count) = registry.camera_interest.get_mut(&camera_uuid) else {
+        return;
+    };
+    *count = count.saturating_sub(1);
+    if *count == 0 {
+        registry.camera_interest.remove(&camera_uuid);
+        registry.last_states.remove(&camera_uuid);
+    }
+}
+
+fn registry() -> &'static Mutex<Registry> {
+    REGISTRY.get_or_init(|| {
+        Mutex::new(Registry {
+            connections: HashMap::new(),
+            camera_interest: HashMap::new(),
+            last_states: HashMap::new(),
+        })
+    })
+}
+
+fn state_sender() -> &'static broadcast::Sender<CameraStateEvent> {
+    STATE_TX.get_or_init(|| {
+        let (sender, _) = broadcast::channel(256);
+        sender
+    })
+}
+
+#[instrument(level = "debug", skip_all, fields(%event.camera_uuid))]
+fn emit(mut event: CameraStateEvent) {
+    record_partial(&mut event);
+    if let Err(error) = state_sender().send(event) {
+        debug!("No camera state subscribers: {error}");
+    }
+}
+
+/// Merges `event` into the last-known snapshot, unless nobody is interested in that camera.
+#[instrument(level = "debug", skip_all, fields(%event.camera_uuid))]
+fn record_partial(event: &mut CameraStateEvent) {
+    let mut registry = registry().lock().unwrap();
+    if !registry.camera_interest.contains_key(&event.camera_uuid) {
+        return;
+    }
+    let snapshot = registry.last_states.entry(event.camera_uuid).or_default();
+
+    if let Some(value) = event.actuators_config.take() {
+        snapshot.actuators_config = Some(value.clone());
+        event.actuators_config = Some(value);
+    }
+    if let Some(value) = event.actuators_state.take() {
+        snapshot.actuators_state = Some(value.clone());
+        event.actuators_state = Some(value);
+    }
+    if let Some(value) = event.actuators_configured.take() {
+        snapshot.actuators_configured = Some(value);
+        event.actuators_configured = Some(value);
+    }
+    if let Some(value) = event.video_parameters.take() {
+        snapshot.video_parameters = Some(value.clone());
+        event.video_parameters = Some(value);
+    }
+    if let Some(value) = event.base_parameters.take() {
+        snapshot.base_parameters = Some(value.clone());
+        event.base_parameters = Some(value);
+    }
+    if let Some(value) = event.advanced_parameters.take() {
+        snapshot.advanced_parameters = Some(value.clone());
+        event.advanced_parameters = Some(value);
+    }
+}
+
+#[instrument(level = "debug", skip_all)]
+fn ensure_actuators_bridge() {
+    if ACTUATORS_BRIDGE_STARTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    tokio::spawn(async {
+        let mut receiver = autopilot::subscribe_actuators_state();
+
+        loop {
+            match receiver.recv().await {
+                Ok(update) => {
+                    let subscribed = {
+                        let registry = registry().lock().unwrap();
+                        registry.camera_interest.contains_key(&update.camera_uuid)
+                    };
+
+                    if !subscribed {
+                        continue;
+                    }
+
+                    let actuators_state = match serde_json::to_value(update.state) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            warn!("Failed serializing actuators state: {error}");
+                            continue;
+                        }
+                    };
+
+                    emit(CameraStateEvent {
+                        camera_uuid: update.camera_uuid,
+                        actuators_state: Some(actuators_state),
+                        ..Default::default()
+                    });
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    // Sender is a process-lifetime OnceCell; Closed is unexpected.
+                    // Exit rather than busy-resubscribe and spin a core.
+                    warn!("Actuators state broadcast closed; stopping actuators bridge");
+                    break;
+                }
+                Err(broadcast::error::RecvError::Lagged(samples)) => {
+                    debug!("Actuators bridge lagged by {samples} updates");
+                }
+            }
+        }
+    });
+}
+
+#[instrument(level = "debug", skip_all)]
+fn ensure_slow_watcher_started() {
+    if SLOW_WATCHER_STARTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    tokio::spawn(slow_state_watcher());
+}
+
+/// Drop interest for cameras that disappeared from the MCM list.
+#[instrument(level = "debug", skip_all)]
+pub(crate) fn retain_known_cameras(known: &HashSet<Uuid>) {
+    let mut registry = registry().lock().unwrap();
+    let had_interest = !registry.camera_interest.is_empty();
+
+    for cameras in registry.connections.values_mut() {
+        cameras.retain(|camera_uuid| known.contains(camera_uuid));
+    }
+    registry
+        .connections
+        .retain(|_, cameras| !cameras.is_empty());
+
+    let mut new_interest: HashMap<Uuid, usize> = HashMap::new();
+    for cameras in registry.connections.values() {
+        for camera_uuid in cameras {
+            *new_interest.entry(*camera_uuid).or_insert(0) += 1;
+        }
+    }
+
+    let removed: Vec<Uuid> = registry
+        .camera_interest
+        .keys()
+        .filter(|camera_uuid| !new_interest.contains_key(camera_uuid))
+        .copied()
+        .collect();
+    registry.camera_interest = new_interest;
+    for camera_uuid in removed {
+        registry.last_states.remove(&camera_uuid);
+    }
+
+    if had_interest && registry.camera_interest.is_empty() {
+        autopilot::remove_actuators_state_interest();
+    }
+}
+
+#[instrument(level = "debug", skip_all)]
+fn ensure_camera_list_watcher() {
+    if CAMERA_LIST_WATCHER_STARTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    tokio::spawn(async {
+        let mut receiver = mcm_client::subscribe_cameras();
+        loop {
+            match receiver.recv().await {
+                Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let known: HashSet<Uuid> =
+                        mcm_client::cameras().await.keys().copied().collect();
+                    retain_known_cameras(&known);
+                    camera_ui::retain_known_cameras(&known);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    warn!("Camera list broadcast closed; stopping camera-list watcher");
+                    break;
+                }
+            }
+        }
+    });
+}
+
+#[instrument(level = "debug", skip_all)]
+async fn slow_state_watcher() {
+    let mut interval = tokio::time::interval(SLOW_WATCH_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    loop {
+        interval.tick().await;
+
+        let cameras: Vec<(Uuid, CameraSnapshot)> = {
+            let registry = registry().lock().unwrap();
+            registry
+                .camera_interest
+                .keys()
+                .map(|camera_uuid| {
+                    let previous = registry
+                        .last_states
+                        .get(camera_uuid)
+                        .cloned()
+                        .unwrap_or_default();
+                    (*camera_uuid, previous)
+                })
+                .collect()
+        };
+
+        let results = stream::iter(cameras.into_iter())
+            .map(|(camera_uuid, previous)| async move {
+                let fetched = fetch_slow_snapshot(camera_uuid, &previous).await;
+                (camera_uuid, previous, fetched)
+            })
+            .buffer_unordered(SLOW_FETCH_CONCURRENCY);
+
+        // Emit each camera as soon as its fetch completes so one slow camera
+        // cannot stall updates for the rest of the fleet.
+        tokio::pin!(results);
+        while let Some((camera_uuid, previous, fetched)) = results.next().await {
+            let Some(merged) = commit_fetched_snapshot(camera_uuid, &previous, fetched) else {
+                continue;
+            };
+            if merged == previous {
+                continue;
+            }
+
+            // Emit only fields that differ from the pre-fetch baseline, using the merged
+            // cache values so concurrent record_partial updates are what clients see.
+            let event = CameraStateEvent {
+                camera_uuid,
+                actuators_config: (merged.actuators_config != previous.actuators_config)
+                    .then(|| merged.actuators_config.clone())
+                    .flatten(),
+                actuators_configured: (merged.actuators_configured
+                    != previous.actuators_configured)
+                    .then_some(merged.actuators_configured)
+                    .flatten(),
+                video_parameters: (merged.video_parameters != previous.video_parameters)
+                    .then(|| merged.video_parameters.clone())
+                    .flatten(),
+                base_parameters: (merged.base_parameters != previous.base_parameters)
+                    .then(|| merged.base_parameters.clone())
+                    .flatten(),
+                advanced_parameters: (merged.advanced_parameters != previous.advanced_parameters)
+                    .then(|| merged.advanced_parameters.clone())
+                    .flatten(),
+                ..Default::default()
+            };
+
+            // actuators_state is driven by the SERVO bridge; a mid-fetch change alone
+            // must not push an empty camera/state event.
+            if event.actuators_config.is_none()
+                && event.actuators_configured.is_none()
+                && event.video_parameters.is_none()
+                && event.base_parameters.is_none()
+                && event.advanced_parameters.is_none()
+            {
+                continue;
+            }
+
+            emit(event);
+        }
+    }
+}
+
+fn snapshot_to_event(
+    camera_uuid: Uuid,
+    snapshot: CameraSnapshot,
+    actuators_default_config: Option<serde_json::Value>,
+) -> CameraStateEvent {
+    CameraStateEvent {
+        camera_uuid,
+        actuators_default_config,
+        actuators_config: snapshot.actuators_config,
+        actuators_state: snapshot.actuators_state,
+        actuators_configured: snapshot.actuators_configured,
+        video_parameters: snapshot.video_parameters,
+        base_parameters: snapshot.base_parameters,
+        advanced_parameters: snapshot.advanced_parameters,
+        ui: Some(camera_ui::get(camera_uuid)),
+    }
+}
+
+/// Fetches every field, falling back to `previous` for the ones that failed.
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+async fn fetch_snapshot(camera_uuid: Uuid, previous: &CameraSnapshot) -> CameraSnapshot {
+    let (actuators_config, actuators_state, video_parameters, base_parameters, advanced_parameters) = tokio::join!(
+        fetch_actuators_config(camera_uuid),
+        fetch_actuators_state(camera_uuid),
+        fetch_video_parameters(camera_uuid),
+        fetch_base_parameters(camera_uuid),
+        fetch_advanced_parameters(camera_uuid),
+    );
+
+    CameraSnapshot {
+        actuators_configured: actuators_configured(&actuators_config, previous),
+        actuators_config: actuators_config
+            .ok()
+            .or_else(|| previous.actuators_config.clone()),
+        actuators_state: actuators_state
+            .ok()
+            .or_else(|| previous.actuators_state.clone()),
+        video_parameters: video_parameters
+            .ok()
+            .or_else(|| previous.video_parameters.clone()),
+        base_parameters: base_parameters
+            .ok()
+            .or_else(|| previous.base_parameters.clone()),
+        advanced_parameters: advanced_parameters
+            .ok()
+            .or_else(|| previous.advanced_parameters.clone()),
+    }
+}
+
+/// Same as [`fetch_snapshot`], without refreshing actuator state (served by the SERVO stream).
+///
+/// Preserves `previous.actuators_state` so a merge does not wipe the live SERVO cache.
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+async fn fetch_slow_snapshot(camera_uuid: Uuid, previous: &CameraSnapshot) -> CameraSnapshot {
+    let (actuators_config, video_parameters, base_parameters, advanced_parameters) = tokio::join!(
+        fetch_actuators_config(camera_uuid),
+        fetch_video_parameters(camera_uuid),
+        fetch_base_parameters(camera_uuid),
+        fetch_advanced_parameters(camera_uuid),
+    );
+
+    CameraSnapshot {
+        actuators_configured: actuators_configured(&actuators_config, previous),
+        actuators_config: actuators_config
+            .ok()
+            .or_else(|| previous.actuators_config.clone()),
+        actuators_state: previous.actuators_state.clone(),
+        video_parameters: video_parameters
+            .ok()
+            .or_else(|| previous.video_parameters.clone()),
+        base_parameters: base_parameters
+            .ok()
+            .or_else(|| previous.base_parameters.clone()),
+        advanced_parameters: advanced_parameters
+            .ok()
+            .or_else(|| previous.advanced_parameters.clone()),
+    }
+}
+
+/// True when an error means the camera has no actuators configured yet.
+fn actuators_configured(
+    actuators_config: &Result<serde_json::Value, String>,
+    previous: &CameraSnapshot,
+) -> Option<bool> {
+    match actuators_config {
+        Ok(_) => Some(true),
+        Err(error) if autopilot::error_indicates_actuators_not_configured(error) => Some(false),
+        Err(error) => {
+            debug!("Actuators config probe failed: {error}");
+            previous.actuators_configured
+        }
+    }
+}
+
+#[instrument(level = "debug", skip_all)]
+async fn actuators_default_config() -> Option<serde_json::Value> {
+    match ACTUATORS_DEFAULT_CONFIG
+        .get_or_try_init(|| async {
+            let value = autopilot::handle_control(ActuatorsControl {
+                camera_uuid: Uuid::nil(),
+                action: AutopilotAction::GetActuatorsDefaultConfig,
+            })
+            .await
+            .map_err(|error| format!("{error:?}"))?;
+            serde_json::to_value(value).map_err(|error| error.to_string())
+        })
+        .await
+    {
+        Ok(value) => Some(value.clone()),
+        Err(error) => {
+            debug!("Failed fetching default actuators config: {error}");
+            None
+        }
+    }
+}
+
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+async fn fetch_actuators_config(camera_uuid: Uuid) -> Result<serde_json::Value, String> {
+    let value = autopilot::handle_control(ActuatorsControl {
+        camera_uuid,
+        action: AutopilotAction::GetActuatorsConfig,
+    })
+    .await
+    .map_err(|error| format!("{error:?}"))?;
+    serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+async fn fetch_actuators_state(camera_uuid: Uuid) -> Result<serde_json::Value, String> {
+    let value = autopilot::handle_control(ActuatorsControl {
+        camera_uuid,
+        action: AutopilotAction::GetActuatorsState,
+    })
+    .await
+    .map_err(|error| format!("{error:?}"))?;
+    serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+async fn fetch_video_parameters(camera_uuid: Uuid) -> Result<serde_json::Value, String> {
+    let value = radcam_commands::handle_control(CameraControl {
+        camera_uuid,
+        action: CameraAction::GetVideoParameterSettings(VideoParameterSettings {
+            channel: Some(VideoChannelValue::MainStream),
+            ..Default::default()
+        }),
+    })
+    .await
+    .map_err(|error| format!("{error:?}"))?;
+    serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+async fn fetch_base_parameters(camera_uuid: Uuid) -> Result<serde_json::Value, String> {
+    let value = radcam_commands::handle_control(CameraControl {
+        camera_uuid,
+        action: CameraAction::GetImageAdjustment,
+    })
+    .await
+    .map_err(|error| format!("{error:?}"))?;
+    serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
+async fn fetch_advanced_parameters(camera_uuid: Uuid) -> Result<serde_json::Value, String> {
+    let value = radcam_commands::handle_control(CameraControl {
+        camera_uuid,
+        action: CameraAction::GetImageAdjustmentEx,
+    })
+    .await
+    .map_err(|error| format!("{error:?}"))?;
+    serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reboot_overlay_stays_until_finish_camera_action() {
+        let camera_uuid = Uuid::from_u128(0xdead_beef_cafe_babe_u128);
+        camera_ui::start_camera_action(camera_uuid, &CameraAction::Restart);
+        assert!(camera_ui::get(camera_uuid).rebooting);
+
+        // Successful fetches while still online must not clear the reboot overlay.
+        emit(CameraStateEvent {
+            camera_uuid,
+            video_parameters: Some(serde_json::json!({ "ok": true })),
+            ..Default::default()
+        });
+        assert!(camera_ui::get(camera_uuid).rebooting);
+
+        camera_ui::finish_camera_action(camera_uuid, &CameraAction::Restart);
+        assert!(!camera_ui::get(camera_uuid).rebooting);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn interest_is_dropped_with_the_last_subscription() {
+        let connection_id: ConnectionId = 4242;
+        let camera_uuid = Uuid::from_u128(0xfeed_face_0000_0001_u128);
+
+        assert!(subscribe(connection_id, camera_uuid));
+        assert!(subscribe(connection_id, camera_uuid));
+        assert!(connection_subscribed(connection_id, camera_uuid));
+
+        registry()
+            .lock()
+            .unwrap()
+            .last_states
+            .insert(camera_uuid, CameraSnapshot::default());
+
+        unsubscribe_connection(connection_id);
+
+        assert!(!connection_subscribed(connection_id, camera_uuid));
+        let registry = registry().lock().unwrap();
+        assert!(!registry.camera_interest.contains_key(&camera_uuid));
+        assert!(!registry.last_states.contains_key(&camera_uuid));
+    }
+
+    #[test]
+    fn commit_fetched_snapshot_keeps_concurrent_partial_updates() {
+        let camera_uuid = Uuid::from_u128(0xfeed_face_0000_0002_u128);
+
+        let baseline = CameraSnapshot {
+            base_parameters: Some(serde_json::json!({ "gain": 1 })),
+            video_parameters: Some(serde_json::json!({ "fps": 30 })),
+            ..Default::default()
+        };
+        {
+            let mut registry = registry().lock().unwrap();
+            registry.camera_interest.insert(camera_uuid, 1);
+            registry.last_states.insert(camera_uuid, baseline.clone());
+            // Concurrent control result lands while a fetch is in flight.
+            registry
+                .last_states
+                .get_mut(&camera_uuid)
+                .unwrap()
+                .base_parameters = Some(serde_json::json!({ "gain": 8 }));
+        }
+
+        let fetched = CameraSnapshot {
+            base_parameters: Some(serde_json::json!({ "gain": 1 })),
+            video_parameters: Some(serde_json::json!({ "fps": 60 })),
+            ..Default::default()
+        };
+
+        let merged = commit_fetched_snapshot(camera_uuid, &baseline, fetched).unwrap();
+        assert_eq!(
+            merged.base_parameters,
+            Some(serde_json::json!({ "gain": 8 }))
+        );
+        assert_eq!(
+            merged.video_parameters,
+            Some(serde_json::json!({ "fps": 60 }))
+        );
+
+        let mut registry = registry().lock().unwrap();
+        registry.camera_interest.remove(&camera_uuid);
+        registry.last_states.remove(&camera_uuid);
+    }
+}
