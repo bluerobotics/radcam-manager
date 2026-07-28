@@ -458,7 +458,7 @@ const runAutopilotControl = (action: string, errorMessage: string): void => {
       console.log(data)
     })
     .catch((error) => {
-      console.error(`${errorMessage}: ${formatRequestError(error)}`)
+      warningToastMessage.value = `${errorMessage}: ${formatRequestError(error)}`
     })
 }
 
@@ -474,7 +474,7 @@ const runCameraControl = (action: string, errorMessage: string): void => {
       console.log(data)
     })
     .catch((error) => {
-      console.error(`${errorMessage}: ${formatRequestError(error)}`)
+      warningToastMessage.value = `${errorMessage}: ${formatRequestError(error)}`
     })
 }
 
@@ -494,8 +494,11 @@ const unsubscribeConnectionState = backendClient.onConnectionState((state, previ
   if (state === 'disconnected' && previousState !== 'disconnected') {
     disconnectedSince.value = new Date()
     connectionStats.value = null
+    uiByCamera.clear()
     uiLoading.value = false
     uiRebooting.value = false
+    errorDialogMessage.value = null
+    warningToastMessage.value = null
   }
   if (state === 'connected') {
     disconnectedSince.value = null

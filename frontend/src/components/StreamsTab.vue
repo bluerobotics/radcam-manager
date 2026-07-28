@@ -154,7 +154,10 @@ watch(
   () => props.selectedCameraUuid,
   async (newValue) => {
     hasUserEditedVideo.value = false
-    if (newValue) {
+    if (!newValue) return
+    // MainStream is pushed on camera/state; other channels still need a fetch.
+    const channel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
+    if (channel !== VideoChannelValue.MainStream) {
       getVideoParameters(true)
     }
   },
@@ -318,12 +321,13 @@ const getVideoParameters = (update: boolean) => {
     return
   }
 
+  const cameraUuid = props.selectedCameraUuid
   const video_parameter_settings = {
     channel: selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream,
   }
 
   const payload = {
-    camera_uuid: props.selectedCameraUuid,
+    camera_uuid: cameraUuid,
     action: "getVencConf",
     json: video_parameter_settings,
   }
@@ -331,6 +335,7 @@ const getVideoParameters = (update: boolean) => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
+      if (props.selectedCameraUuid !== cameraUuid) return
       const settings: VideoParameterSettings =
         data as VideoParameterSettings
 

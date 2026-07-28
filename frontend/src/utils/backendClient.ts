@@ -210,7 +210,10 @@ class BackendClient {
         this.lastMessageAt = Date.now()
         this.setConnectionState('connected')
         this.startStaleCheck()
-        // camera/list is the first server frame and re-subscribes; skip a duplicate here.
+        // Re-subscribe immediately; camera/list also re-queues as a second chance.
+        if (this.subscribedCameraUuid) {
+          this.queueSubscribe(this.subscribedCameraUuid)
+        }
         resolve()
       }
 
@@ -293,7 +296,8 @@ class BackendClient {
     let message: WsResponse | WsEvent
     try {
       message = JSON.parse(raw) as WsResponse | WsEvent
-    } catch {
+    } catch (error) {
+      console.warn('Ignoring invalid WebSocket JSON', error)
       return
     }
 
@@ -419,6 +423,7 @@ class BackendClient {
 
     if (this.subscribedCameraUuid && this.subscribedCameraUuid !== cameraUuid) {
       const previous = this.subscribedCameraUuid
+      // Single active wire UUID: drop previous counts and unsubscribe once.
       this.cameraSubscribeCounts.delete(previous)
       this.sendCameraSubscription('unsubscribe', previous)
     }
@@ -438,7 +443,8 @@ class BackendClient {
       this.subscribeQueued = false
       const pending = this.pendingSubscribe
       this.pendingSubscribe = null
-      if (pending) {
+      // Skip if unsubscribe cleared the active uuid in the same tick.
+      if (pending && pending === this.subscribedCameraUuid) {
         this.sendCameraSubscription('subscribe', pending)
       }
     })
@@ -476,7 +482,10 @@ class BackendClient {
       return
     }
 
-    this.connect().then(send).catch(() => {})
+    this.connect().then(send).catch((error) => {
+      // Local dismiss still cleared the overlay; wire retry is best-effort.
+      console.warn('Failed to send ui_dismiss', error)
+    })
   }
 
   private sendCameraSubscription(type: 'subscribe' | 'unsubscribe', cameraUuid: string): void {
@@ -495,8 +504,8 @@ class BackendClient {
       return
     }
 
-    this.connect().then(send).catch(() => {
-      // reconnect loop will resubscribe on open
+    this.connect().then(send).catch((error) => {
+      console.warn(`Failed to send camera ${type}`, error)
     })
   }
 }
