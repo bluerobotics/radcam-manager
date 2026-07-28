@@ -41,7 +41,11 @@ pub fn router() -> Router {
 async fn autopilot_control(Json(actuators_control): Json<ActuatorsControl>) -> impl IntoResponse {
     match control_bridge::autopilot_control(actuators_control).await {
         Ok(value) => (StatusCode::OK, value.to_string()).into_response(),
-        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+        Err(error) => {
+            let status = StatusCode::from_u16(control_bridge::status_for_error(&error))
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            (status, error).into_response()
+        }
     }
 }
 
