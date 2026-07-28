@@ -32,3 +32,6 @@ url = { workspace = true }
 uuid = { workspace = true }
 ts-rs = { workspace = true }
 tsync = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }
