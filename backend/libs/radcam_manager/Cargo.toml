@@ -15,6 +15,7 @@ bench = false
 autopilot = { path = "../autopilot" }
 web_client = { path = "../web_client" }
 mcm_client = { path = "../mcm_client" }
+radcam_api = { path = "../radcam_api" }
 radcam_commands = { path = "../radcam_commands" }
 
 anyhow = { workspace = true }
@@ -48,8 +49,9 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 url = { workspace = true }
 url_params_serializer = { workspace = true }
 uuid = { workspace = true }
-ts-rs = { workspace = true }
-tsync = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
 
 [build-dependencies]
 vergen-gix = { workspace = true }
