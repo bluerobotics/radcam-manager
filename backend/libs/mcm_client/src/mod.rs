@@ -5,7 +5,10 @@ use indexmap::IndexMap;
 use mcm_client::MCMClient;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::RwLock, task::JoinHandle};
+use tokio::{
+    sync::{RwLock, broadcast},
+    task::JoinHandle,
+};
 use tracing::*;
 use ts_rs::TS;
 use url::Url;
@@ -16,6 +19,7 @@ pub(crate) mod mcm_client;
 pub mod mcm_types;
 
 static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
+static CAMERAS_TX: OnceCell<broadcast::Sender<()>> = OnceCell::new();
 
 #[derive(Debug)]
 struct Manager {
@@ -30,6 +34,9 @@ pub type Cameras = IndexMap<Uuid, Camera>;
 pub struct Camera {
     pub uuid: Uuid,
     pub hostname: Ipv4Addr,
+    /// Device login credentials; never serialized to API clients.
+    #[serde(skip)]
+    #[ts(skip)]
     pub credentials: Option<Credentials>,
     pub streams: Streams,
 }
@@ -105,8 +112,6 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        clear_cameras().await;
-
         let mcm = match MCMClient::try_new(mcm_address, skip_hardware_check).await {
             Ok(mcm) => mcm,
             Err(error) => {
@@ -121,12 +126,21 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
             let radcams = match mcm.get_radcams().await {
                 Ok(radcams) => radcams,
                 Err(error) => {
-                    debug!("Failed to create MCM client: {error:?}");
+                    debug!("Failed to get radcams: {error:?}");
                     break;
                 }
             };
 
             let known_cameras = cameras().await;
+            let radcam_uuids: std::collections::HashSet<Uuid> =
+                radcams.iter().map(|camera| camera.uuid).collect();
+            for uuid in known_cameras.keys() {
+                if !radcam_uuids.contains(uuid)
+                    && let Err(error) = remove_camera(uuid).await
+                {
+                    debug!("Failed removing stale camera {uuid}: {error:?}");
+                }
+            }
 
             for camera in &radcams {
                 if let Some(known_camera) = known_cameras.get(&camera.uuid) {
@@ -137,7 +151,7 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
                         continue;
                     }
 
-                    break;
+                    continue;
                 }
 
                 debug!("New RadCam found: {camera:?}");
@@ -222,7 +236,28 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
 
 #[instrument(level = "debug")]
 pub async fn cameras() -> Cameras {
-    MANAGER.get().unwrap().read().await.cameras.clone()
+    let Some(manager) = MANAGER.get() else {
+        return IndexMap::new();
+    };
+    manager.read().await.cameras.clone()
+}
+
+/// Subscribe to camera-list change notifications for WebSocket push events.
+pub fn subscribe_cameras() -> broadcast::Receiver<()> {
+    cameras_sender().subscribe()
+}
+
+fn cameras_sender() -> &'static broadcast::Sender<()> {
+    CAMERAS_TX.get_or_init(|| {
+        let (sender, _) = broadcast::channel(16);
+        sender
+    })
+}
+
+fn notify_cameras() {
+    if let Err(error) = cameras_sender().send(()) {
+        debug!("No camera-list subscribers: {error}");
+    }
 }
 
 #[instrument(level = "debug")]
@@ -233,28 +268,25 @@ pub async fn add_camera(camera: &Camera) -> Result<()> {
         debug!("Camera updated: old: {old_camera:?}");
     }
 
+    notify_cameras();
+
     Ok(())
 }
 
 #[instrument(level = "debug")]
 pub async fn get_camera(uuid: &Uuid) -> Option<Camera> {
-    let lock = MANAGER.get().unwrap().read().await;
-
-    lock.cameras.get(uuid).cloned()
+    let manager = MANAGER.get()?.read().await;
+    manager.cameras.get(uuid).cloned()
 }
 
 #[instrument(level = "debug")]
 pub async fn remove_camera(uuid: &Uuid) -> Result<Camera> {
     let mut lock = MANAGER.get().unwrap().write().await;
 
-    lock.cameras.swap_remove(uuid).context("context")
-}
+    let camera = lock.cameras.swap_remove(uuid).context("context")?;
+    notify_cameras();
 
-#[instrument(level = "debug")]
-pub async fn clear_cameras() {
-    let mut lock = MANAGER.get().unwrap().write().await;
-
-    lock.cameras.clear();
+    Ok(camera)
 }
 
 #[tokio::test]
