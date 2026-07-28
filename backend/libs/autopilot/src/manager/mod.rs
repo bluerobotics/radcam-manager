@@ -219,11 +219,15 @@ impl Manager {
             self.mavlink.reboot_autopilot().await?;
         }
 
+        // Re-push ENABLE/GAIN only when the Lua script was rewritten/reloaded (or a
+        // full overwrite/reboot), so a correlation toggle does not force a GAIN
+        // round-trip under the manager write lock.
+        let force_script_params = reload_script || overwrite || autopilot_reboot_required;
         if let Some(parameters) = &new_config.parameters {
-            self.update_script_enable(camera_uuid, parameters, true)
+            self.update_script_enable(camera_uuid, parameters, force_script_params)
                 .await?;
 
-            self.update_script_gain(camera_uuid, parameters, true)
+            self.update_script_gain(camera_uuid, parameters, force_script_params)
                 .await?;
         }
 
