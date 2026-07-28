@@ -72,6 +72,20 @@ pub(crate) fn emit_ui(camera_uuid: Uuid, ui: CameraUiState) {
     });
 }
 
+/// Broadcast without writing `event` into the cache.
+///
+/// Use after [`commit_fetched_snapshot`]: the cache is already authoritative, and
+/// re-recording would clobber concurrent `record_partial` updates.
+#[instrument(level = "debug", skip_all, fields(%event.camera_uuid))]
+fn broadcast_event(event: CameraStateEvent) {
+    if !has_interest(event.camera_uuid) {
+        return;
+    }
+    if let Err(error) = state_sender().send(event) {
+        debug!("No camera state subscribers: {error}");
+    }
+}
+
 /// Returns true when `connection_id` is subscribed to `camera_uuid`.
 pub(crate) fn connection_subscribed(connection_id: ConnectionId, camera_uuid: Uuid) -> bool {
     registry()
@@ -224,10 +238,20 @@ pub(crate) fn emit_camera_control_update(
             }
             event.video_parameters = Some(result.clone());
         }
-        CameraAction::SetRecommendedCameraSettings
-        | CameraAction::Restart
-        | CameraAction::SetImageAdjustmentExAll(_) => {
+        CameraAction::SetRecommendedCameraSettings | CameraAction::Restart => {
             tokio::spawn(reconcile_snapshot(camera_uuid).instrument(Span::current()));
+            return;
+        }
+        CameraAction::SetImageAdjustmentExAll(_) => {
+            // Applies to every camera; refresh all that currently have subscribers.
+            let cameras: Vec<Uuid> = {
+                let registry = registry().lock().unwrap();
+                registry.camera_interest.keys().copied().collect()
+            };
+            let span = Span::current();
+            for uuid in cameras {
+                tokio::spawn(reconcile_snapshot(uuid).instrument(span.clone()));
+            }
             return;
         }
         _ => return,
@@ -261,6 +285,9 @@ pub(crate) fn emit_autopilot_control_update(
 }
 
 /// Re-fetch and emit changed camera fields after disruptive actions.
+///
+/// Does not refresh `actuators_state` (SERVO bridge owns that) and broadcasts
+/// without re-recording so concurrent partial updates are not clobbered.
 #[instrument(level = "debug")]
 pub(crate) async fn reconcile_snapshot(camera_uuid: Uuid) {
     if !has_interest(camera_uuid) {
@@ -268,7 +295,7 @@ pub(crate) async fn reconcile_snapshot(camera_uuid: Uuid) {
     }
 
     let baseline = last_state(camera_uuid);
-    let fetched = fetch_snapshot(camera_uuid, &baseline).await;
+    let fetched = fetch_slow_snapshot(camera_uuid, &baseline).await;
     if fetched == baseline {
         return;
     }
@@ -276,8 +303,40 @@ pub(crate) async fn reconcile_snapshot(camera_uuid: Uuid) {
     let Some(merged) = commit_fetched_snapshot(camera_uuid, &baseline, fetched) else {
         return;
     };
+    if merged == baseline {
+        return;
+    }
 
-    emit(snapshot_to_event(camera_uuid, merged, None));
+    let event = CameraStateEvent {
+        camera_uuid,
+        actuators_config: (merged.actuators_config != baseline.actuators_config)
+            .then(|| merged.actuators_config.clone())
+            .flatten(),
+        actuators_configured: (merged.actuators_configured != baseline.actuators_configured)
+            .then_some(merged.actuators_configured)
+            .flatten(),
+        video_parameters: (merged.video_parameters != baseline.video_parameters)
+            .then(|| merged.video_parameters.clone())
+            .flatten(),
+        base_parameters: (merged.base_parameters != baseline.base_parameters)
+            .then(|| merged.base_parameters.clone())
+            .flatten(),
+        advanced_parameters: (merged.advanced_parameters != baseline.advanced_parameters)
+            .then(|| merged.advanced_parameters.clone())
+            .flatten(),
+        ..Default::default()
+    };
+
+    if event.actuators_config.is_none()
+        && event.actuators_configured.is_none()
+        && event.video_parameters.is_none()
+        && event.base_parameters.is_none()
+        && event.advanced_parameters.is_none()
+    {
+        return;
+    }
+
+    broadcast_event(event);
 }
 
 /// Apply `fetched` into the cache for fields that were not updated concurrently since
@@ -381,6 +440,10 @@ fn state_sender() -> &'static broadcast::Sender<CameraStateEvent> {
 #[instrument(level = "debug", skip_all, fields(%event.camera_uuid))]
 fn emit(mut event: CameraStateEvent) {
     record_partial(&mut event);
+    // record_partial is a no-op without interest; skip waking every WS filter.
+    if !has_interest(event.camera_uuid) {
+        return;
+    }
     if let Err(error) = state_sender().send(event) {
         debug!("No camera state subscribers: {error}");
     }
@@ -466,7 +529,8 @@ fn ensure_actuators_bridge() {
                     break;
                 }
                 Err(broadcast::error::RecvError::Lagged(samples)) => {
-                    debug!("Actuators bridge lagged by {samples} updates");
+                    debug!("Actuators bridge lagged by {samples} updates; re-pushing cache");
+                    resync_actuators_from_cache();
                 }
             }
         }
@@ -593,6 +657,7 @@ async fn slow_state_watcher() {
 
             // Emit only fields that differ from the pre-fetch baseline, using the merged
             // cache values so concurrent record_partial updates are what clients see.
+            // Broadcast without re-recording: commit already wrote the cache.
             let event = CameraStateEvent {
                 camera_uuid,
                 actuators_config: (merged.actuators_config != previous.actuators_config)
@@ -625,8 +690,37 @@ async fn slow_state_watcher() {
                 continue;
             }
 
-            emit(event);
+            broadcast_event(event);
         }
+    }
+}
+
+/// Re-push cached `actuators_state` after the SERVO broadcast lagged.
+#[instrument(level = "debug", skip_all)]
+fn resync_actuators_from_cache() {
+    let events: Vec<CameraStateEvent> = {
+        let registry = registry().lock().unwrap();
+        registry
+            .camera_interest
+            .keys()
+            .filter_map(|camera_uuid| {
+                let actuators_state = registry
+                    .last_states
+                    .get(camera_uuid)?
+                    .actuators_state
+                    .clone()?;
+                Some(CameraStateEvent {
+                    camera_uuid: *camera_uuid,
+                    actuators_state: Some(actuators_state),
+                    ..Default::default()
+                })
+            })
+            .collect()
+    };
+
+    for event in events {
+        // Re-record is fine: values match cache; clients need a fresh push after lag.
+        emit(event);
     }
 }
 

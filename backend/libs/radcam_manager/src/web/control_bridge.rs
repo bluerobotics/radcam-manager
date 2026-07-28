@@ -7,12 +7,15 @@ use serde_json::Value;
 
 use crate::web::{camera_state, camera_ui};
 
+/// Wire / HTTP body when the requested camera UUID is not in the MCM list.
+pub(crate) const UNKNOWN_CAMERA: &str = "unknown camera";
+
 /// Run a camera control, driving the shared UI overlay and state stream.
 #[tracing::instrument(level = "debug", skip_all, fields(%camera_control.camera_uuid))]
 pub(crate) async fn camera_control(camera_control: CameraControl) -> Result<Value, String> {
     let camera_uuid = camera_control.camera_uuid;
     if mcm_client::get_camera(&camera_uuid).await.is_none() {
-        return Err("unknown camera".to_string());
+        return Err(UNKNOWN_CAMERA.to_string());
     }
     let action = camera_control.action.clone();
     camera_ui::start_camera_action(camera_uuid, &action);
@@ -38,7 +41,7 @@ pub(crate) async fn autopilot_control(
 ) -> Result<Value, String> {
     let camera_uuid = actuators_control.camera_uuid;
     if mcm_client::get_camera(&camera_uuid).await.is_none() {
-        return Err("unknown camera".to_string());
+        return Err(UNKNOWN_CAMERA.to_string());
     }
     let action = actuators_control.action.clone();
     camera_ui::start_autopilot_action(camera_uuid, &action);
@@ -55,4 +58,9 @@ pub(crate) async fn autopilot_control(
             Err(error)
         }
     }
+}
+
+/// Map a control-bridge error string to an HTTP / WS status code.
+pub(crate) fn status_for_error(error: &str) -> u16 {
+    if error == UNKNOWN_CAMERA { 404 } else { 500 }
 }
