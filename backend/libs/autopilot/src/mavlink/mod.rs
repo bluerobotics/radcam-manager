@@ -1,6 +1,8 @@
 mod connection;
 pub mod parameters;
 
+pub use connection::Message;
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -13,10 +15,7 @@ use tokio::sync::{RwLock, broadcast};
 use tracing::*;
 
 use crate::{
-    mavlink::{
-        connection::{Connection, Message},
-        parameters::ParamEncodingType,
-    },
+    mavlink::{connection::Connection, parameters::ParamEncodingType},
     parameters::{ParamType, Parameter},
 };
 
@@ -349,6 +348,30 @@ impl MavlinkComponent {
             "Command {:?} timed out after {max_retries} retries",
             command.command
         ))
+    }
+
+    /// Subscribe to the shared MAVLink message broadcast for this component.
+    #[instrument(level = "debug", skip(self))]
+    pub async fn get_receiver(&self) -> broadcast::Receiver<Message> {
+        self.inner.get_receiver().await
+    }
+
+    /// Request the autopilot to stream `message_id` at `interval_us` microseconds.
+    #[instrument(level = "debug", skip(self))]
+    pub async fn set_message_interval(&self, message_id: u32, interval_us: f32) -> Result<()> {
+        let target_system = self.inner.system_id;
+        let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
+
+        self.send_command(COMMAND_LONG_DATA {
+            command: MavCmd::MAV_CMD_SET_MESSAGE_INTERVAL,
+            target_system,
+            target_component,
+            confirmation: 0,
+            param1: message_id as f32,
+            param2: interval_us,
+            ..Default::default()
+        })
+        .await
     }
 
     pub async fn request_servo_output_raw(&self) -> Result<SERVO_OUTPUT_RAW_DATA> {
