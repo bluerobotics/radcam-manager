@@ -3,7 +3,6 @@ pub mod api;
 mod manager;
 mod mavlink;
 pub mod parameters;
-mod routes;
 mod settings_translations;
 
 use anyhow::{Context, Result};
@@ -17,7 +16,6 @@ pub use actuators_watch::{
     subscribe as subscribe_actuators_state,
 };
 pub use manager::{clear_saved_settings, init};
-pub use routes::router;
 
 use crate::{
     manager::MANAGER,
