@@ -15,6 +15,7 @@ bench = false
 autopilot = { path="../libs/autopilot" }
 radcam_commands = { path="../libs/radcam_commands" }
 mcm_client = { path = "../libs/mcm_client" }
+radcam_api = { path = "../libs/radcam_api" }
 
 anyhow = { workspace = true }
 ts-rs = { workspace = true }

@@ -285,6 +285,7 @@ dependencies = [
  "anyhow",
  "autopilot",
  "mcm_client",
+ "radcam_api",
  "radcam_commands",
  "regex",
  "ts-rs",
