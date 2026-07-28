@@ -316,8 +316,8 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="isLoading || props.disabled || processingWhiteBalance"
-            :loading="isLoading"
+            :disabled="props.disabled || processingWhiteBalance"
+            :loading="props.loading"
             theme="dark"
             @click="resetToRecommendedDefaults"
           >
@@ -618,8 +618,8 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="hasChannelErrors || isLoading || props.disabled || processingWhiteBalance"
-            :loading="isLoading"
+            :disabled="hasChannelErrors || props.disabled || processingWhiteBalance"
+            :loading="props.loading"
             theme="dark"
             @click="saveHardwareSetup"
           >
@@ -634,39 +634,27 @@
     :show="(!isConfigured) && showWelcomeDialog"
     @close="showWelcomeDialog = false"
   />
-  <Loading
-    :is-loading="isLoading"
-    :message="loadingMessage"
-  />
-  <ErrorDialog
-    :message="errorDialogMessage"
-    @close="errorDialogMessage = null"
-  />
-  <WarningToast :message="warningToastMessage" />
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
 import BlueButtonGroup from './BlueButtonGroup.vue'
 import BlueSlider from './BlueSlider.vue'
 import BlueSwitch from './BlueSwitch.vue'
 import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
-import Loading from './Loading.vue'
-import { VideoChannelValue, type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, BaseAutoWhiteBalanceSceneValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
-import axios from 'axios'
+import { type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, BaseAutoWhiteBalanceSceneValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
+import { backendClient } from '@/utils/backendClient'
+import { useCameraState } from '@/utils/useCameraState'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
-import ErrorDialog from './ErrorDialog.vue'
+import type { CameraStateEvent } from '@/bindings/radcam_api'
 import WelcomeDialog from './WelcomeDialog.vue'
-import { OneMoreTime } from '@/utils/oneMoreTime'
-import { formatRequestError } from '@/utils/formatRequestError'
-import { endMinLoading, startMinLoading } from '@/utils/minLoadingDuration'
 
 
 const props = defineProps<{
   selectedCameraUuid: string | null
-  backendApi: string
   disabled: boolean
+  loading: boolean
   cockpitMode: boolean
 }>()
 
@@ -745,6 +733,7 @@ const currentFocusAndZoomParams = ref<ActuatorsParametersConfig>({
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const selectedVideoBitrate = ref<number | null>(null)
 const hasUserEditedVideo = ref<boolean>(false)
+const inFlightParamWrites = ref(0)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
 const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const actuatorsState = ref<ActuatorsState>({
@@ -754,10 +743,10 @@ const actuatorsState = ref<ActuatorsState>({
 })
 type ActuatorKey = keyof ActuatorsState
 
-const approxEqual = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-3
+const approxEqual = (a: number, b: number): boolean => Math.abs(a - b) <= 0.5
 
 // Tracks the last user-requested value per actuator. While a key is pending, we do not let
-// periodic polling overwrite the UI with intermediate/stale values.
+// pushed state updates overwrite the UI with intermediate/stale values.
 const desiredActuatorsState = ref<Record<ActuatorKey, number | null>>({
   focus: null,
   zoom: null,
@@ -778,11 +767,6 @@ const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
 })
 const isConfigured = ref<boolean>(true)
 const showWelcomeDialog = ref<boolean>(true)
-const isCameraRebooting = ref<boolean>(false)
-const isLoading = ref<boolean>(false)
-const loadingMessage = ref('Applying settings…')
-const errorDialogMessage = ref<string | null>(null)
-const warningToastMessage = ref<string | null>(null)
 const showAdvancedHardware = ref(false)
 const intendedFocusAndZoomParams = ref<ActuatorsParametersConfig>({
   camera_id: null,
@@ -838,6 +822,18 @@ const defaultFocusAndZoomParams = ref<ActuatorsParametersConfig>({
 })
 const hasUnsavedVideoChanges = ref<boolean>(false)
 const processingWhiteBalance = ref(false)
+
+watch(
+  () => props.selectedCameraUuid,
+  () => {
+    hasUserEditedVideo.value = false
+    hasUnsavedVideoChanges.value = false
+    intendedFocusAndZoomParams.value.camera_id = null
+    inFlightParamWrites.value = 0
+    desiredActuatorsState.value = { focus: null, zoom: null, tilt: null }
+    actuatorsSetQueued.value = { focus: null, zoom: null, tilt: null }
+  },
+)
 
 const resolutionOptions = ref([
   { name: '3840x2160', value: { width: 3840, height: 2160 } },
@@ -988,9 +984,12 @@ const formatTiltValue = (angle: number): string => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
-  if (!props.selectedCameraUuid || isLoading.value) {
+  if (!props.selectedCameraUuid || props.disabled) {
     return
   }
+
+  baseParams.value = { ...baseParams.value, [param]: value }
+  inFlightParamWrites.value++
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
@@ -1000,256 +999,93 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
     },
   }
 
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then((response) => {
-      baseParams.value = response.data as BaseParameterSetting
+  backendClient
+    .request('POST', '/camera/control', payload)
+    .then((data) => {
+      baseParams.value = data as BaseParameterSetting
     })
     .catch((error) => {
       const message = `Error sending ${String(param)} control with value '${value}'`
       console.log(message, error.message)
-      showWarningToast(message, error)
-    })
-}
-
-const getActuatorsConfig = () => {
-  if (!props.selectedCameraUuid || isLoading.value) {
-    return
-  }
-
-  const payload = {
-    camera_uuid: props.selectedCameraUuid,
-    action: "getActuatorsConfig",
-  }
-
-  axios
-    .post(`${props.backendApi}/autopilot/control`, payload)
-    .then((response) => {
-      const newParams = (response.data as ActuatorsConfig)?.parameters
-      if (newParams) {
-        currentFocusAndZoomParams.value = { ...newParams }
-
-        // Only update intended if user hasn't made changes
-        if (intendedFocusAndZoomParams.value.camera_id === null) {
-          intendedFocusAndZoomParams.value = { ...newParams }
-        }
-        currentFocusAndZoomParams.value = { ...newParams }
-      } else {
-        console.warn("Received null 'parameters' from response:", response.data)
-      }
-      console.log('# - getActuatorsConfig response:', response.data)
-
-    })
-    .catch((error) => {
-      const message = 'Error getting actuator configuration'
-      console.log(message, error.message)
-      showWarningToast(message, error)
-    })
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const checkIfConfigured = (error: any) => {
-  const details = formatRequestError(error)
-
-    if (typeof details === 'string' && details.toLowerCase().includes('actuators not configured')) {
-      isConfigured.value = false
-    } else {
-      isConfigured.value = true
-    }
-
-    return isConfigured.value
-}
-
-const getActuatorsDefaultConfig = () => {
-  // Only fetch once: if we don't have defaults yet
-  if (!props.selectedCameraUuid || isLoading.value || defaultFocusAndZoomParams.value.camera_id !== null) {
-    return
-  }
-
-  const payload = {
-    camera_uuid: props.selectedCameraUuid,
-    action: "getActuatorsDefaultConfig",
-  }
-
-  axios
-    .post(`${props.backendApi}/autopilot/control`, payload)
-    .then((response) => {
-      const newParams = (response.data as ActuatorsConfig)?.parameters
-      if (newParams) {
-        defaultFocusAndZoomParams.value = { ...newParams }
-        // Initialize intended only if not already set
-        if (intendedFocusAndZoomParams.value.camera_id === null) {
-          intendedFocusAndZoomParams.value = { ...newParams }
-        }
-      }
-      console.log('# - getActuatorsDefaultConfig response:', response.data)
-
-    })
-    .catch((error) => {
-      const message = 'Error getting actuators default configuration'
-      console.log(message, error.message)
-      showWarningToast(message, error)
-    })
-}
-
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: any) => {
-  if (!props.selectedCameraUuid || isLoading.value) {
-    return
-  }
-
-   const payload: ActuatorsControl = {
-    camera_uuid: props.selectedCameraUuid,
-    action: "setActuatorsConfig",
-    json: { "parameters": { [param]: value } as ActuatorsParametersConfig} as ActuatorsConfig
-  }
-
-  axios
-    .post(`${props.backendApi}/autopilot/control`, payload)
-    .then((response) => {
-      const newParams = (response.data as ActuatorsConfig)?.parameters
-      if (newParams) {
-        currentFocusAndZoomParams.value = { ...newParams }
-      } else {
-        console.warn("Received null 'parameters' from response:", response.data)
-      }
-    })
-    .catch((error) => {
-      const message = `Error sending ${String(param)} control with value '${value}'`
-      console.log(message, error.message)
-      showErrorDialog(message, error)
-    })
-}
-
-const getActuatorsState = () => {
-  if (!props.selectedCameraUuid || isLoading.value) {
-    return
-  }
-
-  const payload = {
-    camera_uuid: props.selectedCameraUuid,
-    action: "getActuatorsState",
-  }
-
-  axios
-    .post(`${props.backendApi}/autopilot/control`, payload)
-    .then((response) => {
-      const state = response.data as ActuatorsState
-
-      ;(['focus', 'zoom', 'tilt'] as const).forEach((key) => {
-        const desired = desiredActuatorsState.value[key]
-        const received = state[key]
-
-        // If we have a desired value in flight, only accept feedback once it converges.
-        if (desired !== null) {
-          if (received !== null && received !== undefined && approxEqual(received, desired)) {
-            desiredActuatorsState.value[key] = null
-            actuatorsState.value[key] = received
-          }
-          return
-        }
-
-        if (received !== null && received !== undefined) {
-          actuatorsState.value[key] = received
-        }
-      })
-      console.log(state)
-      isConfigured.value = true
-    })
-    .catch((error) => {
-      const message = 'Error getting actuators state'
-      console.log(message, error.message)
-      showWarningToast(message, error)
-    })
-}
-
-const sendQueuedActuatorState = (param: ActuatorKey): void => {
-  if (!props.selectedCameraUuid || isLoading.value) return
-  if (actuatorsSetInFlight.value[param]) return
-
-  const value = actuatorsSetQueued.value[param]
-  if (value === null) return
-
-  actuatorsSetQueued.value[param] = null
-  actuatorsSetInFlight.value[param] = true
-
-  const payload: ActuatorsControl = {
-    camera_uuid: props.selectedCameraUuid,
-    action: "setActuatorsState",
-    json: { [param]: value } as ActuatorsState,
-  }
-
-  axios
-    .post(`${props.backendApi}/autopilot/control`, payload)
-    .catch((error) => {
-      const message = `Error updating ${param}`
-      console.log(message, error.message)
-      showWarningToast(message, error)
     })
     .finally(() => {
-      actuatorsSetInFlight.value[param] = false
-
-      // If a newer value was queued while this request was in-flight, send it now.
-      if (actuatorsSetQueued.value[param] !== null) {
-        sendQueuedActuatorState(param)
-      }
+      inFlightParamWrites.value = Math.max(0, inFlightParamWrites.value - 1)
     })
 }
 
-const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
-  if (!props.selectedCameraUuid || isLoading.value) return
-
-  const key = param as ActuatorKey
-
-  // Optimistic UI update: do not wait for feedback to reflect user input.
-  actuatorsState.value[key] = value
-  desiredActuatorsState.value[key] = value
-
-  // Coalesce requests per actuator to prevent backlog.
-  const existingQueued = actuatorsSetQueued.value[key]
-  if (existingQueued === null || !approxEqual(existingQueued, value)) {
-    actuatorsSetQueued.value[key] = value
+const applyActuatorsConfig = (data: ActuatorsConfig) => {
+  const newParams = data?.parameters
+  if (newParams) {
+    if (intendedFocusAndZoomParams.value.camera_id === null) {
+      intendedFocusAndZoomParams.value = { ...newParams }
+    }
+    currentFocusAndZoomParams.value = { ...newParams }
+  } else {
+    console.warn("Received null 'parameters' from response:", data)
   }
-  sendQueuedActuatorState(key)
+  isConfigured.value = true
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const showErrorDialog = (message: string, error: any) => {
-  if (error.response?.status === 404 || !checkIfConfigured(error)) return
-
-  errorDialogMessage.value = `${message}: ${formatRequestError(error)}`
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const showWarningToast = (message: string, error: any) => {
-  if (isCameraRebooting.value) return
-  if (error.response?.status === 404 || !checkIfConfigured(error)) return
-
-  warningToastMessage.value = `${message}: ${formatRequestError(error)}`
-}
-
-const REBOOT_GRACE_MS = 90_000
-let rebootGraceTimeout: ReturnType<typeof setTimeout> | undefined
-
-const clearRebootGraceTimeout = () => {
-  if (rebootGraceTimeout) {
-    clearTimeout(rebootGraceTimeout)
-    rebootGraceTimeout = undefined
+const applyActuatorsDefaultConfig = (data: ActuatorsConfig) => {
+  const newParams = data?.parameters
+  if (newParams) {
+    defaultFocusAndZoomParams.value = { ...newParams }
+    if (intendedFocusAndZoomParams.value.camera_id === null) {
+      intendedFocusAndZoomParams.value = { ...newParams }
+    }
   }
 }
 
-const endCameraReboot = () => {
-  isCameraRebooting.value = false
-  clearRebootGraceTimeout()
+const applyActuatorsState = (state: ActuatorsState) => {
+  ;(['focus', 'zoom', 'tilt'] as const).forEach((key) => {
+    const desired = desiredActuatorsState.value[key]
+    const received = state[key]
+
+    if (desired !== null) {
+      if (received !== null && received !== undefined && approxEqual(received, desired)) {
+        desiredActuatorsState.value[key] = null
+        actuatorsState.value[key] = received
+      }
+      return
+    }
+
+    if (received !== null && received !== undefined) {
+      actuatorsState.value[key] = received
+    }
+  })
+  isConfigured.value = true
 }
 
-const beginCameraReboot = () => {
-  isCameraRebooting.value = true
-  warningToastMessage.value = null
-  clearRebootGraceTimeout()
-  rebootGraceTimeout = setTimeout(endCameraReboot, REBOOT_GRACE_MS)
+const applyCameraStateEvent = (body: unknown) => {
+  if (!props.selectedCameraUuid) return
+  if (typeof body !== 'object' || body === null) return
+
+  const data = body as CameraStateEvent
+  if (data.camera_uuid !== props.selectedCameraUuid) return
+
+  if (data.actuators_config) {
+    applyActuatorsConfig(data.actuators_config as ActuatorsConfig)
+  }
+  if (data.actuators_default_config) {
+    applyActuatorsDefaultConfig(data.actuators_default_config as ActuatorsConfig)
+  }
+  if (typeof data.actuators_configured === 'boolean') {
+    isConfigured.value = data.actuators_configured
+  }
+  if (data.actuators_state) {
+    applyActuatorsState(data.actuators_state as ActuatorsState)
+  }
+  if (data.video_parameters) {
+    update_video_parameter_values(data.video_parameters as VideoParameterSettings)
+  }
+  if (data.base_parameters) {
+    if (inFlightParamWrites.value === 0) {
+      baseParams.value = data.base_parameters as BaseParameterSetting
+    }
+  }
 }
+
+useCameraState(toRef(props, 'selectedCameraUuid'), applyCameraStateEvent)
 
 const isHardwareSetupComplete = computed<boolean>(() => {
   return (
@@ -1279,8 +1115,97 @@ const availableServoChannelOptions = computed(() => {
 })
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: any) => {
+  if (!props.selectedCameraUuid || props.disabled) {
+    return
+  }
+
+  const payload: ActuatorsControl = {
+    camera_uuid: props.selectedCameraUuid,
+    action: "setActuatorsConfig",
+    json: { "parameters": { [param]: value } as ActuatorsParametersConfig} as ActuatorsConfig
+  }
+
+  backendClient
+    .request('POST', '/autopilot/control', payload)
+    .then((data) => {
+      const newParams = (data as ActuatorsConfig)?.parameters
+      if (newParams) {
+        currentFocusAndZoomParams.value = { ...newParams }
+      } else {
+        console.warn("Received null 'parameters' from response:", data)
+      }
+    })
+    .catch((error) => {
+      const message = `Error sending ${String(param)} control with value '${value}'`
+      console.log(message, error.message)
+    })
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const sendQueuedActuatorState = (param: ActuatorKey): void => {
+  if (!props.selectedCameraUuid || props.disabled) return
+  if (actuatorsSetInFlight.value[param]) return
+
+  const value = actuatorsSetQueued.value[param]
+  if (value === null) return
+
+  const cameraUuid = props.selectedCameraUuid
+  actuatorsSetQueued.value[param] = null
+  actuatorsSetInFlight.value[param] = true
+
+  const payload: ActuatorsControl = {
+    camera_uuid: cameraUuid,
+    action: "setActuatorsState",
+    json: { [param]: value } as ActuatorsState,
+  }
+
+  backendClient
+    .request('POST', '/autopilot/control', payload)
+    .catch((error) => {
+      const message = `Error updating ${param}`
+      console.log(message, error.message)
+    })
+    .finally(() => {
+      actuatorsSetInFlight.value[param] = false
+
+      if (props.selectedCameraUuid !== cameraUuid) {
+        actuatorsSetQueued.value[param] = null
+        desiredActuatorsState.value[param] = null
+        return
+      }
+
+      // If a newer value was queued while this request was in-flight, send it now.
+      if (actuatorsSetQueued.value[param] !== null) {
+        sendQueuedActuatorState(param)
+      } else {
+        // Clear the desired latch when nothing is queued so whole-percent SERVO
+        // feedback cannot leave a 0.1-step focus value stuck forever.
+        desiredActuatorsState.value[param] = null
+      }
+    })
+}
+
+const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
+  if (!props.selectedCameraUuid || props.disabled) return
+
+  const key = param as ActuatorKey
+
+  // Optimistic UI update: do not wait for feedback to reflect user input.
+  actuatorsState.value[key] = value
+  desiredActuatorsState.value[key] = value
+
+  // Coalesce requests per actuator to prevent backlog.
+  const existingQueued = actuatorsSetQueued.value[key]
+  if (existingQueued === null || !approxEqual(existingQueued, value)) {
+    actuatorsSetQueued.value[key] = value
+  }
+  sendQueuedActuatorState(key)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const handleChannelChanges = (param: keyof ActuatorsParametersConfig, value: any): void => {
-  if (!props.selectedCameraUuid || isLoading.value) return
+  if (!props.selectedCameraUuid || props.disabled) return
 
   // Optional: prevent duplicates (though UI should disable them)
   const isAlreadySelected = Object.entries(intendedFocusAndZoomParams.value).some(
@@ -1295,44 +1220,8 @@ const handleChannelChanges = (param: keyof ActuatorsParametersConfig, value: any
   intendedFocusAndZoomParams.value[param] = value
 }
 
-
-const getVideoParameters = (update: boolean) => {
-  if (!props.selectedCameraUuid || isLoading.value) {
-    return
-  }
-
-  const video_parameter_settings = {
-    channel: selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream,
-  }
-
-  const payload = {
-    camera_uuid: props.selectedCameraUuid,
-    action: 'getVencConf',
-    json: video_parameter_settings,
-  }
-
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then((response) => {
-      const settings: VideoParameterSettings = response.data as VideoParameterSettings
-
-      if (update) {
-        update_video_parameter_values(settings)
-      }
-      if (isCameraRebooting.value) {
-        endCameraReboot()
-      }
-    })
-    .catch((error) => {
-      const message = 'Error getting video parameters'
-      console.log(message, error.message)
-      showWarningToast(message, error)
-    })
-    
-}
-
 const getBaseParameters = () => {
-  if (!props.selectedCameraUuid || isLoading.value) {
+  if (!props.selectedCameraUuid || props.disabled) {
     return
   }
 
@@ -1341,18 +1230,20 @@ const getBaseParameters = () => {
     action: "getImageAdjustment",
   }
 
-  axios.post(`${props.backendApi}/camera/control`, payload)
-    .then(response => {
-      baseParams.value = response.data as BaseParameterSetting
-      console.log(response.data)
+  backendClient.request('POST', '/camera/control', payload)
+    .then(data => {
+      baseParams.value = data as BaseParameterSetting
+      console.log(data)
     })
     .catch(error => {
       console.error(`Error sending getImageAdjustment request:`, error.message)
     })
 }
 
-const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void => {
-  if (!props.selectedCameraUuid || isLoading.value) return
+const updateVideoParameters = async (
+  partial: Partial<VideoParameterSettings>
+): Promise<void> => {
+  if (!props.selectedCameraUuid || props.disabled) return
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
@@ -1360,22 +1251,20 @@ const updateVideoParameters = (partial: Partial<VideoParameterSettings>): void =
     json: partial as VideoParameterSettings,
   }
 
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then((response) => {
-      const settings = response.data as VideoParameterSettings
-      update_video_parameter_values(settings)
-    })
-    .catch((error) => {
-      const message = `Error sending partial video params '${JSON.stringify(partial)}'`
-      console.log(message, error.message)
-      showWarningToast(message, error)
-  })
+  try {
+    const data = await backendClient.request('POST', '/camera/control', payload)
+    const settings = data as VideoParameterSettings
+    update_video_parameter_values(settings)
+  } catch (error) {
+    const message = `Error sending partial video params '${JSON.stringify(partial)}'`
+    console.log(message, error instanceof Error ? error.message : error)
+    throw error
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const handleVideoChanges = (what: 'resolution' | 'bitrate', value: any): void => {
-  if (!props.selectedCameraUuid || isLoading.value) return
+  if (!props.selectedCameraUuid || props.disabled) return
 
   hasUserEditedVideo.value = true
 
@@ -1446,7 +1335,7 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
 }
 
 const doWhiteBalance = async () => {
-  if (!props.selectedCameraUuid || isLoading.value) {
+  if (!props.selectedCameraUuid || props.disabled) {
     return
   }
 
@@ -1462,7 +1351,7 @@ const doWhiteBalance = async () => {
     } as AdvancedParameterSetting,
   }
 
-  axios.post(`${props.backendApi}/camera/control`, payload)
+  backendClient.request('POST', '/camera/control', payload)
     .catch(error => {
       console.error("Error sending onceAWB control:", error.message)
     }).finally(() => {
@@ -1472,34 +1361,27 @@ const doWhiteBalance = async () => {
 }
 
 const doRestart = () => {
-  if (!props.selectedCameraUuid || isLoading.value) {
+  if (!props.selectedCameraUuid || props.disabled) {
     return
   }
-
-  beginCameraReboot()
-  loadingMessage.value = 'Rebooting camera…'
-  const startedAt = startMinLoading(isLoading)
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
     action: "restart",
   }
 
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then((response) => {
-      console.log("Got an answer from the restarting request", response.data)
-      endMinLoading(isLoading, startedAt)
+  backendClient
+    .request('POST', '/camera/control', payload)
+    .then((data) => {
+      console.log("Got an answer from the restarting request", data)
     })
     .catch((error) => {
-      endCameraReboot()
-      showErrorDialog('Failed to reboot camera', error)
-      endMinLoading(isLoading, startedAt, true)
+      console.error('Failed to reboot camera', error)
     })
 }
 
 const saveVideoDataAndRestart = async (): Promise<void> => {
-  if (!props.selectedCameraUuid || isLoading.value) return
+  if (!props.selectedCameraUuid || props.disabled) return
 
   const curr = selectedVideoParameters.value
   const newWidth = selectedVideoResolution.value?.width ?? null
@@ -1512,9 +1394,13 @@ const saveVideoDataAndRestart = async (): Promise<void> => {
   if (newBitrate !== null && newBitrate !== curr.bitrate) videoPartial.bitrate = newBitrate
 
   if (Object.keys(videoPartial).length > 0) {
-    await updateVideoParameters(videoPartial)
-    doRestart()
-    Object.assign(selectedVideoParameters.value, videoPartial)
+    try {
+      await updateVideoParameters(videoPartial)
+      doRestart()
+      Object.assign(selectedVideoParameters.value, videoPartial)
+    } catch {
+      return
+    }
   }
 
   hasUserEditedVideo.value = false
@@ -1522,60 +1408,47 @@ const saveVideoDataAndRestart = async (): Promise<void> => {
 }
 
 const updateLuaScript = (): void => {
-  if (!props.selectedCameraUuid || isLoading.value) return
+  if (!props.selectedCameraUuid || props.disabled) return
 
-  loadingMessage.value = 'Updating Lua script…'
-  const startedAt = startMinLoading(isLoading)
-
-  axios
-    .post(`${props.backendApi}/autopilot/control`, {
+  backendClient
+    .request('POST', '/autopilot/control', {
       camera_uuid: props.selectedCameraUuid,
       action: 'exportLuaScript',
     })
-    .then((response) => {
-      console.log('Lua script download initiated:', response.data)
-      endMinLoading(isLoading, startedAt)
+    .then((data) => {
+      console.log('Lua script download initiated:', data)
     })
     .catch((error) => {
-      showErrorDialog('Failed to update Lua script', error)
-      endMinLoading(isLoading, startedAt, true)
+      console.error('Failed to update Lua script', error)
     })
 }
 
 const applyRecommendedCameraSettings = (): void => {
-  if (!props.selectedCameraUuid || isLoading.value) return
-
-  loadingMessage.value = 'Applying recommended camera settings…'
-  const startedAt = startMinLoading(isLoading)
+  if (!props.selectedCameraUuid || props.disabled) return
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
     action: 'setRecommendedCameraSettings',
   }
 
-  axios
-    .post(`${props.backendApi}/camera/control`, payload)
-    .then((response) => {
-      console.log('Recommended camera settings applied:', response.data)
-      getCameraStates()
-      endMinLoading(isLoading, startedAt)
+  backendClient
+    .request('POST', '/camera/control', payload)
+    .then((data) => {
+      console.log('Recommended camera settings applied:', data)
     })
     .catch((error) => {
-      showErrorDialog('Failed to apply recommended camera settings', error)
-      endMinLoading(isLoading, startedAt, true)
+      console.error('Failed to apply recommended camera settings', error)
     })
 }
 
 const saveHardwareSetup = async (): Promise<void> => {
-  if (!props.selectedCameraUuid || isLoading.value || !defaultFocusAndZoomParams.value.camera_id || !intendedFocusAndZoomParams.value) return
+  if (!props.selectedCameraUuid || props.disabled || !defaultFocusAndZoomParams.value.camera_id || !intendedFocusAndZoomParams.value) return
 
   if (!isHardwareSetupComplete.value) {
     console.error('All channel selections are required')
     return
   }
 
-  isLoading.value = true
-  
   let payloadParams: ActuatorsParametersConfig
   payloadParams = { ...defaultFocusAndZoomParams.value }
   if (showAdvancedHardware.value) {
@@ -1590,12 +1463,12 @@ const saveHardwareSetup = async (): Promise<void> => {
 
   console.log('Saving hardware setup:', payload)
 
-  axios
-    .post(`${props.backendApi}/autopilot/control`, payload)
-    .then((response) => {
-      console.log("Got an answer from the setActuatorsConfig request", response.data)
+  backendClient
+    .request('POST', '/autopilot/control', payload)
+    .then((data) => {
+      console.log("Got an answer from the setActuatorsConfig request", data)
 
-      const newParams = (response.data as ActuatorsConfig)?.parameters
+      const newParams = (data as ActuatorsConfig)?.parameters
       if (newParams) {
         currentFocusAndZoomParams.value = { ...newParams }
         intendedFocusAndZoomParams.value = { ...newParams }
@@ -1604,29 +1477,23 @@ const saveHardwareSetup = async (): Promise<void> => {
     .catch((error) => {
       const message = 'Error saving hardware setup'
       console.log(message, error.message)
-      showErrorDialog(message, error)
-    })
-    .finally(() => {
-      isLoading.value = false
     })
 }
 
 const resetToRecommendedDefaults = async (): Promise<void> => {
-  if (!props.selectedCameraUuid || isLoading.value) return
-  
-  isLoading.value = true
+  if (!props.selectedCameraUuid || props.disabled) return
 
   const payload = {
     camera_uuid: props.selectedCameraUuid,
     action: 'resetActuatorsConfig',
   }
 
-  axios
-    .post(`${props.backendApi}/autopilot/control`, payload)
-    .then((response) => {
-      console.log("Got an answer from the setActuatorsConfig request", response.data)
+  backendClient
+    .request('POST', '/autopilot/control', payload)
+    .then((data) => {
+      console.log("Got an answer from the setActuatorsConfig request", data)
 
-      const newParams = (response.data as ActuatorsConfig)?.parameters
+      const newParams = (data as ActuatorsConfig)?.parameters
       if (newParams) {
         currentFocusAndZoomParams.value = { ...newParams }
         intendedFocusAndZoomParams.value = { ...newParams }
@@ -1635,31 +1502,10 @@ const resetToRecommendedDefaults = async (): Promise<void> => {
     .catch((error) => {
       const message = 'Failed to apply default hardware setup'
       console.error(message, error)
-      showErrorDialog(message, error)
-    })
-    .finally(() => {
-      isLoading.value = false
     })
 }
 
-const getCameraStates = () => {
-  getActuatorsDefaultConfig()
-  getActuatorsConfig()
-  getActuatorsState()
-  getVideoParameters(true)
-  getBaseParameters()
-}
-
-defineExpose({ getCameraStates, updateLuaScript, applyRecommendedCameraSettings, rebootCamera: doRestart })
-
-watch(
-  () => props.selectedCameraUuid,
-  async (newValue) => {
-    if (newValue) {
-      getCameraStates()
-    }
-  }
-)
+defineExpose({ updateLuaScript, applyRecommendedCameraSettings, rebootCamera: doRestart })
 
 watch(
   () => selectedVideoResolution.value,
@@ -1677,15 +1523,5 @@ watch(
     }
   }
 )
-
-watch(warningToastMessage, (newVal) => {
-  if (newVal) {
-    setTimeout(() => {
-      warningToastMessage.value = null
-    }, 5000)
-  }
-})
-
-new OneMoreTime({ delay: 1000, errorDelay: 5000, autostart: true, disposeWith: this }, getCameraStates);
 
 </script>
