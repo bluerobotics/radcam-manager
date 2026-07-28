@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use indexmap::IndexMap;
 use mavlink::{
     MavHeader,
@@ -443,9 +443,11 @@ impl MavlinkComponent {
             let recv_parameter = match Self::wait_for_param(inner.clone(), &parameter.name).await {
                 Ok(parameter) => parameter,
                 Err(error) => {
-                    warn!("Failed getting parameter: {error:?}");
-
-                    continue;
+                    // wait_for_param already exhausted its retries; do not loop
+                    // forever here (that held MANAGER.write() for tens of seconds).
+                    let name = &parameter.name;
+                    return Err(error)
+                        .context(format!("Failed confirming parameter {name} after set"));
                 }
             };
 
