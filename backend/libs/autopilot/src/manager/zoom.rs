@@ -9,9 +9,8 @@ use crate::{
 };
 
 impl Manager {
-    #[instrument(level = "debug", skip(self, parameters))]
+    #[instrument(level = "debug", skip(parameters))]
     pub async fn update_zoom_parameters(
-        &mut self,
         camera_uuid: &Uuid,
         parameters: &api::ActuatorsParametersConfig,
         overwrite: bool,
@@ -19,21 +18,31 @@ impl Manager {
         let mut autopilot_reboot_required = overwrite;
 
         if let Some(channel) = &parameters.zoom_channel {
-            let current_parameters = &mut self
-                .settings
-                .actuators
-                .entry(*camera_uuid)
-                .or_default()
-                .parameters;
-            let encoding = crate::mavlink::component()?.encoding().await;
+            // Snapshot under a short write with no await inside, so the MAVLink I/O
+            // below never runs while MANAGER is locked.
+            let old_channel = {
+                let mut manager = crate::manager::MANAGER
+                    .get()
+                    .context("Not available")?
+                    .write()
+                    .await;
+                manager
+                    .settings
+                    .actuators
+                    .entry(*camera_uuid)
+                    .or_default()
+                    .parameters
+                    .zoom_channel
+            };
+
+            let mavlink = crate::mavlink::component()?;
+            let encoding = mavlink.encoding().await;
 
             // Disables the old zoom_channel:
-            if &current_parameters.zoom_channel != channel {
-                let param_name = format!("SERVO{}_FUNCTION", current_parameters.zoom_channel as u8);
+            if &old_channel != channel {
+                let param_name = format!("SERVO{}_FUNCTION", old_channel as u8);
 
-                let mut param = crate::mavlink::component()?
-                    .get_param(&param_name, false)
-                    .await?;
+                let mut param = mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
                 param
                     .value
@@ -41,15 +50,13 @@ impl Manager {
                 let new_value = param.value;
 
                 if old_value != new_value {
-                    match crate::mavlink::component()?.set_param(param).await {
+                    match mavlink.set_param(param).await {
                         Ok(_) => {
-                            if old_value != new_value {
-                                info!(
-                                    "zoom_channel (SERVO{}) changed from {:?} to {new_value:?}",
-                                    current_parameters.zoom_channel as u8, old_value
-                                );
-                                autopilot_reboot_required = true;
-                            }
+                            info!(
+                                "zoom_channel (SERVO{}) changed from {:?} to {new_value:?}",
+                                old_channel as u8, old_value
+                            );
+                            autopilot_reboot_required = true;
                         }
                         Err(error) => {
                             return Err(error).context(
@@ -64,9 +71,7 @@ impl Manager {
             {
                 let param_name = format!("SERVO{}_FUNCTION", *channel as u8);
 
-                let mut param = crate::mavlink::component()?
-                    .get_param(&param_name, false)
-                    .await?;
+                let mut param = mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
                 param.value.set_value(
                     ParamType::INT16(ChannelFunction::CameraZoom as i16),
@@ -75,16 +80,22 @@ impl Manager {
                 let new_value = param.value;
 
                 if overwrite || old_value != new_value {
-                    match crate::mavlink::component()?.set_param(param).await {
+                    match mavlink.set_param(param).await {
                         Ok(_) => {
-                            if overwrite || old_value != new_value {
-                                info!(
-                                    "zoom_channel (SERVO{}) changed from {:?} to {new_value:?}",
-                                    *channel as u8, old_value
-                                );
-                            }
+                            info!(
+                                "zoom_channel (SERVO{}) changed from {:?} to {new_value:?}",
+                                *channel as u8, old_value
+                            );
 
-                            current_parameters.zoom_channel = *channel;
+                            let mut manager = crate::manager::MANAGER
+                                .get()
+                                .context("Not available")?
+                                .write()
+                                .await;
+                            if let Some(actuators) = manager.settings.actuators.get_mut(camera_uuid)
+                            {
+                                actuators.parameters.zoom_channel = *channel;
+                            }
                             autopilot_reboot_required = true;
                         }
                         Err(error) => {
@@ -97,25 +108,21 @@ impl Manager {
             }
         }
 
-        self.update_zoom_channel_parameters(camera_uuid, parameters, autopilot_reboot_required)
+        Self::update_zoom_channel_parameters(camera_uuid, parameters, autopilot_reboot_required)
             .await?;
 
         Ok(autopilot_reboot_required)
     }
 
-    #[instrument(level = "debug", skip(self, parameters))]
+    #[instrument(level = "debug", skip(parameters))]
     pub async fn update_zoom_channel_parameters(
-        &mut self,
         camera_uuid: &Uuid,
         parameters: &api::ActuatorsParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
-        self.update_zoom_channel_min(camera_uuid, parameters, force_apply)
-            .await?;
-        self.update_zoom_channel_trim(camera_uuid, parameters, force_apply)
-            .await?;
-        self.update_zoom_channel_max(camera_uuid, parameters, force_apply)
-            .await?;
+        Self::update_zoom_channel_min(camera_uuid, parameters, force_apply).await?;
+        Self::update_zoom_channel_trim(camera_uuid, parameters, force_apply).await?;
+        Self::update_zoom_channel_max(camera_uuid, parameters, force_apply).await?;
 
         Ok(())
     }
