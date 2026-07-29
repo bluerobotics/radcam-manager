@@ -92,7 +92,15 @@ impl MavlinkComponent {
 
             let encoding_c_cast = data
                 .capabilities
-                .contains(MavProtocolCapability::MAV_PROTOCOL_CAPABILITY_PARAM_ENCODE_C_CAST);
+                .contains(MavProtocolCapability::MAV_PROTOCOL_CAPABILITY_PARAM_ENCODE_C_CAST)
+                || {
+                    // Deprecated alias of C_CAST (renamed 2022-03); still set by some stacks.
+                    #[allow(deprecated)]
+                    {
+                        data.capabilities
+                            .contains(MavProtocolCapability::MAV_PROTOCOL_CAPABILITY_PARAM_FLOAT)
+                    }
+                };
             let encoding_bytewise = data
                 .capabilities
                 .contains(MavProtocolCapability::MAV_PROTOCOL_CAPABILITY_PARAM_ENCODE_BYTEWISE);
@@ -111,10 +119,19 @@ impl MavlinkComponent {
                     break ParamEncodingType::ByteWise;
                 }
                 (false, false) => {
+                    // Spec: either bit *should* be set if params are supported, but the
+                    // protocol may still be used with prior knowledge of the component
+                    // (https://mavlink.io/en/services/parameter.html#protocol-discovery).
+                    // ArduPilot uses C-cast encoding and does *not* set
+                    // MAV_PROTOCOL_CAPABILITY_PARAM_ENCODE_C_CAST
+                    // (https://mavlink.io/en/services/parameter.html#ardupilot).
+                    // Storing Unsupported here made Parameter::try_new fail for every
+                    // PARAM_VALUE, so update_all_params never finished and MANAGER
+                    // never registered — settings.json stayed out of sync with runtime.
                     error!(
-                        "Unexpected value: None of the C_CAST and BYTEWISE encodings are set by the Autopilot. Assuming C_CAST, then."
+                        "Neither PARAM_ENCODE_C_CAST nor PARAM_ENCODE_BYTEWISE set; assuming C_CAST (ArduPilot)"
                     );
-                    break ParamEncodingType::Unsupported;
+                    break ParamEncodingType::CCast;
                 }
             }
         };
