@@ -740,7 +740,6 @@ const currentFocusAndZoomParams = ref<ActuatorsParametersConfig>({
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const selectedVideoBitrate = ref<number | null>(null)
 const hasUserEditedVideo = ref<boolean>(false)
-const inFlightParamWrites = ref(0)
 const selectedVideoParameters = ref<VideoParameterSettings>({})
 const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const actuatorsState = ref<ActuatorsState>({
@@ -817,7 +816,8 @@ const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
 /** Bumped on camera switch so in-flight actuator POSTs ignore stale `.finally` cleanup. */
 const actuatorsRequestGeneration = ref(0)
 const pendingBase = createPendingFields<keyof BaseParameterSetting, unknown>()
-const correlationToggleInFlight = ref(false)
+const correlationLatch = ref<{ token: number; value: boolean | null } | null>(null)
+let nextCorrelationToken = 1
 const isConfigured = ref<boolean>(false)
 const showWelcomeDialog = ref<boolean>(true)
 const showAdvancedHardware = ref(false)
@@ -882,9 +882,8 @@ watch(
     hasUserEditedVideo.value = false
     hasUnsavedVideoChanges.value = false
     actuatorsRequestGeneration.value += 1
-    inFlightParamWrites.value = 0
     pendingBase.clear()
-    correlationToggleInFlight.value = false
+    correlationLatch.value = null
     isConfigured.value = false
     showAdvancedHardware.value = false
     processingWhiteBalance.value = false
@@ -1082,7 +1081,6 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   const previous = baseParams.value[param]
   const { token, epoch } = pendingBase.begin(param, previous, value)
   baseParams.value = { ...baseParams.value, [param]: value }
-  inFlightParamWrites.value++
 
   const payload = {
     camera_uuid: cameraUuid,
@@ -1103,10 +1101,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
       }
       const incoming = data as BaseParameterSetting
       pendingBase.settleSuccess(param, token, epoch, () => {
-        baseParams.value = pendingBase.mergeRemote(incoming, {
-          ...incoming,
-          [param]: value,
-        } as BaseParameterSetting)
+        baseParams.value = pendingBase.mergeRemote(incoming)
       })
     })
     .catch((error) => {
@@ -1131,10 +1126,16 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
         },
       )
     })
-    .finally(() => {
-      if (generation !== actuatorsRequestGeneration.value) return
-      inFlightParamWrites.value = Math.max(0, inFlightParamWrites.value - 1)
-    })
+}
+
+const applyConfigParameters = (newParams: ActuatorsParametersConfig): void => {
+  const latch = correlationLatch.value
+  currentFocusAndZoomParams.value = latch
+    ? {
+        ...newParams,
+        enable_focus_and_zoom_correlation: latch.value,
+      }
+    : { ...newParams }
 }
 
 const applyActuatorsConfig = (data: ActuatorsConfig) => {
@@ -1143,9 +1144,7 @@ const applyActuatorsConfig = (data: ActuatorsConfig) => {
     if (intendedFocusAndZoomParams.value.camera_id === null) {
       intendedFocusAndZoomParams.value = { ...newParams }
     }
-    if (!correlationToggleInFlight.value) {
-      currentFocusAndZoomParams.value = { ...newParams }
-    }
+    applyConfigParameters(newParams)
   } else {
     console.warn("Received null 'parameters' from response:", data)
   }
@@ -1205,7 +1204,6 @@ const applyCameraStateEvent = (body: unknown) => {
   if (data.base_parameters) {
     baseParams.value = pendingBase.mergeRemote(
       data.base_parameters as BaseParameterSetting,
-      baseParams.value,
     )
   }
 }
@@ -1251,10 +1249,12 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
     param === 'enable_focus_and_zoom_correlation'
       ? currentFocusAndZoomParams.value.enable_focus_and_zoom_correlation
       : null
+  let correlationToken: number | null = null
 
   if (param === 'enable_focus_and_zoom_correlation') {
-    if (correlationToggleInFlight.value) return
-    correlationToggleInFlight.value = true
+    if (correlationLatch.value !== null) return
+    correlationToken = nextCorrelationToken++
+    correlationLatch.value = { token: correlationToken, value }
     currentFocusAndZoomParams.value = {
       ...currentFocusAndZoomParams.value,
       enable_focus_and_zoom_correlation: value,
@@ -1278,7 +1278,7 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
       }
       const newParams = (data as ActuatorsConfig)?.parameters
       if (newParams) {
-        currentFocusAndZoomParams.value = { ...newParams }
+        applyConfigParameters(newParams)
       } else {
         console.warn("Received null 'parameters' from response:", data)
       }
@@ -1287,8 +1287,11 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
       if (
         param === 'enable_focus_and_zoom_correlation' &&
         props.selectedCameraUuid === cameraUuid &&
-        generation === actuatorsRequestGeneration.value
+        generation === actuatorsRequestGeneration.value &&
+        correlationToken !== null &&
+        correlationLatch.value?.token === correlationToken
       ) {
+        correlationLatch.value = null
         currentFocusAndZoomParams.value = {
           ...currentFocusAndZoomParams.value,
           enable_focus_and_zoom_correlation: previousCorrelation,
@@ -1299,10 +1302,11 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
     })
     .finally(() => {
       if (
-        param === 'enable_focus_and_zoom_correlation' &&
-        generation === actuatorsRequestGeneration.value
+        correlationToken !== null &&
+        generation === actuatorsRequestGeneration.value &&
+        correlationLatch.value?.token === correlationToken
       ) {
-        correlationToggleInFlight.value = false
+        correlationLatch.value = null
       }
     })
 }
@@ -1336,10 +1340,11 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
       if (generation !== actuatorsRequestGeneration.value) return
       if (!ownsActuatorFlight(actuatorsSetInFlight.value[param], token)) return
 
+      const desiredBeforeClear = desiredActuatorsState.value[param]
       // Failed command will never match SERVO — drop the latch for this value.
       if (
-        desiredActuatorsState.value[param] !== null &&
-        approxEqual(desiredActuatorsState.value[param]!, value, param)
+        desiredBeforeClear !== null &&
+        approxEqual(desiredBeforeClear, value, param)
       ) {
         clearDesiredLatch(param)
       }
@@ -1348,7 +1353,7 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
         shouldRollbackActuatorUi({
           ownsFlight: true,
           queued: actuatorsSetQueued.value[param],
-          desired: desiredActuatorsState.value[param],
+          desiredBeforeClear,
           ui: actuatorsState.value[param],
           attempted: value,
           rollback: actuatorsSetRollback.value[param],
@@ -1443,7 +1448,6 @@ const getBaseParameters = () => {
       }
       baseParams.value = pendingBase.mergeRemote(
         data as BaseParameterSetting,
-        baseParams.value,
       )
       console.log(data)
     })
@@ -1458,6 +1462,7 @@ const updateVideoParameters = async (
   if (!props.selectedCameraUuid || props.disabled) return
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = actuatorsRequestGeneration.value
   const payload = {
     camera_uuid: cameraUuid,
     action: 'setVencConf',
@@ -1466,7 +1471,12 @@ const updateVideoParameters = async (
 
   try {
     const data = await backendClient.request('POST', '/camera/control', payload)
-    if (props.selectedCameraUuid !== cameraUuid) return
+    if (
+      props.selectedCameraUuid !== cameraUuid ||
+      generation !== actuatorsRequestGeneration.value
+    ) {
+      return
+    }
     const settings = data as VideoParameterSettings
     update_video_parameter_values(settings)
   } catch (error) {
@@ -1708,7 +1718,7 @@ const saveHardwareSetup = async (): Promise<void> => {
 
       const newParams = (data as ActuatorsConfig)?.parameters
       if (newParams) {
-        currentFocusAndZoomParams.value = { ...newParams }
+        applyConfigParameters(newParams)
         intendedFocusAndZoomParams.value = { ...newParams }
       }
     })
@@ -1741,7 +1751,7 @@ const resetToRecommendedDefaults = async (): Promise<void> => {
 
       const newParams = (data as ActuatorsConfig)?.parameters
       if (newParams) {
-        currentFocusAndZoomParams.value = { ...newParams }
+        applyConfigParameters(newParams)
         intendedFocusAndZoomParams.value = { ...newParams }
       }
     })

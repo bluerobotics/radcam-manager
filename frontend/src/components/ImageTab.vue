@@ -849,8 +849,6 @@ const noiseReductionOptions = enumToOptions(AdvancedDisplayNoiseReductionValue)
 const _2dNrLevelOptions = enumToOptions(AdvancedDisplay2dNrLevelValue)
 const antiFlickerOptions = enumToOptions(AdvancedDisplayAntiflickerValue)
 
-const inFlightBaseWrites = ref(0)
-const inFlightAdvancedWrites = ref(0)
 const imageRequestGeneration = ref(0)
 const pendingBase = createPendingFields<keyof BaseParameterSetting, unknown>()
 const pendingAdvanced = createPendingFields<keyof AdvancedParameterSetting, unknown>()
@@ -865,13 +863,11 @@ const applyCameraStateEvent = (body: unknown) => {
   if (data.base_parameters) {
     baseParams.value = pendingBase.mergeRemote(
       data.base_parameters as BaseParameterSetting,
-      baseParams.value,
     )
   }
   if (data.advanced_parameters) {
     advancedParams.value = pendingAdvanced.mergeRemote(
       data.advanced_parameters as AdvancedParameterSetting,
-      advancedParams.value,
     )
   }
 }
@@ -882,8 +878,6 @@ watch(
   () => props.selectedCameraUuid,
   () => {
     imageRequestGeneration.value += 1
-    inFlightBaseWrites.value = 0
-    inFlightAdvancedWrites.value = 0
     pendingBase.clear()
     pendingAdvanced.clear()
     processingWhiteBalance.value = false
@@ -903,7 +897,6 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   const previous = baseParams.value[param]
   const { token, epoch } = pendingBase.begin(param, previous, value)
   baseParams.value = { ...baseParams.value, [param]: value }
-  inFlightBaseWrites.value++
 
   const payload = {
     camera_uuid: cameraUuid,
@@ -925,10 +918,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
       }
       const incoming = data as BaseParameterSetting
       pendingBase.settleSuccess(param, token, epoch, () => {
-        baseParams.value = pendingBase.mergeRemote(incoming, {
-          ...incoming,
-          [param]: value,
-        } as BaseParameterSetting)
+        baseParams.value = pendingBase.mergeRemote(incoming)
       })
     })
     .catch(error => {
@@ -948,10 +938,6 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
           baseParams.value = { ...baseParams.value, [param]: prev as BaseParameterSetting[typeof param] }
         },
       )
-    })
-    .finally(() => {
-      if (generation !== imageRequestGeneration.value) return
-      inFlightBaseWrites.value = Math.max(0, inFlightBaseWrites.value - 1)
     })
 }
 
@@ -977,7 +963,6 @@ const getBaseParameters = () => {
       }
       baseParams.value = pendingBase.mergeRemote(
         data as BaseParameterSetting,
-        baseParams.value,
       )
       console.log(data)
     })
@@ -1027,7 +1012,6 @@ const doRestoreBase = async () => {
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
   pendingBase.beginRestore()
-  inFlightBaseWrites.value++
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustment",
@@ -1045,14 +1029,13 @@ const doRestoreBase = async () => {
       ) {
         return
       }
-      baseParams.value = data as BaseParameterSetting
+      baseParams.value = pendingBase.mergeRemote(data as BaseParameterSetting)
     })
     .catch(error => {
       console.error("Error sending base image restore control:", error.message)
     })
     .finally(() => {
       if (generation !== imageRequestGeneration.value) return
-      inFlightBaseWrites.value = Math.max(0, inFlightBaseWrites.value - 1)
       processingBaseRestore.value = false
     })
 }
@@ -1066,7 +1049,6 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
   const previous = advancedParams.value[param]
   const { token, epoch } = pendingAdvanced.begin(param, previous, value)
   advancedParams.value = { ...advancedParams.value, [param]: value }
-  inFlightAdvancedWrites.value++
 
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
@@ -1084,10 +1066,7 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
       }
       const incoming = data as AdvancedParameterSetting
       pendingAdvanced.settleSuccess(param, token, epoch, () => {
-        advancedParams.value = pendingAdvanced.mergeRemote(incoming, {
-          ...incoming,
-          [param]: value,
-        } as AdvancedParameterSetting)
+        advancedParams.value = pendingAdvanced.mergeRemote(incoming)
       })
     })
     .catch(error => {
@@ -1111,10 +1090,6 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
         },
       )
     })
-    .finally(() => {
-      if (generation !== imageRequestGeneration.value) return
-      inFlightAdvancedWrites.value = Math.max(0, inFlightAdvancedWrites.value - 1)
-    })
 }
 
 const doRestoreAdvanced = async () => {
@@ -1125,7 +1100,6 @@ const doRestoreAdvanced = async () => {
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
   pendingAdvanced.beginRestore()
-  inFlightAdvancedWrites.value++
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
@@ -1140,14 +1114,13 @@ const doRestoreAdvanced = async () => {
       ) {
         return
       }
-      advancedParams.value = data as AdvancedParameterSetting
+      advancedParams.value = pendingAdvanced.mergeRemote(data as AdvancedParameterSetting)
     })
     .catch(error => {
       console.error("Error restoring advanced parameters:", error.message)
     })
     .finally(() => {
       if (generation !== imageRequestGeneration.value) return
-      inFlightAdvancedWrites.value = Math.max(0, inFlightAdvancedWrites.value - 1)
       processingAdvancedRestore.value = false
     })
 }
