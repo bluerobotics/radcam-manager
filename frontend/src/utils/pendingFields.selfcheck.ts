@@ -45,7 +45,3 @@ export function runPendingFieldsSelfCheck(): void {
 
   console.log('pendingFields self-check ok')
 }
-
-if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
-  runPendingFieldsSelfCheck()
-}

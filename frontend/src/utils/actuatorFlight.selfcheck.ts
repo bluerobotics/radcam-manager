@@ -82,7 +82,3 @@ export function runActuatorFlightSelfCheck(): void {
 
   console.log('actuatorFlight self-check ok')
 }
-
-if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
-  runActuatorFlightSelfCheck()
-}
