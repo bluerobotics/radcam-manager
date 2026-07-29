@@ -139,13 +139,16 @@ pub(crate) async fn control_inner(
         Action::SetActuatorsState(new_state) => {
             let camera_uuid = actuators_control.camera_uuid;
             let focus_was_set = new_state.focus.is_some();
-            // Send MAVLink without write lock (ACK retries must not block the watcher).
+            // Validate entry, then send MAVLink with no Manager lock held.
             {
                 let manager = MANAGER.get().context("Not available")?.read().await;
-                manager
-                    .apply_state_setpoints(&camera_uuid, new_state)
-                    .await?;
+                let _ = manager
+                    .settings
+                    .actuators
+                    .get(&camera_uuid)
+                    .context(crate::ACTUATORS_NOT_CONFIGURED)?;
             }
+            manager::Manager::apply_state_setpoints(new_state).await?;
             let age_before = actuators_watch::last_servo_age(camera_uuid);
             let servo_output_raw = crate::mavlink::component()?
                 .request_servo_output_raw()
