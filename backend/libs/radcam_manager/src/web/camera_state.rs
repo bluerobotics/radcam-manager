@@ -47,6 +47,9 @@ struct Registry {
     last_states: HashMap<Uuid, CameraSnapshot>,
 }
 
+/// Clears the actuators lag-resync flag when the task ends or panics.
+struct ActuatorsLagResyncGuard;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 struct CameraSnapshot {
     actuators_config: Option<serde_json::Value>,
@@ -55,6 +58,12 @@ struct CameraSnapshot {
     video_parameters: Option<serde_json::Value>,
     base_parameters: Option<serde_json::Value>,
     advanced_parameters: Option<serde_json::Value>,
+}
+
+impl Drop for ActuatorsLagResyncGuard {
+    fn drop(&mut self) {
+        ACTUATORS_LAG_RESYNCING.store(false, Ordering::SeqCst);
+    }
 }
 
 /// Subscribe to camera state broadcast events.
@@ -206,13 +215,18 @@ pub(crate) fn cached_state_event(camera_uuid: Uuid) -> CameraStateEvent {
     )
 }
 
-/// Actuators-only event from the autopilot manager cache (for lag recovery).
+/// Actuators-only event from a fresh GetActuatorsState (for lag / permit-miss recovery).
 ///
-/// Updates `last_states` so remounts see the same positions.
+/// Uses the same cache-vs-one-shot path as REST so defaults are not stamped into
+/// `last_states` when the SERVO cache is stale for this camera.
 #[instrument(level = "debug", skip_all, fields(%camera_uuid))]
 pub(crate) async fn actuators_state_event(camera_uuid: Uuid) -> Option<CameraStateEvent> {
-    let state = autopilot::cached_actuators_state(camera_uuid).await?;
-    let actuators_state = serde_json::to_value(state).ok()?;
+    let actuators_state = autopilot::handle_control(ActuatorsControl {
+        camera_uuid,
+        action: AutopilotAction::GetActuatorsState,
+    })
+    .await
+    .ok()?;
     let mut event = CameraStateEvent {
         camera_uuid,
         actuators_state: Some(actuators_state),
@@ -558,8 +572,8 @@ fn ensure_actuators_bridge() {
                         registry.camera_interest.keys().copied().collect()
                     };
                     tokio::spawn(async move {
+                        let _guard = ActuatorsLagResyncGuard;
                         resync_actuators_from_manager(cameras).await;
-                        ACTUATORS_LAG_RESYNCING.store(false, Ordering::SeqCst);
                     });
                 }
             }
