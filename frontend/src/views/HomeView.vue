@@ -148,6 +148,7 @@
             :disabled="!backendConnected || selectedCameraUUID == null || uiLoading || uiRebooting"
             :loading="uiLoading"
             :cockpit-mode="isCockpitMode"
+            :one-push-awb="onePushAwb"
           />
         </div>
         <div v-if="configMode === 'advanced'">
@@ -175,6 +176,7 @@
               <ImageTab
                 :selected-camera-uuid="selectedCameraUUID"
                 :disabled="!backendConnected || selectedCameraUUID == null || uiLoading || uiRebooting"
+                :one-push-awb="onePushAwb"
               />
             </v-tabs-window-item>
             <v-tabs-window-item value="streams">
@@ -203,7 +205,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouteQuery } from '@vueuse/router'
 
 import type { Camera } from '@/bindings/mcm_client'
-import type { CameraStateEvent, CameraUiState } from '@/bindings/radcam_api'
+import type { CameraStateEvent, CameraUiState, OnePushAwbStatus } from '@/bindings/radcam_api'
 import BasicSettings from '@/components/BasicSettings.vue'
 import BlueButtonGroup from '@/components/BlueButtonGroup.vue'
 import ImageTab from '@/components/ImageTab.vue'
@@ -283,6 +285,7 @@ const cameraControls = ref<InstanceType<typeof BasicSettings> | null>(null)
 const uiLoading = ref(false)
 const uiLoadingMessage = ref('Applying settings…')
 const uiRebooting = ref(false)
+const onePushAwb = ref<OnePushAwbStatus | null>(null)
 const errorDialogMessage = ref<string | null>(null)
 const warningToastMessage = ref<string | null>(null)
 const isCockpitMode = useRouteQuery<string, boolean>('cockpit_mode', 'false', {
@@ -314,6 +317,7 @@ const applyCameraUi = (ui: CameraUiState) => {
     uiLoadingMessage.value = ui.loading_message
   }
   uiRebooting.value = ui.rebooting
+  onePushAwb.value = ui.one_push_awb ?? null
   errorDialogMessage.value = ui.error_dialog ?? null
   warningToastMessage.value = ui.warning_toast ?? null
 }
@@ -339,6 +343,7 @@ watch(selectedCameraUUID, (uuid, previousUuid) => {
   if (!uuid) {
     uiLoading.value = false
     uiRebooting.value = false
+    onePushAwb.value = null
     errorDialogMessage.value = null
     warningToastMessage.value = null
     return
@@ -358,6 +363,7 @@ watch(selectedCameraUUID, (uuid, previousUuid) => {
   } else {
     uiLoading.value = false
     uiRebooting.value = false
+    onePushAwb.value = null
     errorDialogMessage.value = null
     warningToastMessage.value = null
   }
