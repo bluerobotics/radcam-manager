@@ -7,14 +7,14 @@
     >
       <BlueButtonGroup
         label="Water environment White Balance"
-        :disabled="!isConfigured || props.disabled || processingWhiteBalance"
+        :disabled="!isConfigured || props.disabled || wbBusy"
         :button-items="WhiteBalanceSceneButtonItems"
         theme="dark"
         type="switch"
       />
       <BlueButtonGroup
         label="White Balance Mode"
-        :disabled="!isConfigured || props.disabled || processingWhiteBalance"
+        :disabled="!isConfigured || props.disabled || wbBusy"
         :button-items="whiteBalanceModeButtonItems"
         theme="dark"
         type="switch"
@@ -24,7 +24,7 @@
         class="d-flex flex-col align-end mt-6"
       >
         <v-btn
-          :disabled="props.disabled"
+          :disabled="props.disabled || wbBusy"
           class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
           size="small"
           variant="elevated"
@@ -32,13 +32,13 @@
           @click="doWhiteBalance"
         >
           <v-progress-circular
-            v-if="processingWhiteBalance"
+            v-if="wbRunning"
             indeterminate
             color="white"
             size="20"
             class="me-2"
           />
-          {{ processingWhiteBalance ? "Processing..." : "One-Push White Balance" }}
+          {{ onePushLabel }}
         </v-btn>
       </div>
       <div
@@ -47,7 +47,7 @@
       >
         <BlueSlider
           v-model="baseParams.awb_red"
-          :disabled="!isConfigured || props.disabled || processingWhiteBalance"
+          :disabled="!isConfigured || props.disabled || wbBusy"
           name="red"
           label="Red"
           :min="0"
@@ -60,7 +60,7 @@
         />
         <BlueSlider
           v-model="baseParams.awb_blue"
-          :disabled="!isConfigured || props.disabled || processingWhiteBalance"
+          :disabled="!isConfigured || props.disabled || wbBusy"
           name="blue"
           label="Blue"
           :min="0"
@@ -175,7 +175,7 @@
     >
       <BlueSelect
         v-model="selectedVideoResolution"
-        :disabled="!isConfigured || props.disabled || processingWhiteBalance"
+        :disabled="!isConfigured || props.disabled"
         label="Resolution"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
@@ -183,7 +183,7 @@
       />
       <BlueSelect
         v-model="selectedVideoBitrate"
-        :disabled="!isConfigured || props.disabled || processingWhiteBalance"
+        :disabled="!isConfigured || props.disabled"
         label="Bitrate"
         :items="bitrateOptions || [{ name: 'No bitrates available', value: null }]"
         theme="dark"
@@ -264,7 +264,7 @@
         class="flex justify-end mt-8 mb-[-20px]"
       >
         <v-btn
-          :disabled="!isConfigured || props.disabled || processingWhiteBalance"
+          :disabled="!isConfigured || props.disabled"
           class="py-1 px-3 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
           :class="{ 'opacity-50 pointer-events-none': !hasUnsavedVideoChanges }"
           size="small"
@@ -316,7 +316,7 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="props.disabled || processingWhiteBalance"
+            :disabled="props.disabled"
             :loading="props.loading"
             theme="dark"
             @click="resetToRecommendedDefaults"
@@ -618,7 +618,7 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="hasChannelErrors || props.disabled || processingWhiteBalance"
+            :disabled="hasChannelErrors || props.disabled"
             :loading="props.loading"
             theme="dark"
             @click="saveHardwareSetup"
@@ -654,7 +654,7 @@ import {
 import { createPendingFields } from '@/utils/pendingFields'
 import { useCameraState } from '@/utils/useCameraState'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
-import type { CameraStateEvent } from '@/bindings/radcam_api'
+import type { CameraStateEvent, OnePushAwbStatus } from '@/bindings/radcam_api'
 import WelcomeDialog from './WelcomeDialog.vue'
 
 
@@ -663,7 +663,16 @@ const props = defineProps<{
   disabled: boolean
   loading: boolean
   cockpitMode: boolean
+  onePushAwb?: OnePushAwbStatus | null
 }>()
+
+const wbBusy = computed(() => props.onePushAwb != null)
+const wbRunning = computed(() => props.onePushAwb?.phase === 'running')
+const onePushLabel = computed(() => {
+  if (props.onePushAwb?.phase === 'running') return 'Processing...'
+  if (props.onePushAwb?.phase === 'cooldown') return 'Cooling down...'
+  return 'One-Push White Balance'
+})
 
 interface ServoChannelOption {
   name: string
@@ -874,7 +883,6 @@ const defaultFocusAndZoomParams = ref<ActuatorsParametersConfig>({
   tilt_mnt_pitch_max: null,
 })
 const hasUnsavedVideoChanges = ref<boolean>(false)
-const processingWhiteBalance = ref(false)
 
 watch(
   () => props.selectedCameraUuid,
@@ -886,7 +894,6 @@ watch(
     correlationLatch.value = null
     isConfigured.value = false
     showAdvancedHardware.value = false
-    processingWhiteBalance.value = false
     const emptyParams: ActuatorsParametersConfig = {
       camera_id: null,
       focus_channel: null,
@@ -1559,16 +1566,11 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
 }
 
 const doWhiteBalance = async () => {
-  if (!props.selectedCameraUuid || props.disabled) {
+  if (!props.selectedCameraUuid || props.disabled || wbBusy.value) {
     return
   }
 
-  // Prevent multiple concurrent white balance operations
-  if (processingWhiteBalance.value) return
-  processingWhiteBalance.value = true
-
   const cameraUuid = props.selectedCameraUuid
-  const generation = actuatorsRequestGeneration.value
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
@@ -1580,12 +1582,6 @@ const doWhiteBalance = async () => {
   backendClient.request('POST', '/camera/control', payload)
     .catch(error => {
       console.error("Error sending onceAWB control:", error.message)
-    }).finally(() => {
-      if (generation !== actuatorsRequestGeneration.value) return
-      processingWhiteBalance.value = false
-      if (props.selectedCameraUuid === cameraUuid) {
-        getBaseParameters()
-      }
     })
 }
 

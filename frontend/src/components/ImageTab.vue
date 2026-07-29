@@ -92,17 +92,17 @@
     <div class="ma-2 text-right">
       <v-btn
         variant="tonal"
-        :disabled="props.disabled || processingWhiteBalance"
+        :disabled="props.disabled || wbBusy"
         @click="doWhiteBalance"
       >
         <v-progress-circular
-          v-if="processingWhiteBalance"
+          v-if="wbRunning"
           indeterminate
           color="white"
           size="20"
           class="me-2"
         />
-        {{ processingWhiteBalance ? "Processing..." : "One-Push White Balance" }}
+        {{ onePushLabel }}
       </v-btn>
     </div>
   </div>
@@ -118,7 +118,7 @@
           :model-value="baseParams.auto_awb"
           :items="autoWhiteBalanceModeOptions"
           label="White Balance Mode"
-          :disabled="props.disabled"
+          :disabled="props.disabled || wbBusy"
           item-title="text"
           item-value="value"
           class="mb-4"
@@ -129,7 +129,7 @@
           :model-value="baseParams.awb_auto_mode"
           :items="autoWhiteBalanceSceneOptions"
           label="White Balance Scene"
-          :disabled="props.disabled"
+          :disabled="props.disabled || wbBusy"
           item-title="text"
           item-value="value"
           class="mb-4"
@@ -145,7 +145,7 @@
             :min="0"
             :max="255"
             :step="1"
-            :disabled="props.disabled"
+            :disabled="props.disabled || wbBusy"
             @update:current="updateBaseParameter('awb_red', $event)"
           />
           <Slider
@@ -155,7 +155,7 @@
             :min="0"
             :max="255"
             :step="1"
-            :disabled="props.disabled"
+            :disabled="props.disabled || wbBusy"
             @update:current="updateBaseParameter('awb_green', $event)"
           />
           <Slider
@@ -165,7 +165,7 @@
             :min="0"
             :max="255"
             :step="1"
-            :disabled="props.disabled"
+            :disabled="props.disabled || wbBusy"
             @update:current="updateBaseParameter('awb_blue', $event)"
           />
         </div>
@@ -176,7 +176,7 @@
           :min="0"
           :max="255"
           :step="1"
-          :disabled="props.disabled"
+          :disabled="props.disabled || wbBusy"
           @update:current="updateBaseParameter('awb_style_red', $event)"
         />
         <Slider
@@ -186,7 +186,7 @@
           :min="0"
           :max="255"
           :step="1"
-          :disabled="props.disabled"
+          :disabled="props.disabled || wbBusy"
           @update:current="updateBaseParameter('awb_style_green', $event)"
         />
         <Slider
@@ -196,7 +196,7 @@
           :min="0"
           :max="255"
           :step="1"
-          :disabled="props.disabled"
+          :disabled="props.disabled || wbBusy"
           @update:current="updateBaseParameter('awb_style_blue', $event)"
         />
       </v-expansion-panel-text>
@@ -731,14 +731,23 @@ import { enumToOptions } from '@/utils/enumUtils'
 import { backendClient } from '@/utils/backendClient'
 import { useCameraState } from '@/utils/useCameraState'
 import { createPendingFields } from '@/utils/pendingFields'
-import { ref, toRef, watch } from 'vue'
+import type { OnePushAwbStatus } from '@/bindings/radcam_api'
+import { computed, ref, toRef, watch } from 'vue'
 
 const props = defineProps<{
   selectedCameraUuid: string | null
   disabled: boolean
+  onePushAwb?: OnePushAwbStatus | null
 }>()
 
-const processingWhiteBalance = ref(false)
+const wbBusy = computed(() => props.onePushAwb != null)
+const wbRunning = computed(() => props.onePushAwb?.phase === 'running')
+const onePushLabel = computed(() => {
+  if (props.onePushAwb?.phase === 'running') return 'Processing...'
+  if (props.onePushAwb?.phase === 'cooldown') return 'Cooling down...'
+  return 'One-Push White Balance'
+})
+
 const processingBaseRestore = ref(false)
 const processingAdvancedRestore = ref(false)
 
@@ -880,7 +889,6 @@ watch(
     imageRequestGeneration.value += 1
     pendingBase.clear()
     pendingAdvanced.clear()
-    processingWhiteBalance.value = false
     processingBaseRestore.value = false
     processingAdvancedRestore.value = false
   },
@@ -972,18 +980,12 @@ const getBaseParameters = () => {
 }
 
 const doWhiteBalance = async () => {
-  if (!props.selectedCameraUuid) {
+  if (!props.selectedCameraUuid || props.disabled || wbBusy.value) {
     return
   }
 
-  // Prevent multiple concurrent white balance operations
-  if (processingWhiteBalance.value) return
-  processingWhiteBalance.value = true
-
-  const cameraUuid = props.selectedCameraUuid
-  const generation = imageRequestGeneration.value
   const payload: CameraControl = {
-    camera_uuid: cameraUuid,
+    camera_uuid: props.selectedCameraUuid,
     action: "setImageAdjustmentEx",
     json: {
       onceAWB: 1,
@@ -993,12 +995,6 @@ const doWhiteBalance = async () => {
   backendClient.request('POST', '/camera/control', payload)
     .catch(error => {
       console.error("Error sending onceAWB control:", error.message)
-    }).finally(() => {
-      if (generation !== imageRequestGeneration.value) return
-      processingWhiteBalance.value = false
-      if (props.selectedCameraUuid === cameraUuid) {
-        getBaseParameters()
-      }
     })
 }
 
