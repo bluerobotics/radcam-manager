@@ -153,7 +153,11 @@ impl Manager {
         // Prefer measured SERVO positions so the WS stream does not treat the
         // requested setpoint as authoritative when the autopilot never moved.
         match self.get_state(camera_uuid).await {
-            Ok(measured) => {
+            Ok(mut measured) => {
+                // Tilt was not commanded; do not imply it was applied.
+                if new_state.tilt.is_some() {
+                    measured.tilt = None;
+                }
                 if focus_was_set {
                     self.check_focus_script_health(camera_uuid).await;
                 }

@@ -65,7 +65,7 @@ impl Manager {
                 let mut param = self.mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
                 param.value.set_value(
-                    ParamType::UINT16(ChannelFunction::CameraZoom as u16),
+                    ParamType::INT16(ChannelFunction::CameraZoom as i16),
                     encoding,
                 )?;
                 let new_value = param.value;
