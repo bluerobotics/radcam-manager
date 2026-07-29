@@ -6,9 +6,9 @@ mod script;
 mod tilt;
 mod zoom;
 
+use ::mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
 use tracing::*;
@@ -20,14 +20,13 @@ use settings::MANAGER as SETTINGS_MANAGER;
 use crate::{
     CameraActuators,
     api::{self, ServoChannel},
-    mavlink::MavlinkComponent,
+    mavlink::{self, MavlinkComponent},
 };
 
 pub static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 
 #[derive(Debug)]
 pub struct Manager {
-    pub mavlink: MavlinkComponent,
     pub autopilot_scripts_file: String,
     pub settings: State,
     pub(crate) script_health: ScriptHealthTracker,
@@ -107,7 +106,7 @@ impl Manager {
         }
 
         if let Some(focus) = new_state.focus {
-            self.mavlink
+            crate::mavlink::component()?
                 .send_command(COMMAND_LONG_DATA {
                     target_system: 1,
                     target_component: 1,
@@ -123,7 +122,7 @@ impl Manager {
         }
 
         if let Some(zoom) = new_state.zoom {
-            self.mavlink
+            crate::mavlink::component()?
                 .send_command(COMMAND_LONG_DATA {
                     target_system: 1,
                     target_component: 1,
@@ -189,14 +188,18 @@ impl Manager {
 
         reload_script |= self.export_script(camera_uuid, overwrite).await?;
 
-        autopilot_reboot_required |= self.mavlink.enable_lua_script(overwrite).await?;
+        autopilot_reboot_required |= crate::mavlink::component()?
+            .enable_lua_script(overwrite)
+            .await?;
 
         if reload_script && !autopilot_reboot_required {
-            self.mavlink.reload_lua_scripts(overwrite).await?;
+            crate::mavlink::component()?
+                .reload_lua_scripts(overwrite)
+                .await?;
         }
 
         if autopilot_reboot_required {
-            self.mavlink.reboot_autopilot().await?;
+            crate::mavlink::component()?.reboot_autopilot().await?;
         }
 
         // Re-push ENABLE/GAIN only when the Lua script was rewritten/reloaded (or a
@@ -246,12 +249,12 @@ pub async fn init(
 
     let mavlink =
         MavlinkComponent::try_new(mavlink_address, mavlink_system_id, mavlink_component_id).await?;
+    mavlink::init_component(mavlink)?;
 
     let script_health = ScriptHealthTracker::default();
 
     MANAGER.get_or_init(|| {
         RwLock::new(Manager {
-            mavlink,
             autopilot_scripts_file,
             settings,
             script_health,

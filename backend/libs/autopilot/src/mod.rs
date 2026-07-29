@@ -73,12 +73,16 @@ pub(crate) async fn control_inner(
                 .await?;
 
             if reload_script {
-                manager.mavlink.reload_lua_scripts(true).await?;
+                crate::mavlink::component()?
+                    .reload_lua_scripts(true)
+                    .await?;
             }
 
-            let autopilot_reboot_required = manager.mavlink.enable_lua_script(false).await?;
+            let autopilot_reboot_required = crate::mavlink::component()?
+                .enable_lua_script(false)
+                .await?;
             if autopilot_reboot_required {
-                manager.mavlink.reboot_autopilot().await?;
+                crate::mavlink::component()?.reboot_autopilot().await?;
             }
 
             serde_json::to_value({})?
@@ -110,14 +114,10 @@ pub(crate) async fn control_inner(
                         .context(crate::ACTUATORS_NOT_CONFIGURED)?;
                 }
                 let age_before = actuators_watch::last_servo_age(actuators_control.camera_uuid);
-                let servo_output_raw = {
-                    let manager = MANAGER.get().context("Not available")?.read().await;
-                    manager
-                        .mavlink
-                        .request_servo_output_raw()
-                        .await
-                        .context("Failed waiting for SERVO_OUTPUT_RAW_DATA message")?
-                };
+                let servo_output_raw = crate::mavlink::component()?
+                    .request_servo_output_raw()
+                    .await
+                    .context("Failed waiting for SERVO_OUTPUT_RAW_DATA message")?;
                 let mut manager = MANAGER.get().context("Not available")?.write().await;
                 let actuators = manager
                     .settings
@@ -147,14 +147,10 @@ pub(crate) async fn control_inner(
                     .await?;
             }
             let age_before = actuators_watch::last_servo_age(camera_uuid);
-            let servo_output_raw = {
-                let manager = MANAGER.get().context("Not available")?.read().await;
-                manager
-                    .mavlink
-                    .request_servo_output_raw()
-                    .await
-                    .context("Failed waiting for SERVO_OUTPUT_RAW_DATA message")?
-            };
+            let servo_output_raw = crate::mavlink::component()?
+                .request_servo_output_raw()
+                .await
+                .context("Failed waiting for SERVO_OUTPUT_RAW_DATA message")?;
             let state = {
                 let mut manager = MANAGER.get().context("Not available")?.write().await;
                 let actuators = manager
@@ -183,10 +179,10 @@ pub(crate) async fn control_inner(
                         .is_some_and(|a| a.parameters.enable_focus_and_zoom_correlation)
                 };
                 if enabled {
-                    let health_servo = {
-                        let manager = MANAGER.get().context("Not available")?.read().await;
-                        manager.mavlink.request_servo_output_raw().await.ok()
-                    };
+                    let health_servo = crate::mavlink::component()?
+                        .request_servo_output_raw()
+                        .await
+                        .ok();
                     if let Some(health_servo) = health_servo {
                         let needs_reload = {
                             let mut manager = MANAGER.get().context("Not available")?.write().await;
@@ -194,8 +190,9 @@ pub(crate) async fn control_inner(
                         };
                         if needs_reload {
                             warn!("Attempting Lua script reload due to stale focus output");
-                            let manager = MANAGER.get().context("Not available")?.read().await;
-                            if let Err(error) = manager.mavlink.reload_lua_scripts(true).await {
+                            if let Err(error) =
+                                crate::mavlink::component()?.reload_lua_scripts(true).await
+                            {
                                 error!("Failed to reload Lua scripts: {error:?}");
                             }
                         }

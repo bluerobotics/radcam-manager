@@ -22,7 +22,7 @@ macro_rules! generate_update_channel_param_function {
                 .or_default()
                 .parameters;
 
-            let encoding = self.mavlink.encoding().await;
+            let encoding = $crate::mavlink::component()?.encoding().await;
 
             let channel = current_parameters.$channel_field as u8;
 
@@ -34,12 +34,14 @@ macro_rules! generate_update_channel_param_function {
                 (None, false) => return Ok(()),
             };
 
-            let mut param = self.mavlink.get_param(&param_name, false).await?;
+            let mut param = $crate::mavlink::component()?
+                .get_param(&param_name, false)
+                .await?;
             let old_value = current_parameters.$field_name;
             param.value.set_value(ParamType::$ty(new_value), encoding)?;
 
             if (old_value != new_value) || force_apply {
-                match self.mavlink.set_param(param).await {
+                match $crate::mavlink::component()?.set_param(param).await {
                     Ok(_) => {
                         if old_value != new_value {
                             info!(
@@ -90,7 +92,7 @@ macro_rules! generate_update_mount_param_function {
                 .parameters;
             let mut has_changed = false;
 
-            let encoding = self.mavlink.encoding().await;
+            let encoding = $crate::mavlink::component()?.encoding().await;
 
             let mount_id = match current_parameters.camera_id {
                 api::CameraID::CAM1 => TiltChannelFunction::MNT1,
@@ -104,12 +106,14 @@ macro_rules! generate_update_mount_param_function {
                 (None, false) => return Ok(has_changed),
             };
 
-            let mut param = self.mavlink.get_param(&param_name, false).await?;
+            let mut param = $crate::mavlink::component()?
+                .get_param(&param_name, false)
+                .await?;
             let old_value = current_parameters.$field_name;
             param.value.set_value(ParamType::$ty(new_value), encoding)?;
 
             if (old_value != new_value) || force_apply {
-                match self.mavlink.set_param(param).await {
+                match $crate::mavlink::component()?.set_param(param).await {
                     Ok(_) => {
                         if old_value != new_value {
                             info!(
