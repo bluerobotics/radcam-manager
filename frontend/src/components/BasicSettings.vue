@@ -743,7 +743,15 @@ const actuatorsState = ref<ActuatorsState>({
 })
 type ActuatorKey = keyof ActuatorsState
 
-const approxEqual = (a: number, b: number): boolean => Math.abs(a - b) <= 0.5
+/** Match SERVO feedback within half a UI step (focus 0.1, zoom/tilt 1). */
+const actuatorMatchEpsilon: Record<ActuatorKey, number> = {
+  focus: 0.05,
+  zoom: 0.5,
+  tilt: 0.5,
+}
+
+const approxEqual = (a: number, b: number, key: ActuatorKey = 'zoom'): boolean =>
+  Math.abs(a - b) <= actuatorMatchEpsilon[key]
 
 // Tracks the last user-requested value per actuator. While a key is pending, we do not let
 // pushed state updates overwrite the UI with intermediate/stale values.
@@ -767,6 +775,8 @@ const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
 })
 /** Bumped on camera switch so in-flight actuator POSTs ignore stale `.finally` cleanup. */
 const actuatorsRequestGeneration = ref(0)
+/** Monotonic seq so only the newest image-param write may apply its response body. */
+let baseParamWriteSeq = 0
 const correlationToggleInFlight = ref(false)
 const isConfigured = ref<boolean>(false)
 const showWelcomeDialog = ref<boolean>(true)
@@ -832,6 +842,7 @@ watch(
     hasUserEditedVideo.value = false
     hasUnsavedVideoChanges.value = false
     actuatorsRequestGeneration.value += 1
+    baseParamWriteSeq += 1
     inFlightParamWrites.value = 0
     correlationToggleInFlight.value = false
     isConfigured.value = false
@@ -1027,6 +1038,8 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = actuatorsRequestGeneration.value
+  const writeSeq = ++baseParamWriteSeq
+  const previous = baseParams.value[param]
   baseParams.value = { ...baseParams.value, [param]: value }
   inFlightParamWrites.value++
 
@@ -1043,18 +1056,24 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
     .then((data) => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== actuatorsRequestGeneration.value
+        generation !== actuatorsRequestGeneration.value ||
+        writeSeq !== baseParamWriteSeq
       ) {
         return
       }
-      // Only apply when this is the last in-flight write (avoid older responses clobbering).
-      if (inFlightParamWrites.value === 1) {
-        baseParams.value = data as BaseParameterSetting
-      }
+      baseParams.value = data as BaseParameterSetting
     })
     .catch((error) => {
       const message = `Error sending ${String(param)} control with value '${value}'`
       console.log(message, error.message)
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== actuatorsRequestGeneration.value ||
+        writeSeq !== baseParamWriteSeq
+      ) {
+        return
+      }
+      baseParams.value = { ...baseParams.value, [param]: previous }
     })
     .finally(() => {
       if (generation !== actuatorsRequestGeneration.value) return
@@ -1092,7 +1111,7 @@ const applyActuatorsState = (state: ActuatorsState) => {
     const received = state[key]
 
     if (desired !== null) {
-      if (received !== null && received !== undefined && approxEqual(received, desired)) {
+      if (received !== null && received !== undefined && approxEqual(received, desired, key)) {
         desiredActuatorsState.value[key] = null
         actuatorsState.value[key] = received
       }
@@ -1256,6 +1275,11 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
     .catch((error) => {
       const message = `Error updating ${param}`
       console.log(message, error.message)
+      if (generation !== actuatorsRequestGeneration.value) return
+      // Failed command will never match SERVO — drop the latch for this value.
+      if (desiredActuatorsState.value[param] === value) {
+        desiredActuatorsState.value[param] = null
+      }
     })
     .finally(() => {
       // Camera switched while this request was in flight — leave the new camera alone.
@@ -1270,8 +1294,6 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
       if (actuatorsSetQueued.value[param] !== null) {
         sendQueuedActuatorState(param, true)
       }
-      // Leave desiredActuatorsState latched until SERVO feedback matches
-      // (see applyActuatorsState).
     })
 }
 
@@ -1286,7 +1308,7 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
 
   // Coalesce requests per actuator to prevent backlog.
   const existingQueued = actuatorsSetQueued.value[key]
-  if (existingQueued === null || !approxEqual(existingQueued, value)) {
+  if (existingQueued === null || !approxEqual(existingQueued, value, key)) {
     actuatorsSetQueued.value[key] = value
   }
   sendQueuedActuatorState(key)

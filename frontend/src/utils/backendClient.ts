@@ -478,6 +478,7 @@ class BackendClient {
   /** Re-push subscribe for the active camera without changing refcounts (tab remount). */
   refreshCameraSubscription(): void {
     if (this.subscribedCameraUuid) {
+      this.subscribeBlocked = false
       this.queueSubscribe(this.subscribedCameraUuid)
     }
   }

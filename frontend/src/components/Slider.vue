@@ -92,7 +92,7 @@ const onNumberCommit = () => {
 }
 
 const startSliding = () => {
-  if (isSliding) return
+  if (props.disabled || isSliding) return
   isSliding = true
   window.addEventListener('pointerup', stopSliding)
   window.addEventListener('pointercancel', stopSliding)

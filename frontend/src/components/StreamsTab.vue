@@ -283,8 +283,13 @@ const updateVideoParameters = () => {
         // Always reboot the camera that accepted the venc change, even if the
         // user switched selection afterward.
         handedOffRestart = true
-        awaitingRestartHydrate = true
         doRestart(cameraUuid)
+        if (
+          props.selectedCameraUuid === cameraUuid &&
+          generation === streamsRequestGeneration.value
+        ) {
+          awaitingRestartHydrate = true
+        }
       }
     })
     .catch((error) =>
@@ -338,12 +343,15 @@ const doRestart = (cameraUuid?: string) => {
       }
       console.log("Got an answer from the restarting request", data)
     })
-    .catch((error) =>
+    .catch((error) => {
       console.error(
         `Error sending restart':`,
         error.message
       )
-    )
+      if (generation === streamsRequestGeneration.value) {
+        awaitingRestartHydrate = false
+      }
+    })
     .finally(() => {
       if (!manageSpinner) return
       if (generation !== streamsRequestGeneration.value) return
