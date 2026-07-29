@@ -316,6 +316,18 @@ class BackendClient {
     }
 
     if (message.type === 'event') {
+      // Re-subscribe after MCM list arrives if an earlier subscribe was rejected
+      // while cameras were still coming online.
+      if (message.event === 'camera/list' && this.subscribedCameraUuid) {
+        this.queueSubscribe(this.subscribedCameraUuid)
+      }
+      if (message.event === 'camera/subscribe_rejected' && this.subscribedCameraUuid) {
+        const body = message.body as { camera_uuid?: string } | null
+        if (!body?.camera_uuid || body.camera_uuid === this.subscribedCameraUuid) {
+          this.queueSubscribe(this.subscribedCameraUuid)
+        }
+      }
+
       const handlers = this.eventHandlers.get(message.event)
       if (!handlers) return
       for (const handler of handlers) {
