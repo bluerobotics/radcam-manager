@@ -242,7 +242,8 @@ watch(
 watch(
   [selectedVideoParameters, selectedVideoResolution],
   () => {
-    if (!suppressUserEditFlag && !awaitingHydrate) {
+    // Allow dirty during hydrate so a successful fetch cannot clobber in-progress edits.
+    if (!suppressUserEditFlag) {
       hasUserEditedVideo.value = true
     }
   },
@@ -260,7 +261,7 @@ const applyCameraStateEvent = (body: unknown) => {
   if (awaitingRestartHydrate) {
     const settings = data.video_parameters as VideoParameterSettings
     const currentChannel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
-    if (settings.channel != null && settings.channel !== currentChannel) return
+    if (settings.channel !== currentChannel) return
     // First matching post-restart video snapshot — accept and clear the latch.
     update_video_parameter_values(settings)
     clearRestartHydrateLatch()
@@ -269,7 +270,7 @@ const applyCameraStateEvent = (body: unknown) => {
 
   const settings = data.video_parameters as VideoParameterSettings
   const currentChannel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
-  if (settings.channel != null && settings.channel !== currentChannel) return
+  if (settings.channel !== currentChannel) return
 
   update_video_parameter_values(settings)
 }
@@ -425,9 +426,16 @@ const getVideoParameters = (update: boolean) => {
         data as VideoParameterSettings
 
       if (update) {
-        update_video_parameter_values(settings)
-        if (awaitingRestartHydrate) {
+        if (!hasUserEditedVideo.value) {
+          update_video_parameter_values(settings)
+        }
+        if (awaitingRestartHydrate && !hasUserEditedVideo.value) {
           clearRestartHydrateLatch()
+        }
+        // End initial hydrate window even when dirty skipped the overwrite.
+        if (awaitingHydrate) {
+          awaitingHydrate = false
+          suppressUserEditFlag = false
         }
       }
     })
