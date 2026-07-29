@@ -264,7 +264,14 @@ impl MavlinkComponent {
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub async fn send_command(&self, mut command: COMMAND_LONG_DATA) -> Result<()> {
+    pub async fn send_command(&self, command: COMMAND_LONG_DATA) -> Result<()> {
+        let _txn = self.inner.txn.lock().await;
+        self.send_command_locked(command).await
+    }
+
+    /// Send a command and wait for ACK. Caller must hold [`ComponentInner::txn`].
+    #[instrument(level = "debug", skip(self))]
+    async fn send_command_locked(&self, mut command: COMMAND_LONG_DATA) -> Result<()> {
         let target_system = self.inner.system_id;
         let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
         let this_system = self.inner.system_id;
@@ -374,17 +381,16 @@ impl MavlinkComponent {
         .await
     }
 
+    /// One-shot request for `SERVO_OUTPUT_RAW`. Holds the mavlink txn for the whole RPC.
     pub async fn request_servo_output_raw(&self) -> Result<SERVO_OUTPUT_RAW_DATA> {
         let target_system = self.inner.system_id;
         let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
 
-        let wait_servo_output_raw_handle = tokio::spawn({
-            let inner = self.inner.clone();
+        let _txn = self.inner.txn.lock().await;
+        // Subscribe before send so the first SERVO frame cannot be missed.
+        let mut receiver = self.inner.get_receiver().await;
 
-            Self::wait_servo_output_raw(inner)
-        });
-
-        self.send_command(COMMAND_LONG_DATA {
+        self.send_command_locked(COMMAND_LONG_DATA {
             command: MavCmd::MAV_CMD_REQUEST_MESSAGE,
             target_system,
             target_component,
@@ -394,16 +400,14 @@ impl MavlinkComponent {
         })
         .await?;
 
-        wait_servo_output_raw_handle.await?
+        Self::wait_servo_output_raw_on(&mut receiver, target_system, target_component).await
     }
 
-    pub async fn wait_servo_output_raw(
-        inner: Arc<ComponentInner>,
+    async fn wait_servo_output_raw_on(
+        receiver: &mut broadcast::Receiver<Message>,
+        target_system: u8,
+        target_component: u8,
     ) -> Result<SERVO_OUTPUT_RAW_DATA> {
-        let target_system = inner.system_id;
-        let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
-        let mut receiver = inner.get_receiver().await;
-
         let wait_message = async {
             loop {
                 use broadcast::error::RecvError;
@@ -455,6 +459,9 @@ pub(crate) struct ComponentInner {
     pub component_id: u8,
     pub encoding: Arc<RwLock<ParamEncodingType>>,
     pub parameters: Arc<RwLock<IndexMap<String, Parameter>>>,
+    /// Serializes correlated MAVLink RPCs (command ACK / PARAM_VALUE matching).
+    /// Lock order: never acquire MANAGER while holding this.
+    pub txn: tokio::sync::Mutex<()>,
     connection: Connection,
 }
 
@@ -520,6 +527,7 @@ impl ComponentInner {
             component_id,
             encoding: Arc::new(RwLock::new(ParamEncodingType::default())),
             parameters: Arc::new(RwLock::new(IndexMap::with_capacity(2048))),
+            txn: tokio::sync::Mutex::new(()),
             connection,
         })
     }
