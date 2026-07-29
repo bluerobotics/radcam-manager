@@ -66,11 +66,13 @@ pub(crate) async fn control_inner(
 
     let res = match &actuators_control.action {
         Action::ExportLuaScript => {
-            let mut manager = MANAGER.get().context("Not available")?.write().await;
-
-            let reload_script = manager
-                .export_script(&actuators_control.camera_uuid, true)
-                .await?;
+            let _apply = manager::CONFIG_APPLY.lock().await;
+            let reload_script = {
+                let mut manager = MANAGER.get().context("Not available")?.write().await;
+                manager
+                    .export_script(&actuators_control.camera_uuid, true)
+                    .await?
+            };
 
             if reload_script {
                 crate::mavlink::component()?
@@ -222,6 +224,7 @@ pub(crate) async fn control_inner(
             serde_json::to_value(config)?
         }
         Action::SetActuatorsConfig(new_config) => {
+            let _apply = manager::CONFIG_APPLY.lock().await;
             let mut manager = MANAGER.get().context("Not available")?.write().await;
             let mut new_config = new_config.to_owned();
 
@@ -235,6 +238,9 @@ pub(crate) async fn control_inner(
             new_config = merge_struct::merge(base_config, &new_config.clone())
                 .context("Failing to merge structs")?;
 
+            // ponytail: still holds MANAGER.write across param I/O — CONFIG_APPLY
+            // serializes mutators; full snapshot-I/O-commit of hand-written channel
+            // swaps is the upgrade path.
             manager
                 .update_config(&actuators_control.camera_uuid, &new_config, false)
                 .await?;
@@ -249,6 +255,7 @@ pub(crate) async fn control_inner(
             serde_json::to_value(config)?
         }
         Action::ResetActuatorsConfig => {
+            let _apply = manager::CONFIG_APPLY.lock().await;
             let mut manager = MANAGER.get().context("Not available")?.write().await;
 
             manager.reset_config(&actuators_control.camera_uuid).await?;

@@ -25,6 +25,10 @@ use crate::{
 
 pub static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 
+/// Serializes config apply/reset/clear. Watcher never takes this.
+/// Lock order: CONFIG_APPLY → MANAGER → mavlink txn.
+pub static CONFIG_APPLY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[derive(Debug)]
 pub struct Manager {
     pub autopilot_scripts_file: String,
@@ -58,18 +62,20 @@ impl State {
 
     #[instrument(level = "debug", skip(self))]
     pub async fn save(&self) -> Result<()> {
+        // Clone under the caller's MANAGER guard, then drop any implication that
+        // disk I/O needs the actuators map borrow — SETTINGS_MANAGER is separate.
+        let actuators = self
+            .actuators
+            .iter()
+            .map(|(uuid, actuator_settings)| (*uuid, actuator_settings.into()))
+            .collect();
+
         let settings = &mut SETTINGS_MANAGER
             .get()
             .context("Not available")?
             .write()
             .await
             .settings;
-
-        let actuators = self
-            .actuators
-            .iter()
-            .map(|(uuid, actuator_settings)| (*uuid, actuator_settings.into()))
-            .collect();
 
         *settings.get_actuators_mut() = actuators;
 
@@ -231,6 +237,7 @@ pub async fn init(
     let settings = State::from_settings().await?;
 
     if let Some(manager) = MANAGER.get() {
+        let _apply = CONFIG_APPLY.lock().await;
         let mut guard = manager.write().await;
         guard.autopilot_scripts_file = autopilot_scripts_file;
         guard.settings = settings;
@@ -260,6 +267,7 @@ pub async fn init(
 pub async fn clear_saved_settings() -> Result<()> {
     settings::clear().await?;
 
+    let _apply = CONFIG_APPLY.lock().await;
     let manager = MANAGER.get().context("Not available")?;
     let mut guard = manager.write().await;
     guard.remove_script().await?;
