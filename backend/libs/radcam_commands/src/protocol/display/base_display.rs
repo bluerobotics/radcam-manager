@@ -139,7 +139,9 @@ pub enum BaseFrameTurboValue {
 #[tsync]
 #[repr(u8)]
 pub enum BaseSceneModeValue {
+    /// Camera firmware reports 0 when no capture scene is selected.
     #[default]
+    Off = 0,
     FaceCapture = 1,
     LicensePlateCapture = 2,
 }
