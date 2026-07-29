@@ -66,24 +66,22 @@ pub(crate) async fn control_inner(
 
     let res = match &actuators_control.action {
         Action::ExportLuaScript => {
-            let _apply = manager::CONFIG_APPLY.lock().await;
-            let reload_script =
-                manager::Manager::export_script(&actuators_control.camera_uuid, true).await?;
-            manager::Manager::save_actuators_settings().await?;
-            drop(_apply);
-
-            if reload_script {
-                crate::mavlink::component()?
-                    .reload_lua_scripts(true)
-                    .await?;
-            }
-
-            let autopilot_reboot_required = crate::mavlink::component()?
-                .enable_lua_script(false)
-                .await?;
-            if autopilot_reboot_required {
-                crate::mavlink::component()?.reboot_autopilot().await?;
-            }
+            let camera_uuid = actuators_control.camera_uuid;
+            manager::reboot_outside_apply(
+                async {
+                    let reload_script = manager::Manager::export_script(&camera_uuid, true).await?;
+                    manager::Manager::save_actuators_settings().await?;
+                    if reload_script {
+                        crate::mavlink::component()?
+                            .reload_lua_scripts(true)
+                            .await?;
+                    }
+                    crate::mavlink::component()?.enable_lua_script(false).await
+                },
+                // Export already saved under apply; post-reboot finalize is a no-op.
+                async { Ok(()) },
+            )
+            .await?;
 
             serde_json::to_value({})?
         }
@@ -223,7 +221,6 @@ pub(crate) async fn control_inner(
         }
         Action::SetActuatorsConfig(new_config) => {
             let camera_uuid = actuators_control.camera_uuid;
-            let mut apply = manager::CONFIG_APPLY.lock().await;
             let new_config = {
                 let manager = MANAGER.get().context("Not available")?.read().await;
                 let base_config = manager
@@ -235,19 +232,17 @@ pub(crate) async fn control_inner(
                 merge_struct::merge(&base_config, new_config).context("Failing to merge structs")?
             };
 
-            let needs_reboot =
-                manager::Manager::update_config(&camera_uuid, &new_config, false).await?;
-            if needs_reboot {
-                drop(apply);
-                crate::mavlink::component()?.reboot_autopilot().await?;
-                apply = manager::CONFIG_APPLY.lock().await;
-                manager::Manager::finalize_config_after_reboot(
-                    &camera_uuid,
-                    new_config.parameters.as_ref(),
-                )
-                .await?;
-            }
-            drop(apply);
+            manager::reboot_outside_apply(
+                async { manager::Manager::update_config(&camera_uuid, &new_config, false).await },
+                async {
+                    manager::Manager::finalize_config_after_reboot(
+                        &camera_uuid,
+                        new_config.parameters.as_ref(),
+                    )
+                    .await
+                },
+            )
+            .await?;
 
             let manager = MANAGER.get().context("Not available")?.read().await;
             let config: &api::ActuatorsConfig = &manager
@@ -261,20 +256,18 @@ pub(crate) async fn control_inner(
         }
         Action::ResetActuatorsConfig => {
             let camera_uuid = actuators_control.camera_uuid;
-            let mut apply = manager::CONFIG_APPLY.lock().await;
-            let needs_reboot = manager::Manager::reset_config(&camera_uuid).await?;
-            if needs_reboot {
-                drop(apply);
-                crate::mavlink::component()?.reboot_autopilot().await?;
-                apply = manager::CONFIG_APPLY.lock().await;
-                let default_params = api::ActuatorsConfig::from(&CameraActuators::default());
-                manager::Manager::finalize_config_after_reboot(
-                    &camera_uuid,
-                    default_params.parameters.as_ref(),
-                )
-                .await?;
-            }
-            drop(apply);
+            let default_params = api::ActuatorsConfig::from(&CameraActuators::default());
+            manager::reboot_outside_apply(
+                async { manager::Manager::reset_config(&camera_uuid).await },
+                async {
+                    manager::Manager::finalize_config_after_reboot(
+                        &camera_uuid,
+                        default_params.parameters.as_ref(),
+                    )
+                    .await
+                },
+            )
+            .await?;
 
             let manager = MANAGER.get().context("Not available")?.read().await;
             let config: &api::ActuatorsConfig = &manager

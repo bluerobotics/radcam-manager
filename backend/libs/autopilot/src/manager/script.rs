@@ -61,11 +61,11 @@ impl Manager {
         Ok(true)
     }
 
-    #[instrument(level = "debug", skip(self))]
-    pub async fn remove_script(&self) -> Result<()> {
-        let path = std::path::Path::new(&self.autopilot_scripts_file);
+    #[instrument(level = "debug")]
+    pub async fn delete_script_file(path: &str) -> Result<()> {
+        let path_obj = std::path::Path::new(path);
 
-        match tokio::fs::remove_file(path).await {
+        match tokio::fs::remove_file(path_obj).await {
             Ok(()) => info!("Removed lua script at {path:?}"),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 trace!("No lua script to remove at {path:?}");
@@ -76,6 +76,13 @@ impl Manager {
             }
         }
 
+        Ok(())
+    }
+
+    /// Disable scripting (or reload if no reboot needed). Returns `true` if reboot is required.
+    /// Does not reboot and does not hold [`crate::manager::MANAGER`].
+    #[instrument(level = "debug")]
+    pub async fn disable_or_reload_lua() -> Result<bool> {
         let autopilot_reboot_required =
             crate::mavlink::component()?.enable_lua_script(true).await?;
 
@@ -83,11 +90,9 @@ impl Manager {
             crate::mavlink::component()?
                 .reload_lua_scripts(true)
                 .await?;
-        } else {
-            crate::mavlink::component()?.reboot_autopilot().await?;
         }
 
-        Ok(())
+        Ok(autopilot_reboot_required)
     }
 
     #[instrument(level = "debug", skip(parameters))]
@@ -197,6 +202,7 @@ impl Manager {
         Ok(autopilot_reboot_required)
     }
 
+    #[instrument(level = "debug", skip(parameters))]
     pub async fn update_script_enable(
         camera_uuid: &Uuid,
         parameters: &api::ActuatorsParametersConfig,
@@ -266,6 +272,7 @@ impl Manager {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(parameters))]
     pub async fn update_script_gain(
         camera_uuid: &Uuid,
         parameters: &api::ActuatorsParametersConfig,

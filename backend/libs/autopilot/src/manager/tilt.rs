@@ -117,25 +117,22 @@ impl Manager {
         }
 
         Self::update_tilt_channel_parameters(camera_uuid, parameters, autopilot_reboot_required)
-            .await?;
-
-        Ok(autopilot_reboot_required)
+            .await
+            .map(|reboot| autopilot_reboot_required | reboot)
     }
     #[instrument(level = "debug", skip(parameters))]
     pub async fn update_tilt_channel_parameters(
         camera_uuid: &Uuid,
         parameters: &api::ActuatorsParametersConfig,
         force_apply: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         Self::update_tilt_channel_min(camera_uuid, parameters, force_apply).await?;
         Self::update_tilt_channel_trim(camera_uuid, parameters, force_apply).await?;
         Self::update_tilt_channel_max(camera_uuid, parameters, force_apply).await?;
 
         Self::update_tilt_mnt_pitch_min(camera_uuid, parameters, force_apply).await?;
         Self::update_tilt_mnt_pitch_max(camera_uuid, parameters, force_apply).await?;
-        Self::update_tilt_mnt_type(camera_uuid, parameters, force_apply).await?;
-
-        Ok(())
+        Self::update_tilt_mnt_type(camera_uuid, parameters, force_apply).await
     }
 
     generate_update_channel_param_function!(
@@ -184,7 +181,7 @@ impl Manager {
         camera_uuid: &Uuid,
         parameters: &api::ActuatorsParametersConfig,
         force_apply: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let (param_name, new_value, old_value) = {
             let mut manager = crate::manager::MANAGER
                 .get()
@@ -208,7 +205,7 @@ impl Manager {
             let new_value = match (parameters.tilt_mnt_type, force_apply) {
                 (Some(value), _) => value,
                 (None, true) => current_parameters.tilt_mnt_type,
-                (None, false) => return Ok(()),
+                (None, false) => return Ok(false),
             };
 
             (param_name, new_value, current_parameters.tilt_mnt_type)
@@ -241,8 +238,8 @@ impl Manager {
                     if let Some(actuators) = manager.settings.actuators.get_mut(camera_uuid) {
                         actuators.parameters.tilt_mnt_type = new_value;
                     }
-
-                    // TODO: Reboot required after change!
+                    // Mount type changes require an autopilot reboot to take effect.
+                    return Ok(old_value_encoded != new_value_encoded || force_apply);
                 }
                 Err(error) => {
                     return Err(error).context(format!("Failed setting parameter {param_name}"));
@@ -250,6 +247,6 @@ impl Manager {
             }
         }
 
-        Ok(())
+        Ok(false)
     }
 }
