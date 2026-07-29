@@ -9,7 +9,7 @@ use std::{
 
 use autopilot::api::{Action as AutopilotAction, ActuatorsConfig};
 use once_cell::sync::OnceCell;
-use radcam_api::{CameraUiState, UiDismissField};
+use radcam_api::{CameraUiState, OnePushAwbStatus, UiDismissField};
 use radcam_commands::Action as CameraAction;
 use tokio::task::JoinHandle;
 use tracing::*;
@@ -57,6 +57,18 @@ pub(crate) fn retain_known_cameras(known: &HashSet<Uuid>) {
         clear_min_loading_timeout(entry);
         false
     });
+}
+
+/// Set or clear the shared one-push AWB phase for all clients.
+#[instrument(level = "debug")]
+pub(crate) fn set_one_push_awb(camera_uuid: Uuid, status: Option<OnePushAwbStatus>) {
+    let state = {
+        let mut lock = ui().lock().unwrap();
+        let entry = lock.entry(camera_uuid).or_insert_with(new_entry);
+        entry.state.one_push_awb = status;
+        entry.state.clone()
+    };
+    camera_state::emit_ui(camera_uuid, state);
 }
 
 /// Dismiss a UI overlay field for all clients.
@@ -339,7 +351,7 @@ fn set_error(camera_uuid: Uuid, message: String) {
 
 /// Show a transient warning toast; suppressed while rebooting.
 #[instrument(level = "debug")]
-fn set_warning(camera_uuid: Uuid, message: String) {
+pub(crate) fn set_warning(camera_uuid: Uuid, message: String) {
     if autopilot::error_indicates_actuators_not_configured(&message) {
         return;
     }
