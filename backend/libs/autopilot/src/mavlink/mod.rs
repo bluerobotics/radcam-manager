@@ -226,7 +226,16 @@ impl MavlinkComponent {
         self.wait_autopilot().await?;
 
         Self::configure_parameter_encoding(self.inner.clone()).await;
-        Self::update_all_params(self.inner.clone()).await;
+        // Bound so a wedged autopilot cannot stall reboot forever.
+        if tokio::time::timeout(
+            tokio::time::Duration::from_secs(60),
+            Self::update_all_params(self.inner.clone()),
+        )
+        .await
+        .is_err()
+        {
+            warn!("Timed out refreshing parameters after autopilot reboot");
+        }
 
         Ok(())
     }
@@ -238,7 +247,7 @@ impl MavlinkComponent {
         let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
         let mut receiver = self.inner.get_receiver().await;
 
-        let wait_command_ack = async {
+        let wait_heartbeat = async {
             loop {
                 use broadcast::error::RecvError;
 
@@ -246,7 +255,7 @@ impl MavlinkComponent {
                     Ok(Message::Received((recv_header, recv_message)))
                         if recv_header.system_id == target_system
                             && recv_header.component_id == target_component
-                            && matches!(recv_message, MavMessage::COMMAND_ACK(_)) =>
+                            && matches!(recv_message, MavMessage::HEARTBEAT(_)) =>
                     {
                         if let MavMessage::HEARTBEAT(heartbeat) = recv_message {
                             use mavlink::ardupilotmega::MavState;
@@ -275,15 +284,15 @@ impl MavlinkComponent {
             }
         };
 
-        match tokio::time::timeout(tokio::time::Duration::from_secs(15), wait_command_ack).await {
-            Ok(res) => return res,
+        match tokio::time::timeout(tokio::time::Duration::from_secs(15), wait_heartbeat).await {
+            Ok(res) => res,
             Err(_) => {
-                warn!("Timeout waiting for autopilot {target_system}:{target_component}, retrying");
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                warn!(
+                    "Timeout waiting for autopilot {target_system}:{target_component} heartbeat; continuing"
+                );
+                Ok(())
             }
         }
-
-        Ok(())
     }
 
     #[instrument(level = "debug", skip(self))]

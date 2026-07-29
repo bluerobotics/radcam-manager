@@ -15,53 +15,56 @@ macro_rules! generate_update_channel_param_function {
             parameters: &$crate::api::ActuatorsParametersConfig,
             force_apply: bool,
         ) -> Result<()> {
-            let current_parameters = &mut self
-                .settings
-                .actuators
-                .entry(*camera_uuid)
-                .or_default()
-                .parameters;
-
-            let encoding = $crate::mavlink::component()?.encoding().await;
-
-            let channel = current_parameters.$channel_field as u8;
-
-            let param_name = format!("{}{}_{}", $param_prefix, channel, $param_suffix);
-
-            let new_value = match (parameters.$field_name, force_apply) {
-                (Some(value), _) => value,
-                (None, true) => current_parameters.$field_name,
-                (None, false) => return Ok(()),
+            // Snapshot under &mut self with no await, then release the field borrow
+            // before MAVLink I/O (caller must not hold MANAGER.write across this).
+            let (param_name, new_value, old_value) = {
+                let current_parameters = &mut self
+                    .settings
+                    .actuators
+                    .entry(*camera_uuid)
+                    .or_default()
+                    .parameters;
+                let channel = current_parameters.$channel_field as u8;
+                let param_name = format!("{}{}_{}", $param_prefix, channel, $param_suffix);
+                let new_value = match (parameters.$field_name, force_apply) {
+                    (Some(value), _) => value,
+                    (None, true) => current_parameters.$field_name,
+                    (None, false) => return Ok(()),
+                };
+                let old_value = current_parameters.$field_name;
+                (param_name, new_value, old_value)
             };
 
-            let mut param = $crate::mavlink::component()?
-                .get_param(&param_name, false)
-                .await?;
-            let old_value = current_parameters.$field_name;
+            if (old_value == new_value) && !force_apply {
+                trace!("Parameter {param_name:?} skipped");
+                return Ok(());
+            }
+
+            let mavlink = $crate::mavlink::component()?;
+            let encoding = mavlink.encoding().await;
+            let mut param = mavlink.get_param(&param_name, false).await?;
             param.value.set_value(ParamType::$ty(new_value), encoding)?;
 
-            if (old_value != new_value) || force_apply {
-                match $crate::mavlink::component()?.set_param(param).await {
-                    Ok(_) => {
-                        if old_value != new_value {
-                            info!(
-                                "{} changed from {:?} to {:?}",
-                                stringify!($field_name),
-                                old_value,
-                                new_value
-                            );
-                        }
-                        current_parameters.$field_name = new_value;
+            match mavlink.set_param(param).await {
+                Ok(_) => {
+                    if old_value != new_value {
+                        info!(
+                            "{} changed from {:?} to {:?}",
+                            stringify!($field_name),
+                            old_value,
+                            new_value
+                        );
                     }
-                    Err(error) => {
-                        return Err(anyhow::anyhow!(
-                            "Failed setting parameter {}: {error:?}",
-                            stringify!($field_name)
-                        ));
+                    if let Some(actuators) = self.settings.actuators.get_mut(camera_uuid) {
+                        actuators.parameters.$field_name = new_value;
                     }
                 }
-            } else {
-                trace!("Parameter {param_name:?} skipped");
+                Err(error) => {
+                    return Err(anyhow::anyhow!(
+                        "Failed setting parameter {}: {error:?}",
+                        stringify!($field_name)
+                    ));
+                }
             }
 
             Ok(())
@@ -84,60 +87,57 @@ macro_rules! generate_update_mount_param_function {
             parameters: &$crate::api::ActuatorsParametersConfig,
             force_apply: bool,
         ) -> Result<bool> {
-            let current_parameters = &mut self
-                .settings
-                .actuators
-                .entry(*camera_uuid)
-                .or_default()
-                .parameters;
-            let mut has_changed = false;
-
-            let encoding = $crate::mavlink::component()?.encoding().await;
-
-            let mount_id = match current_parameters.camera_id {
-                api::CameraID::CAM1 => TiltChannelFunction::MNT1,
-                api::CameraID::CAM2 => TiltChannelFunction::MNT2,
+            let (param_name, new_value, old_value) = {
+                let current_parameters = &mut self
+                    .settings
+                    .actuators
+                    .entry(*camera_uuid)
+                    .or_default()
+                    .parameters;
+                let mount_id = match current_parameters.camera_id {
+                    api::CameraID::CAM1 => TiltChannelFunction::MNT1,
+                    api::CameraID::CAM2 => TiltChannelFunction::MNT2,
+                };
+                let param_name = format!("{mount_id:?}_{}", $param_suffix);
+                let new_value = match (parameters.$field_name, force_apply) {
+                    (Some(value), _) => value,
+                    (None, true) => current_parameters.$field_name,
+                    (None, false) => return Ok(false),
+                };
+                let old_value = current_parameters.$field_name;
+                (param_name, new_value, old_value)
             };
-            let param_name = format!("{mount_id:?}_{}", $param_suffix);
 
-            let new_value = match (parameters.$field_name, force_apply) {
-                (Some(value), _) => value,
-                (None, true) => current_parameters.$field_name,
-                (None, false) => return Ok(has_changed),
-            };
-
-            let mut param = $crate::mavlink::component()?
-                .get_param(&param_name, false)
-                .await?;
-            let old_value = current_parameters.$field_name;
-            param.value.set_value(ParamType::$ty(new_value), encoding)?;
-
-            if (old_value != new_value) || force_apply {
-                match $crate::mavlink::component()?.set_param(param).await {
-                    Ok(_) => {
-                        if old_value != new_value {
-                            info!(
-                                "{} changed from {:?} to {:?}",
-                                stringify!($field_name),
-                                old_value,
-                                new_value
-                            );
-                        }
-                        current_parameters.$field_name = new_value;
-                        has_changed = true;
-                    }
-                    Err(error) => {
-                        return Err(anyhow::anyhow!(
-                            "Failed setting parameter {}: {error:?}",
-                            stringify!($field_name)
-                        ));
-                    }
-                }
-            } else {
+            if (old_value == new_value) && !force_apply {
                 trace!("Parameter {param_name:?} skipped");
+                return Ok(false);
             }
 
-            Ok(has_changed)
+            let mavlink = $crate::mavlink::component()?;
+            let encoding = mavlink.encoding().await;
+            let mut param = mavlink.get_param(&param_name, false).await?;
+            param.value.set_value(ParamType::$ty(new_value), encoding)?;
+
+            match mavlink.set_param(param).await {
+                Ok(_) => {
+                    if old_value != new_value {
+                        info!(
+                            "{} changed from {:?} to {:?}",
+                            stringify!($field_name),
+                            old_value,
+                            new_value
+                        );
+                    }
+                    if let Some(actuators) = self.settings.actuators.get_mut(camera_uuid) {
+                        actuators.parameters.$field_name = new_value;
+                    }
+                    Ok(old_value != new_value)
+                }
+                Err(error) => Err(anyhow::anyhow!(
+                    "Failed setting parameter {}: {error:?}",
+                    stringify!($field_name)
+                )),
+            }
         }
     };
 }

@@ -110,8 +110,7 @@ impl Manager {
         parameters: &api::ActuatorsParametersConfig,
         force_apply: bool,
     ) -> Result<()> {
-        (self)
-            .update_zoom_channel_min(camera_uuid, parameters, force_apply)
+        self.update_zoom_channel_min(camera_uuid, parameters, force_apply)
             .await?;
         self.update_zoom_channel_trim(camera_uuid, parameters, force_apply)
             .await?;
