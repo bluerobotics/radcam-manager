@@ -188,10 +188,17 @@ pub(crate) async fn control_inner(
                         manager.mavlink.request_servo_output_raw().await.ok()
                     };
                     if let Some(health_servo) = health_servo {
-                        let mut manager = MANAGER.get().context("Not available")?.write().await;
-                        manager
-                            .apply_focus_script_health_sample(&camera_uuid, &health_servo)
-                            .await;
+                        let needs_reload = {
+                            let mut manager = MANAGER.get().context("Not available")?.write().await;
+                            manager.apply_focus_script_health_sample(&camera_uuid, &health_servo)
+                        };
+                        if needs_reload {
+                            warn!("Attempting Lua script reload due to stale focus output");
+                            let manager = MANAGER.get().context("Not available")?.read().await;
+                            if let Err(error) = manager.mavlink.reload_lua_scripts(true).await {
+                                error!("Failed to reload Lua scripts: {error:?}");
+                            }
+                        }
                     }
                 }
             }
