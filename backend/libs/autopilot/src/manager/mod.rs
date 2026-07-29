@@ -131,9 +131,12 @@ impl Manager {
     }
 
     /// Send focus/zoom setpoints without waiting for SERVO (caller measures separately).
+    ///
+    /// Only needs `&self` so callers can send MAVLink commands without holding
+    /// `MANAGER.write()` across ACK retries.
     #[instrument(level = "debug", skip(self))]
     pub async fn apply_state_setpoints(
-        &mut self,
+        &self,
         _camera_uuid: &Uuid,
         new_state: &api::ActuatorsState,
     ) -> Result<()> {
