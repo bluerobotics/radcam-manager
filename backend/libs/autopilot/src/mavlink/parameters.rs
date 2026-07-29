@@ -278,7 +278,13 @@ impl MavlinkComponent {
 
     #[instrument(level = "debug", skip(self))]
     pub async fn get_param(&self, param_name: &str, skip_cache: bool) -> Result<Parameter> {
-        Self::get_param_inner(self.inner.clone(), param_name, skip_cache).await
+        if !skip_cache && let Some(parameter) = self.inner.parameters.read().await.get(param_name) {
+            trace!("Got parameter from cache!");
+            return Ok(parameter.clone());
+        }
+
+        let _txn = self.inner.txn.lock().await;
+        Self::get_param_inner(self.inner.clone(), param_name, true).await
     }
 
     #[instrument(level = "debug", skip(inner))]
@@ -404,6 +410,7 @@ impl MavlinkComponent {
 
     #[instrument(level = "debug", skip(self))]
     pub async fn set_param(&self, parameter: Parameter) -> Result<Parameter> {
+        let _txn = self.inner.txn.lock().await;
         Self::set_param_inner(self.inner.clone(), parameter).await
     }
 
