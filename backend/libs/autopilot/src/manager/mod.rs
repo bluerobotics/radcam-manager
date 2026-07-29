@@ -327,27 +327,30 @@ pub async fn init(
 ) -> Result<()> {
     let settings = State::from_settings().await?;
 
+    // Publish settings before MAVLink param sync so GetActuatorsConfig works while
+    // try_new is still downloading parameters (can take tens of seconds).
     if let Some(manager) = MANAGER.get() {
         let _apply = CONFIG_APPLY.lock().await;
         let mut guard = manager.write().await;
-        guard.autopilot_scripts_file = autopilot_scripts_file;
+        guard.autopilot_scripts_file = autopilot_scripts_file.clone();
         guard.settings = settings;
+    } else {
+        MANAGER.get_or_init(|| {
+            RwLock::new(Manager {
+                autopilot_scripts_file: autopilot_scripts_file.clone(),
+                settings,
+                script_health: ScriptHealthTracker::default(),
+            })
+        });
+    }
+
+    if mavlink::component().is_ok() {
         return Ok(());
     }
 
     let mavlink =
         MavlinkComponent::try_new(mavlink_address, mavlink_system_id, mavlink_component_id).await?;
     mavlink::init_component(mavlink)?;
-
-    let script_health = ScriptHealthTracker::default();
-
-    MANAGER.get_or_init(|| {
-        RwLock::new(Manager {
-            autopilot_scripts_file,
-            settings,
-            script_health,
-        })
-    });
 
     crate::actuators_watch::start();
 
