@@ -8,6 +8,7 @@ mod zoom;
 
 use ::mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use anyhow::{Context, Result};
+use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
@@ -31,17 +32,14 @@ pub static CONFIG_APPLY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(
 
 /// Hold [`CONFIG_APPLY`] for `under_apply`. If it returns `true`, drop the mutex,
 /// run `reboot`, re-acquire, then run `finalize`.
-#[instrument(level = "debug", skip_all)]
-pub async fn reboot_outside_apply_with<U, R, F>(
-    under_apply: U,
-    reboot: R,
-    finalize: F,
-) -> Result<()>
-where
-    U: std::future::Future<Output = Result<bool>>,
-    R: std::future::Future<Output = Result<()>>,
-    F: std::future::Future<Output = Result<()>>,
-{
+///
+/// Futures are type-erased (`BoxFuture`) so composing this into instrumented
+/// `handle_control` / WS spawn paths does not overflow rustc's Send recursion limit.
+pub async fn reboot_outside_apply_with(
+    under_apply: BoxFuture<'_, Result<bool>>,
+    reboot: BoxFuture<'_, Result<()>>,
+    finalize: BoxFuture<'_, Result<()>>,
+) -> Result<()> {
     let mut apply = CONFIG_APPLY.lock().await;
     let needs_reboot = under_apply.await?;
     if needs_reboot {
@@ -56,14 +54,13 @@ where
 
 /// Hold [`CONFIG_APPLY`] for `under_apply`. If it returns `true`, drop the mutex,
 /// reboot the autopilot, re-acquire, then run `finalize`.
-pub async fn reboot_outside_apply<U, F>(under_apply: U, finalize: F) -> Result<()>
-where
-    U: std::future::Future<Output = Result<bool>>,
-    F: std::future::Future<Output = Result<()>>,
-{
+pub async fn reboot_outside_apply(
+    under_apply: BoxFuture<'_, Result<bool>>,
+    finalize: BoxFuture<'_, Result<()>>,
+) -> Result<()> {
     reboot_outside_apply_with(
         under_apply,
-        async { crate::mavlink::component()?.reboot_autopilot().await },
+        Box::pin(async { crate::mavlink::component()?.reboot_autopilot().await }),
         finalize,
     )
     .await
@@ -79,21 +76,21 @@ mod apply_tests {
     async fn finalize_runs_only_after_reboot_when_needed() {
         let phase = AtomicUsize::new(0);
         reboot_outside_apply_with(
-            async {
+            Box::pin(async {
                 assert_eq!(phase.load(Ordering::SeqCst), 0);
                 phase.store(1, Ordering::SeqCst);
                 Ok(true)
-            },
-            async {
+            }),
+            Box::pin(async {
                 assert_eq!(phase.load(Ordering::SeqCst), 1);
                 phase.store(2, Ordering::SeqCst);
                 Ok(())
-            },
-            async {
+            }),
+            Box::pin(async {
                 assert_eq!(phase.load(Ordering::SeqCst), 2);
                 phase.store(3, Ordering::SeqCst);
                 Ok(())
-            },
+            }),
         )
         .await
         .unwrap();
@@ -104,14 +101,14 @@ mod apply_tests {
     async fn finalize_skipped_when_no_reboot() {
         let finalized = AtomicUsize::new(0);
         reboot_outside_apply_with(
-            async { Ok(false) },
-            async {
+            Box::pin(async { Ok(false) }),
+            Box::pin(async {
                 panic!("reboot must not run");
-            },
-            async {
+            }),
+            Box::pin(async {
                 finalized.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            },
+            }),
         )
         .await
         .unwrap();

@@ -68,7 +68,7 @@ pub(crate) async fn control_inner(
         Action::ExportLuaScript => {
             let camera_uuid = actuators_control.camera_uuid;
             manager::reboot_outside_apply(
-                async {
+                Box::pin(async {
                     let reload_script = manager::Manager::export_script(&camera_uuid, true).await?;
                     manager::Manager::save_actuators_settings().await?;
                     if reload_script {
@@ -77,9 +77,9 @@ pub(crate) async fn control_inner(
                             .await?;
                     }
                     crate::mavlink::component()?.enable_lua_script(false).await
-                },
+                }),
                 // Export already saved under apply; post-reboot finalize is a no-op.
-                async { Ok(()) },
+                Box::pin(async { Ok(()) }),
             )
             .await?;
 
@@ -233,14 +233,16 @@ pub(crate) async fn control_inner(
             };
 
             manager::reboot_outside_apply(
-                async { manager::Manager::update_config(&camera_uuid, &new_config, false).await },
-                async {
+                Box::pin(async {
+                    manager::Manager::update_config(&camera_uuid, &new_config, false).await
+                }),
+                Box::pin(async {
                     manager::Manager::finalize_config_after_reboot(
                         &camera_uuid,
                         new_config.parameters.as_ref(),
                     )
                     .await
-                },
+                }),
             )
             .await?;
 
@@ -258,14 +260,14 @@ pub(crate) async fn control_inner(
             let camera_uuid = actuators_control.camera_uuid;
             let default_params = api::ActuatorsConfig::from(&CameraActuators::default());
             manager::reboot_outside_apply(
-                async { manager::Manager::reset_config(&camera_uuid).await },
-                async {
+                Box::pin(async { manager::Manager::reset_config(&camera_uuid).await }),
+                Box::pin(async {
                     manager::Manager::finalize_config_after_reboot(
                         &camera_uuid,
                         default_params.parameters.as_ref(),
                     )
                     .await
-                },
+                }),
             )
             .await?;
 
