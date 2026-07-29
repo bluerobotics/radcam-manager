@@ -62,8 +62,6 @@ impl State {
 
     #[instrument(level = "debug", skip(self))]
     pub async fn save(&self) -> Result<()> {
-        // Clone under the caller's MANAGER guard, then drop any implication that
-        // disk I/O needs the actuators map borrow — SETTINGS_MANAGER is separate.
         let actuators = self
             .actuators
             .iter()
@@ -95,7 +93,6 @@ impl Manager {
             if new_state.focus.is_none() && new_state.zoom.is_none() {
                 return Err(anyhow::anyhow!("Tilt setpoint is not implemented"));
             }
-            // Clients that echo a full ActuatorsState still need focus/zoom to apply.
             warn!("Ignoring unimplemented tilt setpoint; applying focus/zoom only");
         }
 
@@ -110,7 +107,7 @@ impl Manager {
                     confirmation: 0,
                     param1: SetFocusType::FOCUS_TYPE_RANGE as u8 as f32,
                     param2: focus,
-                    param3: 0 as f32, // autopilot cameras
+                    param3: 0 as f32,
                     ..Default::default()
                 })
                 .await
@@ -126,7 +123,7 @@ impl Manager {
                     confirmation: 0,
                     param1: CameraZoomType::ZOOM_TYPE_RANGE as u8 as f32,
                     param2: zoom,
-                    param3: 0 as f32, // autopilot cameras
+                    param3: 0 as f32,
                     ..Default::default()
                 })
                 .await
@@ -136,53 +133,70 @@ impl Manager {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(self))]
+    /// Persist actuators settings without holding `MANAGER.write` across disk I/O.
+    #[instrument(level = "debug")]
+    pub async fn save_actuators_settings() -> Result<()> {
+        let actuators = {
+            let manager = MANAGER.get().context("Not available")?.read().await;
+            manager
+                .settings
+                .actuators
+                .iter()
+                .map(|(uuid, actuator_settings)| (*uuid, actuator_settings.into()))
+                .collect()
+        };
+
+        let settings = &mut SETTINGS_MANAGER
+            .get()
+            .context("Not available")?
+            .write()
+            .await
+            .settings;
+
+        *settings.get_actuators_mut() = actuators;
+        settings.save().await
+    }
+
+    /// Apply config without holding `MANAGER.write` across MAVLink I/O.
+    ///
+    /// Caller must hold [`CONFIG_APPLY`]. Returns `true` if the autopilot must be
+    /// rebooted before [`Self::finalize_config_after_reboot`] (enable/gain + save).
+    #[instrument(level = "debug", skip(new_config))]
     pub async fn update_config(
-        &mut self,
         camera_uuid: &Uuid,
         new_config: &api::ActuatorsConfig,
         overwrite: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let mut autopilot_reboot_required = overwrite;
 
-        // Parameters update
         if let Some(parameters) = &new_config.parameters {
-            autopilot_reboot_required |= self
-                .update_camera_parameters(camera_uuid, parameters, overwrite)
-                .await?;
+            autopilot_reboot_required |=
+                Self::update_camera_parameters(camera_uuid, parameters, overwrite).await?;
 
-            autopilot_reboot_required |= self
-                .update_script_parameters(camera_uuid, parameters, overwrite)
-                .await?;
+            autopilot_reboot_required |=
+                Self::update_script_parameters(camera_uuid, parameters, overwrite).await?;
 
-            autopilot_reboot_required |= self
-                .update_focus_parameters(camera_uuid, parameters, overwrite)
-                .await?;
+            autopilot_reboot_required |=
+                Self::update_focus_parameters(camera_uuid, parameters, overwrite).await?;
 
-            autopilot_reboot_required |= self
-                .update_zoom_parameters(camera_uuid, parameters, overwrite)
-                .await?;
+            autopilot_reboot_required |=
+                Self::update_zoom_parameters(camera_uuid, parameters, overwrite).await?;
 
-            autopilot_reboot_required |= self
-                .update_tilt_parameters(camera_uuid, parameters, overwrite)
-                .await?;
+            autopilot_reboot_required |=
+                Self::update_tilt_parameters(camera_uuid, parameters, overwrite).await?;
         }
 
         let mut reload_script = overwrite;
 
-        // Callibration update
         if let Some(points) = &new_config.closest_points {
-            reload_script |= self
-                .update_closest_points(camera_uuid, points, overwrite)
-                .await?;
+            reload_script |= Self::update_closest_points(camera_uuid, points, overwrite).await?;
         }
         if let Some(points) = &new_config.furthest_points {
-            reload_script |= self
-                .update_furthest_points(camera_uuid, points, overwrite)
-                .await?;
+            reload_script |= Self::update_furthest_points(camera_uuid, points, overwrite).await?;
         }
 
-        reload_script |= self.export_script(camera_uuid, overwrite).await?;
+        // File write only — disk settings save is deferred to finalize / no-reboot path.
+        reload_script |= Self::export_script(camera_uuid, overwrite).await?;
 
         autopilot_reboot_required |= crate::mavlink::component()?
             .enable_lua_script(overwrite)
@@ -195,34 +209,44 @@ impl Manager {
         }
 
         if autopilot_reboot_required {
-            crate::mavlink::component()?.reboot_autopilot().await?;
+            // Caller drops CONFIG_APPLY, reboots, then calls finalize_config_after_reboot.
+            return Ok(true);
         }
 
-        // Re-push ENABLE/GAIN only when the Lua script was rewritten/reloaded (or a
-        // full overwrite/reboot), so a correlation toggle does not force a GAIN
-        // round-trip under the manager write lock.
-        let force_script_params = reload_script || overwrite || autopilot_reboot_required;
+        let force_script_params = reload_script || overwrite;
         if let Some(parameters) = &new_config.parameters {
-            self.update_script_enable(camera_uuid, parameters, force_script_params)
-                .await?;
-
-            self.update_script_gain(camera_uuid, parameters, force_script_params)
-                .await?;
+            Self::update_script_enable(camera_uuid, parameters, force_script_params).await?;
+            Self::update_script_gain(camera_uuid, parameters, force_script_params).await?;
         }
 
-        self.settings.save().await?;
-
-        Ok(())
+        Self::save_actuators_settings().await?;
+        Ok(false)
     }
 
-    #[instrument(level = "debug", skip(self))]
-    pub async fn reset_config(&mut self, camera_uuid: &Uuid) -> Result<()> {
+    /// Post-reboot enable/gain push and settings save. Caller must hold [`CONFIG_APPLY`].
+    #[instrument(level = "debug", skip(parameters))]
+    pub async fn finalize_config_after_reboot(
+        camera_uuid: &Uuid,
+        parameters: Option<&api::ActuatorsParametersConfig>,
+    ) -> Result<()> {
+        if let Some(parameters) = parameters {
+            Self::update_script_enable(camera_uuid, parameters, true).await?;
+            Self::update_script_gain(camera_uuid, parameters, true).await?;
+        }
+        Self::save_actuators_settings().await
+    }
+
+    #[instrument(level = "debug")]
+    pub async fn reset_config(camera_uuid: &Uuid) -> Result<bool> {
         let actuators = CameraActuators::default();
         let config = api::ActuatorsConfig::from(&actuators);
 
-        self.settings.actuators.insert(*camera_uuid, actuators);
+        {
+            let mut manager = MANAGER.get().context("Not available")?.write().await;
+            manager.settings.actuators.insert(*camera_uuid, actuators);
+        }
 
-        self.update_config(camera_uuid, &config, true).await
+        Self::update_config(camera_uuid, &config, true).await
     }
 }
 
