@@ -352,7 +352,7 @@ watch(selectedCameraUUID, (uuid, previousUuid) => {
     applyCameraUi({
       ...ui,
       loading: false,
-      loading_message: null,
+      loading_message: undefined,
       rebooting: false,
     })
   } else {
