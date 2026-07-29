@@ -910,7 +910,9 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
       ) {
         return
       }
-      baseParams.value = data as BaseParameterSetting
+      if (inFlightBaseWrites.value === 1) {
+        baseParams.value = data as BaseParameterSetting
+      }
     })
     .catch(error => {
       console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
@@ -1043,7 +1045,9 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
       ) {
         return
       }
-      advancedParams.value = data as AdvancedParameterSetting
+      if (inFlightAdvancedWrites.value === 1) {
+        advancedParams.value = data as AdvancedParameterSetting
+      }
     })
     .catch(error => {
       console.error(`Error updating ${param}:`, error.message)

@@ -42,7 +42,7 @@
         </v-btn>
       </div>
       <div
-        v-if="baseParams.auto_awb"
+        v-if="baseParams.auto_awb === BaseAutoWhiteBalanceModeValue.Manual"
         class="d-flex flex-column align-end mt-6"
       >
         <BlueSlider
@@ -1047,7 +1047,10 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
       ) {
         return
       }
-      baseParams.value = data as BaseParameterSetting
+      // Only apply when this is the last in-flight write (avoid older responses clobbering).
+      if (inFlightParamWrites.value === 1) {
+        baseParams.value = data as BaseParameterSetting
+      }
     })
     .catch((error) => {
       const message = `Error sending ${String(param)} control with value '${value}'`
@@ -1266,11 +1269,9 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
       // even if the UI is disabled (loading/reboot) so the drain cannot strand.
       if (actuatorsSetQueued.value[param] !== null) {
         sendQueuedActuatorState(param, true)
-      } else {
-        // Clear the desired latch when nothing is queued so whole-percent SERVO
-        // feedback cannot leave a 0.1-step focus value stuck forever.
-        desiredActuatorsState.value[param] = null
       }
+      // Leave desiredActuatorsState latched until SERVO feedback matches
+      // (see applyActuatorsState).
     })
 }
 
