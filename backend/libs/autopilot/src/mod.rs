@@ -109,6 +109,7 @@ pub(crate) async fn control_inner(
                         .get(&actuators_control.camera_uuid)
                         .context(crate::ACTUATORS_NOT_CONFIGURED)?;
                 }
+                let age_before = actuators_watch::last_servo_age(actuators_control.camera_uuid);
                 let servo_output_raw = {
                     let manager = MANAGER.get().context("Not available")?.read().await;
                     manager
@@ -124,21 +125,28 @@ pub(crate) async fn control_inner(
                     .get_mut(&actuators_control.camera_uuid)
                     .context(crate::ACTUATORS_NOT_CONFIGURED)?;
                 let state = manager::actuators_state_from_servo(actuators, &servo_output_raw);
-                actuators.state = state;
-                actuators_watch::mark_servo_from_get_state(actuators_control.camera_uuid);
-                serde_json::to_value(state)?
+                let age_after = actuators_watch::last_servo_age(actuators_control.camera_uuid);
+                // Do not clobber a newer watcher sample that landed while we waited.
+                if !actuators_watch::servo_mark_advanced(age_before, age_after) {
+                    actuators.state = state;
+                    actuators_watch::mark_servo_from_get_state(actuators_control.camera_uuid);
+                    serde_json::to_value(state)?
+                } else {
+                    serde_json::to_value(actuators.state)?
+                }
             }
         }
         Action::SetActuatorsState(new_state) => {
             let camera_uuid = actuators_control.camera_uuid;
             let focus_was_set = new_state.focus.is_some();
-            // Apply setpoints under a short write; do not hold it across SERVO wait.
+            // Send MAVLink without write lock (ACK retries must not block the watcher).
             {
-                let mut manager = MANAGER.get().context("Not available")?.write().await;
+                let manager = MANAGER.get().context("Not available")?.read().await;
                 manager
                     .apply_state_setpoints(&camera_uuid, new_state)
                     .await?;
             }
+            let age_before = actuators_watch::last_servo_age(camera_uuid);
             let servo_output_raw = {
                 let manager = MANAGER.get().context("Not available")?.read().await;
                 manager
@@ -147,17 +155,45 @@ pub(crate) async fn control_inner(
                     .await
                     .context("Failed waiting for SERVO_OUTPUT_RAW_DATA message")?
             };
-            let mut manager = MANAGER.get().context("Not available")?.write().await;
-            let actuators = manager
-                .settings
-                .actuators
-                .get_mut(&camera_uuid)
-                .context(crate::ACTUATORS_NOT_CONFIGURED)?;
-            let state = manager::actuators_state_from_servo(actuators, &servo_output_raw);
-            actuators.state = state;
-            actuators_watch::mark_servo_from_get_state(camera_uuid);
+            let state = {
+                let mut manager = MANAGER.get().context("Not available")?.write().await;
+                let actuators = manager
+                    .settings
+                    .actuators
+                    .get_mut(&camera_uuid)
+                    .context(crate::ACTUATORS_NOT_CONFIGURED)?;
+                let measured = manager::actuators_state_from_servo(actuators, &servo_output_raw);
+                let age_after = actuators_watch::last_servo_age(camera_uuid);
+                if !actuators_watch::servo_mark_advanced(age_before, age_after) {
+                    actuators.state = measured;
+                    actuators_watch::mark_servo_from_get_state(camera_uuid);
+                    measured
+                } else {
+                    actuators.state
+                }
+            };
+            // Health check waits for SERVO again — never under MANAGER.write().
             if focus_was_set {
-                manager.check_focus_script_health(&camera_uuid).await;
+                let enabled = {
+                    let manager = MANAGER.get().context("Not available")?.read().await;
+                    manager
+                        .settings
+                        .actuators
+                        .get(&camera_uuid)
+                        .is_some_and(|a| a.parameters.enable_focus_and_zoom_correlation)
+                };
+                if enabled {
+                    let health_servo = {
+                        let manager = MANAGER.get().context("Not available")?.read().await;
+                        manager.mavlink.request_servo_output_raw().await.ok()
+                    };
+                    if let Some(health_servo) = health_servo {
+                        let mut manager = MANAGER.get().context("Not available")?.write().await;
+                        manager
+                            .apply_focus_script_health_sample(&camera_uuid, &health_servo)
+                            .await;
+                    }
+                }
             }
             serde_json::to_value(state)?
         }

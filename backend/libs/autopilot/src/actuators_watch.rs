@@ -139,6 +139,15 @@ pub fn last_servo_age(camera_uuid: Uuid) -> Option<Duration> {
     Some(at.elapsed())
 }
 
+/// True when a SERVO mark appeared or got younger between two [`last_servo_age`] snapshots.
+pub fn servo_mark_advanced(before: Option<Duration>, after: Option<Duration>) -> bool {
+    match (before, after) {
+        (None, Some(_)) => true,
+        (Some(before), Some(after)) => after < before,
+        _ => false,
+    }
+}
+
 /// True when this camera's cached actuators state is fresh enough to serve without a one-shot wait.
 pub fn cache_is_fresh(camera_uuid: Uuid) -> bool {
     last_servo_age(camera_uuid).is_some_and(|age| age < STREAM_STALE_AFTER)
@@ -354,6 +363,11 @@ async fn actuators_watcher() {
                 }
                 _ = INTEREST_CHANGED.notified() => {
                     if INTEREST.load(Ordering::SeqCst) > 0 {
+                        // Rising edge 0→1: drop stale emit coalescing so the first
+                        // fresh sample is not suppressed by a pre-disable snapshot.
+                        gate.last_emitted.clear();
+                        gate.last_emit_at.clear();
+                        gate.pending.clear();
                         // Best-effort; refresh tick retries if the autopilot is quiet.
                         // Do not bump last_servo_at — that would fake freshness.
                         let _ = tokio::time::timeout(
