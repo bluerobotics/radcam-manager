@@ -854,6 +854,9 @@ const imageRequestGeneration = ref(0)
 /** Monotonic seq so only the newest write/restore may apply its response body. */
 let baseWriteSeq = 0
 let advancedWriteSeq = 0
+/** Fields with an optimistic write that must not be clobbered by WS/GET. */
+const dirtyBaseFields = new Set<keyof BaseParameterSetting>()
+const dirtyAdvancedFields = new Set<keyof AdvancedParameterSetting>()
 
 const applyCameraStateEvent = (body: unknown) => {
   if (!props.selectedCameraUuid) return
@@ -862,11 +865,31 @@ const applyCameraStateEvent = (body: unknown) => {
   const data = body as Record<string, unknown>
   if (data.camera_uuid !== props.selectedCameraUuid) return
 
-  if (data.base_parameters && inFlightBaseWrites.value === 0) {
-    baseParams.value = data.base_parameters as BaseParameterSetting
+  if (data.base_parameters) {
+    const incoming = data.base_parameters as BaseParameterSetting
+    if (dirtyBaseFields.size === 0) {
+      baseParams.value = incoming
+    } else {
+      baseParams.value = {
+        ...incoming,
+        ...Object.fromEntries(
+          [...dirtyBaseFields].map((key) => [key, baseParams.value[key]]),
+        ),
+      } as BaseParameterSetting
+    }
   }
-  if (data.advanced_parameters && inFlightAdvancedWrites.value === 0) {
-    advancedParams.value = data.advanced_parameters as AdvancedParameterSetting
+  if (data.advanced_parameters) {
+    const incoming = data.advanced_parameters as AdvancedParameterSetting
+    if (dirtyAdvancedFields.size === 0) {
+      advancedParams.value = incoming
+    } else {
+      advancedParams.value = {
+        ...incoming,
+        ...Object.fromEntries(
+          [...dirtyAdvancedFields].map((key) => [key, advancedParams.value[key]]),
+        ),
+      } as AdvancedParameterSetting
+    }
   }
 }
 
@@ -880,6 +903,8 @@ watch(
     inFlightAdvancedWrites.value = 0
     baseWriteSeq += 1
     advancedWriteSeq += 1
+    dirtyBaseFields.clear()
+    dirtyAdvancedFields.clear()
     processingWhiteBalance.value = false
     processingBaseRestore.value = false
     processingAdvancedRestore.value = false
@@ -897,6 +922,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   const writeSeq = ++baseWriteSeq
   const previous = baseParams.value[param]
   baseParams.value = { ...baseParams.value, [param]: value }
+  dirtyBaseFields.add(param)
   inFlightBaseWrites.value++
 
   const payload = {
@@ -919,17 +945,21 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
         return
       }
       baseParams.value = data as BaseParameterSetting
+      dirtyBaseFields.clear()
     })
     .catch(error => {
       console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== imageRequestGeneration.value ||
-        writeSeq !== baseWriteSeq
+        generation !== imageRequestGeneration.value
       ) {
         return
       }
-      baseParams.value = { ...baseParams.value, [param]: previous }
+      // Revert this field even if a newer writeSeq superseded us (other fields).
+      if (baseParams.value[param] === value) {
+        baseParams.value = { ...baseParams.value, [param]: previous }
+      }
+      dirtyBaseFields.delete(param)
     })
     .finally(() => {
       if (generation !== imageRequestGeneration.value) return
@@ -944,6 +974,7 @@ const getBaseParameters = () => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
+  const writeSeqAtStart = baseWriteSeq
   const payload = {
     camera_uuid: cameraUuid,
     action: "getImageAdjustment",
@@ -954,7 +985,9 @@ const getBaseParameters = () => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
         generation !== imageRequestGeneration.value ||
-        inFlightBaseWrites.value > 0
+        writeSeqAtStart !== baseWriteSeq ||
+        inFlightBaseWrites.value > 0 ||
+        dirtyBaseFields.size > 0
       ) {
         return
       }
@@ -1008,6 +1041,7 @@ const doRestoreBase = async () => {
   const generation = imageRequestGeneration.value
   const writeSeq = ++baseWriteSeq
   inFlightBaseWrites.value++
+  dirtyBaseFields.clear()
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustment",
@@ -1027,6 +1061,7 @@ const doRestoreBase = async () => {
         return
       }
       baseParams.value = data as BaseParameterSetting
+      dirtyBaseFields.clear()
     })
     .catch(error => {
       console.error("Error sending base image restore control:", error.message)
@@ -1047,6 +1082,7 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
   const writeSeq = ++advancedWriteSeq
   const previous = advancedParams.value[param]
   advancedParams.value = { ...advancedParams.value, [param]: value }
+  dirtyAdvancedFields.add(param)
   inFlightAdvancedWrites.value++
 
   const payload: CameraControl = {
@@ -1065,17 +1101,20 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
         return
       }
       advancedParams.value = data as AdvancedParameterSetting
+      dirtyAdvancedFields.clear()
     })
     .catch(error => {
       console.error(`Error updating ${param}:`, error.message)
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== imageRequestGeneration.value ||
-        writeSeq !== advancedWriteSeq
+        generation !== imageRequestGeneration.value
       ) {
         return
       }
-      advancedParams.value = { ...advancedParams.value, [param]: previous }
+      if (advancedParams.value[param] === value) {
+        advancedParams.value = { ...advancedParams.value, [param]: previous }
+      }
+      dirtyAdvancedFields.delete(param)
     })
     .finally(() => {
       if (generation !== imageRequestGeneration.value) return
@@ -1092,6 +1131,7 @@ const doRestoreAdvanced = async () => {
   const generation = imageRequestGeneration.value
   const writeSeq = ++advancedWriteSeq
   inFlightAdvancedWrites.value++
+  dirtyAdvancedFields.clear()
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
@@ -1108,6 +1148,7 @@ const doRestoreAdvanced = async () => {
         return
       }
       advancedParams.value = data as AdvancedParameterSetting
+      dirtyAdvancedFields.clear()
     })
     .catch(error => {
       console.error("Error restoring advanced parameters:", error.message)
