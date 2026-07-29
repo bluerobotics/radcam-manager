@@ -121,6 +121,10 @@ class BackendClient {
   private notifyTransportError(error: unknown): void {
     if (!isTransportError(error)) return
     const message = transportErrorMessage(error)
+    this.notifyWarning(message)
+  }
+
+  private notifyWarning(message: string): void {
     for (const handler of this.transportErrorHandlers) {
       handler(message)
     }
@@ -331,8 +335,10 @@ class BackendClient {
         const body = message.body as { camera_uuid?: string; reason?: string } | null
         if (!body?.camera_uuid || body.camera_uuid === this.subscribedCameraUuid) {
           if (body?.reason === 'unknown_camera') {
+            // Retry from the next camera/list — do not immediate-resubscribe (storm).
             this.subscribeNeedsRetry = true
-            this.queueSubscribe(this.subscribedCameraUuid)
+          } else if (body?.reason === 'camera_cap') {
+            this.notifyWarning('Camera subscribe rejected: camera limit reached')
           } else {
             console.warn('Camera subscribe rejected:', body?.reason ?? 'unknown')
           }
