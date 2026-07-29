@@ -8,17 +8,21 @@ macro_rules! generate_update_channel_param_function {
         $ty:ident,
         $channel_field:ident
     ) => {
-        #[instrument(level = "debug", skip(self, parameters))]
+        #[instrument(level = "debug", skip(parameters))]
         async fn $fn_name(
-            &mut self,
             camera_uuid: &Uuid,
             parameters: &$crate::api::ActuatorsParametersConfig,
             force_apply: bool,
         ) -> Result<()> {
-            // Snapshot under &mut self with no await, then release the field borrow
-            // before MAVLink I/O (caller must not hold MANAGER.write across this).
+            // Snapshot under a short write with no await inside, so the MAVLink I/O
+            // below never runs while MANAGER is locked.
             let (param_name, new_value, old_value) = {
-                let current_parameters = &mut self
+                let mut manager = $crate::manager::MANAGER
+                    .get()
+                    .context("Not available")?
+                    .write()
+                    .await;
+                let current_parameters = &mut manager
                     .settings
                     .actuators
                     .entry(*camera_uuid)
@@ -55,7 +59,12 @@ macro_rules! generate_update_channel_param_function {
                             new_value
                         );
                     }
-                    if let Some(actuators) = self.settings.actuators.get_mut(camera_uuid) {
+                    let mut manager = $crate::manager::MANAGER
+                        .get()
+                        .context("Not available")?
+                        .write()
+                        .await;
+                    if let Some(actuators) = manager.settings.actuators.get_mut(camera_uuid) {
                         actuators.parameters.$field_name = new_value;
                     }
                 }
@@ -80,15 +89,19 @@ macro_rules! generate_update_mount_param_function {
         $param_suffix:expr,
         $ty:ident
     ) => {
-        #[instrument(level = "debug", skip(self, parameters))]
+        #[instrument(level = "debug", skip(parameters))]
         pub async fn $fn_name(
-            &mut self,
             camera_uuid: &Uuid,
             parameters: &$crate::api::ActuatorsParametersConfig,
             force_apply: bool,
         ) -> Result<bool> {
             let (param_name, new_value, old_value) = {
-                let current_parameters = &mut self
+                let mut manager = $crate::manager::MANAGER
+                    .get()
+                    .context("Not available")?
+                    .write()
+                    .await;
+                let current_parameters = &mut manager
                     .settings
                     .actuators
                     .entry(*camera_uuid)
@@ -128,7 +141,12 @@ macro_rules! generate_update_mount_param_function {
                             new_value
                         );
                     }
-                    if let Some(actuators) = self.settings.actuators.get_mut(camera_uuid) {
+                    let mut manager = $crate::manager::MANAGER
+                        .get()
+                        .context("Not available")?
+                        .write()
+                        .await;
+                    if let Some(actuators) = manager.settings.actuators.get_mut(camera_uuid) {
                         actuators.parameters.$field_name = new_value;
                     }
                     Ok(old_value != new_value)
