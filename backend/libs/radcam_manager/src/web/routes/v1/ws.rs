@@ -348,9 +348,15 @@ async fn handle_client_text(
                 }
 
                 // Never park on the permit — subscribe/unsubscribe churn must not pile up
-                // tasks. The slow watcher fills in if the initial snapshot is skipped.
+                // tasks. The slow watcher fills params; actuators need an explicit push.
                 let Ok(permit) = snapshot_permits.clone().try_acquire_owned() else {
-                    debug!(%connection_id, %camera_uuid, "No permit for subscribe snapshot");
+                    debug!(%connection_id, %camera_uuid, "No permit for subscribe snapshot; pushing actuators only");
+                    if let Some(event) = camera_state::actuators_state_event(camera_uuid).await
+                        && let Some(text) = state_event_text(&event)
+                    {
+                        // close_notify already woken on Full; nothing left to unwind here.
+                        let _ = queue_text(connection_id, response_tx, close_notify, text);
+                    }
                     return;
                 };
 
