@@ -96,7 +96,7 @@
         @click="doWhiteBalance"
       >
         <v-progress-circular
-          v-if="wbRunning"
+          v-if="wbBusy"
           indeterminate
           color="white"
           size="20"
@@ -741,10 +741,8 @@ const props = defineProps<{
 }>()
 
 const wbBusy = computed(() => props.onePushAwb != null)
-const wbRunning = computed(() => props.onePushAwb?.phase === 'running')
 const onePushLabel = computed(() => {
-  if (props.onePushAwb?.phase === 'running') return 'Processing...'
-  if (props.onePushAwb?.phase === 'cooldown') return 'Cooling down...'
+  if (props.onePushAwb != null) return 'Processing...'
   return 'One-Push White Balance'
 })
 
