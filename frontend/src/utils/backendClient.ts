@@ -220,7 +220,8 @@ class BackendClient {
         this.lastMessageAt = Date.now()
         this.setConnectionState('connected')
         this.startStaleCheck()
-        // Re-subscribe immediately on reconnect (do not wait for camera/list).
+        // Cap is per-connection — clear before re-subscribe on a new socket.
+        this.subscribeBlocked = false
         if (this.subscribedCameraUuid) {
           this.queueSubscribe(this.subscribedCameraUuid)
         }
@@ -242,6 +243,7 @@ class BackendClient {
         this.setConnectionState('disconnected')
         // Force list-driven re-subscribe after reconnect — prior state may be gone.
         this.hasCameraState = false
+        this.subscribeBlocked = false
         this.rejectAllPending(new Error('WebSocket closed'))
 
         if (!settled) {
@@ -480,13 +482,13 @@ class BackendClient {
   /** Re-push subscribe for the active camera without changing refcounts (tab remount). */
   refreshCameraSubscription(): void {
     if (this.subscribedCameraUuid) {
-      // Do not clear subscribeBlocked — tab remount must not retry past camera_cap.
       this.queueSubscribe(this.subscribedCameraUuid)
     }
   }
 
   /** Collapse same-uuid subscribes issued in the same tick into one wire frame. */
   private queueSubscribe(cameraUuid: string): void {
+    if (this.subscribeBlocked) return
     this.pendingSubscribe = cameraUuid
     if (this.subscribeQueued) return
     this.subscribeQueued = true
@@ -495,7 +497,7 @@ class BackendClient {
       const pending = this.pendingSubscribe
       this.pendingSubscribe = null
       // Skip if unsubscribe cleared the active uuid in the same tick.
-      if (pending && pending === this.subscribedCameraUuid) {
+      if (pending && pending === this.subscribedCameraUuid && !this.subscribeBlocked) {
         this.sendCameraSubscription('subscribe', pending)
       }
     })
