@@ -70,7 +70,6 @@
           type="range"
           class="absolute inset-0 w-full h-full opacity-0"
           :class="disabled ? 'cursor-not-allowed' : 'cursor-pointer'"
-          style="width: 95%; left: 2.5%"
           :min="min"
           :max="max"
           :step="rawStep"
@@ -260,8 +259,10 @@ const approxEqual = (a: number, b: number): boolean => {
 
 // Pill position logic
 const fillWidth = computed(() => {
+  const span = props.max - props.min
+  if (!(span > 0)) return 0
   const val = currentSliderValue.value
-  return ((val - props.min) / (props.max - props.min)) * 100
+  return ((val - props.min) / span) * 100
 })
 const staticFillWidth = ref<number>(0)
 
@@ -271,6 +272,8 @@ const pillLeft = computed(() =>
       ? staticFillWidth.value
       : fillWidth.value) / 100})`
 )
+
+const skipEditCommit = ref(false)
 
 const sendValue = (val: number) => {
   if (val === lastSentValue.value) return
@@ -423,9 +426,11 @@ const onRangeKeyup = (e: KeyboardEvent): void => {
 // Keyboard handling for the edit input.
 const handleValueChange = (e: KeyboardEvent): void => {
   if (e.key === 'Escape') {
-    isEditingCurrentSliderValue.value = false
+    // Restore before leaving edit mode so the edit watcher does not commit.
     editedDisplayValue.value = props.scaleFn ? props.scaleFn(lastSentValue.value) : lastSentValue.value
     currentSliderValue.value = lastSentValue.value
+    skipEditCommit.value = true
+    isEditingCurrentSliderValue.value = false
   } else if (e.key === 'Enter') {
     isEditingCurrentSliderValue.value = false
   }
@@ -468,6 +473,10 @@ watch(isEditingCurrentSliderValue, (isEditing) => {
     editedDisplayValue.value = displayValue.value
     staticFillWidth.value = fillWidth.value
   } else {
+    if (skipEditCommit.value) {
+      skipEditCommit.value = false
+      return
+    }
     if (!Number.isFinite(editedDisplayValue.value)) {
       editedDisplayValue.value = displayValue.value
     }

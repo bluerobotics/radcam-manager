@@ -160,6 +160,8 @@ const hasUserEditedVideo = ref(false)
 const streamsRequestGeneration = ref(0)
 let suppressUserEditFlag = false
 let awaitingHydrate = false
+/** Ignore camera/state venc pushes until reboot overlay clears. */
+let awaitingRestartHydrate = false
 
 watch(
   () => props.selectedCameraUuid,
@@ -167,6 +169,7 @@ watch(
     streamsRequestGeneration.value += 1
     hasUserEditedVideo.value = false
     processingUpdate.value = false
+    awaitingRestartHydrate = false
     // Hold dirty latch until the first successful hydrate for this camera.
     suppressUserEditFlag = true
     awaitingHydrate = true
@@ -179,6 +182,15 @@ watch(
     getVideoParameters(true)
   },
   { immediate: true },
+)
+
+watch(
+  () => props.disabled,
+  (disabled, wasDisabled) => {
+    if (wasDisabled && !disabled && awaitingRestartHydrate) {
+      awaitingRestartHydrate = false
+    }
+  },
 )
 
 watch(
@@ -217,7 +229,7 @@ const applyCameraStateEvent = (body: unknown) => {
   const data = body as Record<string, unknown>
   if (data.camera_uuid !== props.selectedCameraUuid) return
   if (!data.video_parameters) return
-  if (hasUserEditedVideo.value) return
+  if (hasUserEditedVideo.value || awaitingRestartHydrate) return
 
   const settings = data.video_parameters as VideoParameterSettings
   const currentChannel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
@@ -271,6 +283,7 @@ const updateVideoParameters = () => {
         // Always reboot the camera that accepted the venc change, even if the
         // user switched selection afterward.
         handedOffRestart = true
+        awaitingRestartHydrate = true
         doRestart(cameraUuid)
       }
     })
@@ -394,8 +407,8 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
   selectedVideoParameters.value.pixel_list = undefined
 
   selectedVideoResolution.value = {
-    width: settings.pic_width!,
-    height: settings.pic_height!,
+    width: settings.pic_width ?? selectedVideoResolution.value?.width ?? 0,
+    height: settings.pic_height ?? selectedVideoResolution.value?.height ?? 0,
   } as VideoResolutionValue
   hasUserEditedVideo.value = false
   awaitingHydrate = false
