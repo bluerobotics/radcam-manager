@@ -167,6 +167,8 @@ fn generate_typescript_bindings_for_radcam_api() -> Result<()> {
     let ts_rs_bindings = [
         radcam_api::CameraStateEvent::export_to_string()?,
         radcam_api::CameraUiState::export_to_string()?,
+        radcam_api::OnePushAwbStatus::export_to_string()?,
+        radcam_api::OnePushAwbPhase::export_to_string()?,
         radcam_api::ConnectionStats::export_to_string()?,
         radcam_api::WsRequest::export_to_string()?,
         radcam_api::WsClientMessage::export_to_string()?,
