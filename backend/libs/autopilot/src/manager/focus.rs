@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::*;
 use uuid::Uuid;
 
@@ -51,9 +51,9 @@ impl Manager {
                             }
                         }
                         Err(error) => {
-                            warn!(
-                                "Failed to disable the old focus channel when setting parameter: {error:?}"
-                            )
+                            return Err(error).context(
+                                "Failed to disable the old focus channel when setting parameter",
+                            );
                         }
                     }
                 }
@@ -89,9 +89,9 @@ impl Manager {
                             autopilot_reboot_required = true;
                         }
                         Err(error) => {
-                            warn!(
-                                "Failed setting new focus channel parameter when setting parameter: {error:?}"
-                            )
+                            return Err(error).context(
+                                "Failed setting new focus channel parameter when setting parameter",
+                            );
                         }
                     }
                 }

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::*;
 use uuid::Uuid;
 
@@ -50,9 +50,9 @@ impl Manager {
                             }
                         }
                         Err(error) => {
-                            warn!(
-                                "Failed to disable the old camera camera_id when setting parameter: {error:?}"
-                            )
+                            return Err(error).context(
+                                "Failed to disable the old camera camera_id when setting parameter",
+                            );
                         }
                     }
                 }
@@ -83,9 +83,9 @@ impl Manager {
                             autopilot_reboot_required = true;
                         }
                         Err(error) => {
-                            warn!(
-                                "Failed setting new camera camera_id parameter when setting parameter: {error:?}"
-                            )
+                            return Err(error).context(
+                                "Failed setting new camera camera_id parameter when setting parameter",
+                            );
                         }
                     }
                 }

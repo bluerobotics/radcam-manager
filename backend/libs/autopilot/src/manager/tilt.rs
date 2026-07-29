@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use settings::TiltChannelFunction;
 use tracing::*;
 use uuid::Uuid;
@@ -51,9 +51,9 @@ impl Manager {
                             }
                         }
                         Err(error) => {
-                            warn!(
-                                "Failed to disable the old tilt channel when setting parameter: {error:?}"
-                            )
+                            return Err(error).context(
+                                "Failed to disable the old tilt channel when setting parameter",
+                            );
                         }
                     }
                 }
@@ -89,9 +89,9 @@ impl Manager {
                             autopilot_reboot_required = true;
                         }
                         Err(error) => {
-                            warn!(
-                                "Failed setting new tilt channel parameter when setting parameter: {error:?}"
-                            )
+                            return Err(error).context(
+                                "Failed setting new tilt channel parameter when setting parameter",
+                            );
                         }
                     }
                 }
@@ -215,7 +215,7 @@ impl Manager {
                     // TODO: Reboot required after change!
                 }
                 Err(error) => {
-                    warn!("Failed setting parameter: {error:?}")
+                    return Err(error).context(format!("Failed setting parameter {param_name}"));
                 }
             }
         }

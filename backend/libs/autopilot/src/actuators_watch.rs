@@ -1,6 +1,9 @@
 use std::{
     collections::HashMap,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -8,7 +11,7 @@ use mavlink::{
     Message as _, MessageData,
     ardupilotmega::{MavMessage, SERVO_OUTPUT_RAW_DATA},
 };
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use tokio::sync::{Notify, broadcast};
 use tracing::*;
 use uuid::Uuid;
@@ -34,8 +37,8 @@ static STATE_TX: OnceCell<broadcast::Sender<ActuatorsStateUpdate>> = OnceCell::n
 static WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
 static INTEREST: AtomicUsize = AtomicUsize::new(0);
 static INTEREST_CHANGED: Notify = Notify::const_new();
-/// Millis since UNIX_EPOCH of the last SERVO sample applied to the manager (0 = never).
-static LAST_SERVO_AT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Millis since UNIX_EPOCH of the last SERVO-backed sample per camera (missing = never).
+static LAST_SERVO_AT_MS: Lazy<Mutex<HashMap<Uuid, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Actuator positions derived from a MAVLink `SERVO_OUTPUT_RAW` sample.
 #[derive(Debug, Clone)]
@@ -129,12 +132,9 @@ pub fn interest_count() -> usize {
     INTEREST.load(Ordering::SeqCst)
 }
 
-/// Age of the last SERVO sample written into the manager cache, if any.
-pub fn last_servo_age() -> Option<Duration> {
-    let ms = LAST_SERVO_AT_MS.load(Ordering::SeqCst);
-    if ms == 0 {
-        return None;
-    }
+/// Age of the last SERVO-backed sample for `camera_uuid`, if any.
+pub fn last_servo_age(camera_uuid: Uuid) -> Option<Duration> {
+    let ms = *LAST_SERVO_AT_MS.lock().ok()?.get(&camera_uuid)?;
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
@@ -142,20 +142,23 @@ pub fn last_servo_age() -> Option<Duration> {
     Some(Duration::from_millis(now_ms.saturating_sub(ms)))
 }
 
-/// True when the cached actuators state is fresh enough to serve without a one-shot wait.
-pub fn cache_is_fresh() -> bool {
-    last_servo_age().is_some_and(|age| age < STREAM_STALE_AFTER)
+/// True when this camera's cached actuators state is fresh enough to serve without a one-shot wait.
+pub fn cache_is_fresh(camera_uuid: Uuid) -> bool {
+    last_servo_age(camera_uuid).is_some_and(|age| age < STREAM_STALE_AFTER)
 }
 
-fn mark_servo_sample() {
-    if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        LAST_SERVO_AT_MS.store(duration.as_millis() as u64, Ordering::SeqCst);
+fn mark_servo_sample(camera_uuid: Uuid) {
+    let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+        return;
+    };
+    if let Ok(mut map) = LAST_SERVO_AT_MS.lock() {
+        map.insert(camera_uuid, duration.as_millis() as u64);
     }
 }
 
-/// Record that actuators.state was refreshed by a one-shot SERVO wait.
-pub(crate) fn mark_servo_from_get_state() {
-    mark_servo_sample();
+/// Record that actuators.state was refreshed by a one-shot SERVO wait for this camera.
+pub(crate) fn mark_servo_from_get_state(camera_uuid: Uuid) {
+    mark_servo_sample(camera_uuid);
 }
 
 /// Latest actuators state cached on the manager for `camera_uuid`, if any.
@@ -251,7 +254,8 @@ async fn actuators_watcher() {
 
     let mut refresh = tokio::time::interval(STREAM_REFRESH_INTERVAL);
     refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut last_servo_at = Instant::now();
+    // None until a real SERVO sample arrives so interest-enable retries immediately.
+    let mut last_servo_at: Option<Instant> = None;
 
     loop {
         let (mut receiver, target_system) = match open_receiver().await {
@@ -289,21 +293,25 @@ async fn actuators_watcher() {
                                 continue;
                             }
 
-                            last_servo_at = Instant::now();
-                            mark_servo_sample();
-
                             let Some(manager) = MANAGER.get() else {
                                 continue;
                             };
 
                             let mut manager = manager.write().await;
+                            let mut updated = Vec::new();
                             for (camera_uuid, actuators) in &mut manager.settings.actuators {
                                 let state =
                                     manager::actuators_state_from_servo(actuators, &servo_output_raw);
                                 actuators.state = state;
+                                updated.push(*camera_uuid);
                                 gate.try_emit(*camera_uuid, state, &sender);
                             }
                             drop(manager);
+
+                            last_servo_at = Some(Instant::now());
+                            for camera_uuid in updated {
+                                mark_servo_sample(camera_uuid);
+                            }
 
                             gate.flush_pending(&sender);
                         }
@@ -321,7 +329,10 @@ async fn actuators_watcher() {
                 _ = refresh.tick() => {
                     // Flush throttle-stranded samples even when SERVO goes quiet.
                     gate.flush_pending(&sender);
-                    if INTEREST.load(Ordering::SeqCst) > 0 && last_servo_at.elapsed() >= STREAM_STALE_AFTER {
+                    let stale = last_servo_at
+                        .map(|at| at.elapsed() >= STREAM_STALE_AFTER)
+                        .unwrap_or(true);
+                    if INTEREST.load(Ordering::SeqCst) > 0 && stale {
                         debug!("SERVO_OUTPUT_RAW stale; re-requesting message interval");
                         // Best-effort; next tick retries if the autopilot is quiet.
                         let _ = tokio::time::timeout(
@@ -334,12 +345,12 @@ async fn actuators_watcher() {
                 _ = INTEREST_CHANGED.notified() => {
                     if INTEREST.load(Ordering::SeqCst) > 0 {
                         // Best-effort; refresh tick retries if the autopilot is quiet.
+                        // Do not bump last_servo_at — that would fake freshness.
                         let _ = tokio::time::timeout(
                             SERVO_REQUEST_TIMEOUT,
                             request_servo_stream(SERVO_STREAM_INTERVAL_US),
                         )
                         .await;
-                        last_servo_at = Instant::now();
                     } else {
                         // Best-effort disable; shutdown() also times this out.
                         let _ = tokio::time::timeout(
@@ -447,5 +458,38 @@ mod tests {
         gate.flush_pending(&sender);
         let update = receiver.try_recv().expect("pending flush");
         assert_eq!(update.state.focus, Some(2.0));
+    }
+
+    #[test]
+    fn emit_gate_keeps_pending_when_send_fails() {
+        let (sender, receiver) = broadcast::channel(8);
+        drop(receiver);
+        let mut gate = EmitGate {
+            last_emitted: HashMap::new(),
+            last_emit_at: HashMap::new(),
+            pending: HashMap::new(),
+        };
+        let camera_uuid = Uuid::nil();
+        let state = api::ActuatorsState {
+            focus: Some(10.0),
+            zoom: None,
+            tilt: None,
+        };
+
+        gate.try_emit(camera_uuid, state, &sender);
+        assert!(gate.last_emitted.get(&camera_uuid).is_none());
+        assert!(gate.pending.contains_key(&camera_uuid));
+    }
+
+    #[test]
+    fn cache_freshness_is_per_camera() {
+        let camera_a = Uuid::nil();
+        let camera_b = Uuid::from_u128(1);
+        assert!(!cache_is_fresh(camera_a));
+        assert!(!cache_is_fresh(camera_b));
+
+        mark_servo_sample(camera_a);
+        assert!(cache_is_fresh(camera_a));
+        assert!(!cache_is_fresh(camera_b));
     }
 }
