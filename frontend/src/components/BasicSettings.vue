@@ -1041,7 +1041,12 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== actuatorsRequestGeneration.value
+      ) {
+        return
+      }
       baseParams.value = data as BaseParameterSetting
     })
     .catch((error) => {
@@ -1186,7 +1191,12 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
   backendClient
     .request('POST', '/autopilot/control', payload)
     .then((data) => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== actuatorsRequestGeneration.value
+      ) {
+        return
+      }
       const newParams = (data as ActuatorsConfig)?.parameters
       if (newParams) {
         currentFocusAndZoomParams.value = { ...newParams }
@@ -1483,9 +1493,12 @@ const saveVideoDataAndRestart = async (): Promise<void> => {
   if (Object.keys(videoPartial).length > 0) {
     try {
       await updateVideoParameters(videoPartial)
-      if (props.selectedCameraUuid !== cameraUuid) return
+      // Always reboot the camera that accepted the venc change, even if the
+      // user switched selection afterward.
       doRestart(cameraUuid)
-      Object.assign(selectedVideoParameters.value, videoPartial)
+      if (props.selectedCameraUuid === cameraUuid) {
+        Object.assign(selectedVideoParameters.value, videoPartial)
+      }
     } catch {
       return
     }

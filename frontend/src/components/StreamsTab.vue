@@ -148,18 +148,24 @@ const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
 const needs_restart = ref<boolean>(false)
 const hasUserEditedVideo = ref(false)
+const streamsRequestGeneration = ref(0)
 let suppressUserEditFlag = false
+let awaitingHydrate = false
 
 watch(
   () => props.selectedCameraUuid,
   async (newValue) => {
+    streamsRequestGeneration.value += 1
     hasUserEditedVideo.value = false
-    // Remount / switch: wait for first hydrate before latching dirty.
+    processingUpdate.value = false
+    // Hold dirty latch until the first successful hydrate for this camera.
     suppressUserEditFlag = true
-    queueMicrotask(() => {
+    awaitingHydrate = true
+    if (!newValue) {
       suppressUserEditFlag = false
-    })
-    if (!newValue) return
+      awaitingHydrate = false
+      return
+    }
     // MainStream is pushed on camera/state; other channels still need a fetch.
     const channel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
     if (channel !== VideoChannelValue.MainStream) {
@@ -216,7 +222,7 @@ watch(
 watch(
   [selectedVideoParameters, selectedVideoResolution],
   () => {
-    if (!suppressUserEditFlag) {
+    if (!suppressUserEditFlag && !awaitingHydrate) {
       hasUserEditedVideo.value = true
     }
   },
@@ -255,6 +261,7 @@ const updateVideoParameters = () => {
   }
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = streamsRequestGeneration.value
   processingUpdate.value = true
 
   console.debug(selectedVideoParameters.value)
@@ -271,7 +278,12 @@ const updateVideoParameters = () => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== streamsRequestGeneration.value
+      ) {
+        return
+      }
       if (!shouldRestart) {
         const settings: VideoParameterSettings =
           data as VideoParameterSettings
@@ -285,11 +297,11 @@ const updateVideoParameters = () => {
       )
     )
     .finally(() => {
-      if (props.selectedCameraUuid !== cameraUuid) {
-        processingUpdate.value = false
+      if (generation !== streamsRequestGeneration.value) {
         return
       }
       if (shouldRestart) {
+        // Reboot the camera that accepted the venc change.
         doRestart(cameraUuid)
       } else {
         processingUpdate.value = false
@@ -303,6 +315,7 @@ const doRestart = (cameraUuid?: string) => {
     return
   }
 
+  const generation = streamsRequestGeneration.value
   console.log("Restarting...")
 
   processingUpdate.value = true
@@ -315,7 +328,12 @@ const doRestart = (cameraUuid?: string) => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
-      if (props.selectedCameraUuid !== uuid) return
+      if (
+        props.selectedCameraUuid !== uuid ||
+        generation !== streamsRequestGeneration.value
+      ) {
+        return
+      }
       console.log("Got an answer from the restarting request", data)
       needs_restart.value = false
     })
@@ -326,9 +344,8 @@ const doRestart = (cameraUuid?: string) => {
       )
     )
     .finally(() => {
-      if (props.selectedCameraUuid === uuid) {
-        processingUpdate.value = false
-      }
+      if (generation !== streamsRequestGeneration.value) return
+      processingUpdate.value = false
     })
 }
 
@@ -338,6 +355,7 @@ const getVideoParameters = (update: boolean) => {
   }
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = streamsRequestGeneration.value
   const video_parameter_settings = {
     channel: selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream,
   }
@@ -351,7 +369,12 @@ const getVideoParameters = (update: boolean) => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== streamsRequestGeneration.value
+      ) {
+        return
+      }
       const settings: VideoParameterSettings =
         data as VideoParameterSettings
 
@@ -361,8 +384,16 @@ const getVideoParameters = (update: boolean) => {
     })
     .catch((error) => {
       console.error(`Error sending getVencConf request:`, error.message)
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== streamsRequestGeneration.value
+      ) {
+        return
+      }
       // Don't latch the form dirty forever when the initial fetch fails.
       hasUserEditedVideo.value = false
+      suppressUserEditFlag = false
+      awaitingHydrate = false
     })
 }
 
@@ -378,6 +409,7 @@ const update_video_parameter_values = (settings: VideoParameterSettings) => {
     height: settings.pic_height!,
   } as VideoResolutionValue
   hasUserEditedVideo.value = false
+  awaitingHydrate = false
   queueMicrotask(() => {
     suppressUserEditFlag = false
   })

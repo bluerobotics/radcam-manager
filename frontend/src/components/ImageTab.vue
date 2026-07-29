@@ -875,6 +875,9 @@ watch(
     imageRequestGeneration.value += 1
     inFlightBaseWrites.value = 0
     inFlightAdvancedWrites.value = 0
+    processingWhiteBalance.value = false
+    processingBaseRestore.value = false
+    processingAdvancedRestore.value = false
   },
 )
 
@@ -901,7 +904,12 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== imageRequestGeneration.value
+      ) {
+        return
+      }
       baseParams.value = data as BaseParameterSetting
     })
     .catch(error => {
@@ -958,9 +966,12 @@ const doWhiteBalance = async () => {
     .catch(error => {
       console.error("Error sending onceAWB control:", error.message)
     }).finally(() => {
-      if (generation !== imageRequestGeneration.value) return
+      // Always clear the spinner; only skip follow-up fetch on switch.
       processingWhiteBalance.value = false
-      if (props.selectedCameraUuid === cameraUuid) {
+      if (
+        generation === imageRequestGeneration.value &&
+        props.selectedCameraUuid === cameraUuid
+      ) {
         getBaseParameters()
       }
     })
@@ -1013,7 +1024,12 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== imageRequestGeneration.value
+      ) {
+        return
+      }
       advancedParams.value = data as AdvancedParameterSetting
     })
     .catch(error => {
