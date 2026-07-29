@@ -851,6 +851,9 @@ const antiFlickerOptions = enumToOptions(AdvancedDisplayAntiflickerValue)
 const inFlightBaseWrites = ref(0)
 const inFlightAdvancedWrites = ref(0)
 const imageRequestGeneration = ref(0)
+/** Monotonic seq so only the newest write/restore may apply its response body. */
+let baseWriteSeq = 0
+let advancedWriteSeq = 0
 
 const applyCameraStateEvent = (body: unknown) => {
   if (!props.selectedCameraUuid) return
@@ -875,6 +878,8 @@ watch(
     imageRequestGeneration.value += 1
     inFlightBaseWrites.value = 0
     inFlightAdvancedWrites.value = 0
+    baseWriteSeq += 1
+    advancedWriteSeq += 1
     processingWhiteBalance.value = false
     processingBaseRestore.value = false
     processingAdvancedRestore.value = false
@@ -889,6 +894,8 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
+  const writeSeq = ++baseWriteSeq
+  const previous = baseParams.value[param]
   baseParams.value = { ...baseParams.value, [param]: value }
   inFlightBaseWrites.value++
 
@@ -906,16 +913,23 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
     .then(data => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== imageRequestGeneration.value
+        generation !== imageRequestGeneration.value ||
+        writeSeq !== baseWriteSeq
       ) {
         return
       }
-      if (inFlightBaseWrites.value === 1) {
-        baseParams.value = data as BaseParameterSetting
-      }
+      baseParams.value = data as BaseParameterSetting
     })
     .catch(error => {
       console.error(`Error sending ${String(param)} control with value '${value}':`, error.message)
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== imageRequestGeneration.value ||
+        writeSeq !== baseWriteSeq
+      ) {
+        return
+      }
+      baseParams.value = { ...baseParams.value, [param]: previous }
     })
     .finally(() => {
       if (generation !== imageRequestGeneration.value) return
@@ -992,6 +1006,7 @@ const doRestoreBase = async () => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
+  const writeSeq = ++baseWriteSeq
   inFlightBaseWrites.value++
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
@@ -1006,7 +1021,8 @@ const doRestoreBase = async () => {
     .then(data => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== imageRequestGeneration.value
+        generation !== imageRequestGeneration.value ||
+        writeSeq !== baseWriteSeq
       ) {
         return
       }
@@ -1028,6 +1044,8 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
 
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
+  const writeSeq = ++advancedWriteSeq
+  const previous = advancedParams.value[param]
   advancedParams.value = { ...advancedParams.value, [param]: value }
   inFlightAdvancedWrites.value++
 
@@ -1041,16 +1059,23 @@ const updateAdvancedParam = (param: keyof AdvancedParameterSetting, value: any) 
     .then(data => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== imageRequestGeneration.value
+        generation !== imageRequestGeneration.value ||
+        writeSeq !== advancedWriteSeq
       ) {
         return
       }
-      if (inFlightAdvancedWrites.value === 1) {
-        advancedParams.value = data as AdvancedParameterSetting
-      }
+      advancedParams.value = data as AdvancedParameterSetting
     })
     .catch(error => {
       console.error(`Error updating ${param}:`, error.message)
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== imageRequestGeneration.value ||
+        writeSeq !== advancedWriteSeq
+      ) {
+        return
+      }
+      advancedParams.value = { ...advancedParams.value, [param]: previous }
     })
     .finally(() => {
       if (generation !== imageRequestGeneration.value) return
@@ -1065,6 +1090,7 @@ const doRestoreAdvanced = async () => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
+  const writeSeq = ++advancedWriteSeq
   inFlightAdvancedWrites.value++
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
@@ -1076,7 +1102,8 @@ const doRestoreAdvanced = async () => {
     .then(data => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== imageRequestGeneration.value
+        generation !== imageRequestGeneration.value ||
+        writeSeq !== advancedWriteSeq
       ) {
         return
       }

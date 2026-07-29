@@ -359,6 +359,9 @@ const flushPendingValue = (): void => {
 }
 
 const endInteracting = (): void => {
+  window.removeEventListener('pointerup', handlePointerUp)
+  window.removeEventListener('pointercancel', handlePointerCancel)
+  if (!isInteracting.value) return
   isInteracting.value = false
 
   const clamped = Math.min(Math.max(currentSliderValue.value, props.min), props.max)
@@ -376,8 +379,8 @@ const startInteracting = (): void => {
   if (props.disabled || isEditingCurrentSliderValue.value) return
   isInteracting.value = true
   clearCommitLock()
-  window.addEventListener('pointerup', handlePointerUp, { once: true })
-  window.addEventListener('pointercancel', handlePointerCancel, { once: true })
+  window.addEventListener('pointerup', handlePointerUp)
+  window.addEventListener('pointercancel', handlePointerCancel)
 }
 
 const isArrowKey = (key: string): boolean =>
