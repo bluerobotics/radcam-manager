@@ -26,13 +26,15 @@ impl Manager {
                 .entry(*camera_uuid)
                 .or_default()
                 .parameters;
-            let encoding = self.mavlink.encoding().await;
+            let encoding = crate::mavlink::component()?.encoding().await;
 
             // Disables the old tilt_channel:
             if &current_parameters.tilt_channel != channel {
                 let param_name = format!("SERVO{}_FUNCTION", current_parameters.tilt_channel as u8);
 
-                let mut param = self.mavlink.get_param(&param_name, false).await?;
+                let mut param = crate::mavlink::component()?
+                    .get_param(&param_name, false)
+                    .await?;
                 let old_value = param.value;
                 param
                     .value
@@ -40,7 +42,7 @@ impl Manager {
                 let new_value = param.value;
 
                 if old_value != new_value {
-                    match self.mavlink.set_param(param).await {
+                    match crate::mavlink::component()?.set_param(param).await {
                         Ok(_) => {
                             if old_value != new_value {
                                 info!(
@@ -68,7 +70,9 @@ impl Manager {
                     api::CameraID::CAM2 => ChannelFunction::Mount2Pitch,
                 };
 
-                let mut param = self.mavlink.get_param(&param_name, false).await?;
+                let mut param = crate::mavlink::component()?
+                    .get_param(&param_name, false)
+                    .await?;
                 let old_value = param.value;
                 param
                     .value
@@ -76,7 +80,7 @@ impl Manager {
                 let new_value = param.value;
 
                 if overwrite || old_value != new_value {
-                    match self.mavlink.set_param(param).await {
+                    match crate::mavlink::component()?.set_param(param).await {
                         Ok(_) => {
                             if overwrite || old_value != new_value {
                                 info!(
@@ -182,7 +186,7 @@ impl Manager {
             .or_default()
             .parameters;
 
-        let encoding = self.mavlink.encoding().await;
+        let encoding = crate::mavlink::component()?.encoding().await;
 
         // Debug name is MNT1/MNT2 (same as pitch macros), not the SERVO function u8.
         let mount_id = match current_parameters.camera_id {
@@ -196,14 +200,16 @@ impl Manager {
             (None, true) => current_parameters.tilt_mnt_type,
             (None, false) => return Ok(()),
         };
-        let mut param = self.mavlink.get_param(&param_name, false).await?;
+        let mut param = crate::mavlink::component()?
+            .get_param(&param_name, false)
+            .await?;
         let old_value_encoded = param.param_value(encoding)?;
         param
             .value
             .set_value(ParamType::INT32(new_value as i32), encoding)?;
         let new_value_encoded = param.param_value(encoding)?;
         if (old_value_encoded != new_value_encoded) || force_apply {
-            match self.mavlink.set_param(param).await {
+            match crate::mavlink::component()?.set_param(param).await {
                 Ok(_) => {
                     if old_value_encoded != new_value_encoded {
                         info!(

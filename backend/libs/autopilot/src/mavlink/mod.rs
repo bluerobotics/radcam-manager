@@ -11,6 +11,7 @@ use mavlink::{
     self, MavHeader, Message as _, MessageData,
     ardupilotmega::{COMMAND_LONG_DATA, MavCmd, MavMessage, MavResult, SERVO_OUTPUT_RAW_DATA},
 };
+use once_cell::sync::OnceCell;
 use tokio::sync::{RwLock, broadcast};
 use tracing::*;
 
@@ -18,6 +19,24 @@ use crate::{
     mavlink::{connection::Connection, parameters::ParamEncodingType},
     parameters::{ParamType, Parameter},
 };
+
+/// Process-lifetime owner of MAVLink tasks. Never dropped while the process runs
+/// (soft restart keeps the existing connection string).
+static MAVLINK_COMPONENT: OnceCell<MavlinkComponent> = OnceCell::new();
+
+/// Shared MAVLink API. Independent of [`crate::manager::MANAGER`] so I/O need not
+/// hold the settings lock.
+pub fn component() -> Result<&'static MavlinkComponent> {
+    MAVLINK_COMPONENT
+        .get()
+        .context("MAVLink component not initialized")
+}
+
+pub(crate) fn init_component(component: MavlinkComponent) -> Result<()> {
+    MAVLINK_COMPONENT
+        .set(component)
+        .map_err(|_| anyhow!("MAVLink component already initialized"))
+}
 
 #[derive(Debug)]
 pub struct MavlinkComponent {
@@ -29,6 +48,10 @@ pub struct MavlinkComponent {
 }
 
 impl MavlinkComponent {
+    pub fn system_id(&self) -> u8 {
+        self.inner.system_id
+    }
+
     #[instrument(level = "debug")]
     pub async fn try_new(address: String, system_id: u8, component_id: u8) -> Result<Self> {
         let inner = Arc::new(ComponentInner::try_new(address, system_id, component_id).await?);

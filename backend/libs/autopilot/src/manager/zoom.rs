@@ -25,13 +25,15 @@ impl Manager {
                 .entry(*camera_uuid)
                 .or_default()
                 .parameters;
-            let encoding = self.mavlink.encoding().await;
+            let encoding = crate::mavlink::component()?.encoding().await;
 
             // Disables the old zoom_channel:
             if &current_parameters.zoom_channel != channel {
                 let param_name = format!("SERVO{}_FUNCTION", current_parameters.zoom_channel as u8);
 
-                let mut param = self.mavlink.get_param(&param_name, false).await?;
+                let mut param = crate::mavlink::component()?
+                    .get_param(&param_name, false)
+                    .await?;
                 let old_value = param.value;
                 param
                     .value
@@ -39,7 +41,7 @@ impl Manager {
                 let new_value = param.value;
 
                 if old_value != new_value {
-                    match self.mavlink.set_param(param).await {
+                    match crate::mavlink::component()?.set_param(param).await {
                         Ok(_) => {
                             if old_value != new_value {
                                 info!(
@@ -62,7 +64,9 @@ impl Manager {
             {
                 let param_name = format!("SERVO{}_FUNCTION", *channel as u8);
 
-                let mut param = self.mavlink.get_param(&param_name, false).await?;
+                let mut param = crate::mavlink::component()?
+                    .get_param(&param_name, false)
+                    .await?;
                 let old_value = param.value;
                 param.value.set_value(
                     ParamType::INT16(ChannelFunction::CameraZoom as i16),
@@ -71,7 +75,7 @@ impl Manager {
                 let new_value = param.value;
 
                 if overwrite || old_value != new_value {
-                    match self.mavlink.set_param(param).await {
+                    match crate::mavlink::component()?.set_param(param).await {
                         Ok(_) => {
                             if overwrite || old_value != new_value {
                                 info!(

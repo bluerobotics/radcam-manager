@@ -73,12 +73,15 @@ impl Manager {
             }
         }
 
-        let autopilot_reboot_required = self.mavlink.enable_lua_script(true).await?;
+        let autopilot_reboot_required =
+            crate::mavlink::component()?.enable_lua_script(true).await?;
 
         if !autopilot_reboot_required {
-            self.mavlink.reload_lua_scripts(true).await?;
+            crate::mavlink::component()?
+                .reload_lua_scripts(true)
+                .await?;
         } else {
-            self.mavlink.reboot_autopilot().await?;
+            crate::mavlink::component()?.reboot_autopilot().await?;
         }
 
         Ok(())
@@ -100,14 +103,16 @@ impl Manager {
                 .entry(*camera_uuid)
                 .or_default()
                 .parameters;
-            let encoding = self.mavlink.encoding().await;
+            let encoding = crate::mavlink::component()?.encoding().await;
 
             // Disables the old script_channel:
             if &current_parameters.script_channel != channel {
                 let param_name =
                     format!("SERVO{}_FUNCTION", current_parameters.script_channel as u8);
 
-                let mut param = self.mavlink.get_param(&param_name, false).await?;
+                let mut param = crate::mavlink::component()?
+                    .get_param(&param_name, false)
+                    .await?;
                 let old_value = param.value;
                 param
                     .value
@@ -115,7 +120,7 @@ impl Manager {
                 let new_value = param.value;
 
                 if old_value != new_value {
-                    match self.mavlink.set_param(param).await {
+                    match crate::mavlink::component()?.set_param(param).await {
                         Ok(_) => {
                             if old_value != new_value {
                                 info!(
@@ -141,7 +146,9 @@ impl Manager {
                 // The script servo input is the values from the CameraFocus
                 let function = ChannelFunction::CameraFocus;
 
-                let mut param = self.mavlink.get_param(&param_name, false).await?;
+                let mut param = crate::mavlink::component()?
+                    .get_param(&param_name, false)
+                    .await?;
                 let old_value = param.value;
                 param
                     .value
@@ -149,7 +156,7 @@ impl Manager {
                 let new_value = param.value;
 
                 if overwrite || old_value != new_value {
-                    match self.mavlink.set_param(param).await {
+                    match crate::mavlink::component()?.set_param(param).await {
                         Ok(_) => {
                             if overwrite || old_value != new_value {
                                 info!(
@@ -206,13 +213,15 @@ impl Manager {
             return Ok(());
         }
 
-        let encoding = self.mavlink.encoding().await;
-        let mut param = self.mavlink.get_param(&param_name, false).await?;
+        let encoding = crate::mavlink::component()?.encoding().await;
+        let mut param = crate::mavlink::component()?
+            .get_param(&param_name, false)
+            .await?;
         param
             .value
             .set_value(ParamType::UINT8(new_value as u8), encoding)?;
 
-        match self.mavlink.set_param(param).await {
+        match crate::mavlink::component()?.set_param(param).await {
             Ok(_) => {
                 if old_value != new_value {
                     info!(
@@ -259,13 +268,15 @@ impl Manager {
             return Ok(());
         }
 
-        let encoding = self.mavlink.encoding().await;
-        let mut param = self.mavlink.get_param(&param_name, false).await?;
+        let encoding = crate::mavlink::component()?.encoding().await;
+        let mut param = crate::mavlink::component()?
+            .get_param(&param_name, false)
+            .await?;
         param
             .value
             .set_value(ParamType::UINT8(new_value as u8), encoding)?;
 
-        match self.mavlink.set_param(param).await {
+        match crate::mavlink::component()?.set_param(param).await {
             Ok(_) => {
                 if old_value != new_value {
                     info!(
