@@ -37,8 +37,9 @@ static STATE_TX: OnceCell<broadcast::Sender<ActuatorsStateUpdate>> = OnceCell::n
 static WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
 static INTEREST: AtomicUsize = AtomicUsize::new(0);
 static INTEREST_CHANGED: Notify = Notify::const_new();
-/// Millis since UNIX_EPOCH of the last SERVO-backed sample per camera (missing = never).
-static LAST_SERVO_AT_MS: Lazy<Mutex<HashMap<Uuid, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+/// Instant of the last SERVO-backed sample per camera (missing = never / invalidated).
+static LAST_SERVO_AT: Lazy<Mutex<HashMap<Uuid, Instant>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Actuator positions derived from a MAVLink `SERVO_OUTPUT_RAW` sample.
 #[derive(Debug, Clone)]
@@ -134,12 +135,8 @@ pub fn interest_count() -> usize {
 
 /// Age of the last SERVO-backed sample for `camera_uuid`, if any.
 pub fn last_servo_age(camera_uuid: Uuid) -> Option<Duration> {
-    let ms = *LAST_SERVO_AT_MS.lock().ok()?.get(&camera_uuid)?;
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_millis() as u64;
-    Some(Duration::from_millis(now_ms.saturating_sub(ms)))
+    let at = *LAST_SERVO_AT.lock().ok()?.get(&camera_uuid)?;
+    Some(at.elapsed())
 }
 
 /// True when this camera's cached actuators state is fresh enough to serve without a one-shot wait.
@@ -148,11 +145,14 @@ pub fn cache_is_fresh(camera_uuid: Uuid) -> bool {
 }
 
 fn mark_servo_sample(camera_uuid: Uuid) {
-    let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
-        return;
-    };
-    if let Ok(mut map) = LAST_SERVO_AT_MS.lock() {
-        map.insert(camera_uuid, duration.as_millis() as u64);
+    if let Ok(mut map) = LAST_SERVO_AT.lock() {
+        map.insert(camera_uuid, Instant::now());
+    }
+}
+
+fn clear_servo_freshness() {
+    if let Ok(mut map) = LAST_SERVO_AT.lock() {
+        map.clear();
     }
 }
 
@@ -209,7 +209,11 @@ pub fn remove_interest() {
     match INTEREST.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |interests| {
         interests.checked_sub(1)
     }) {
-        Ok(1) => INTEREST_CHANGED.notify_one(),
+        Ok(1) => {
+            // Stream is about to stop; do not serve pre-disable cache as fresh.
+            clear_servo_freshness();
+            INTEREST_CHANGED.notify_one();
+        }
         Ok(_) => (),
         Err(_current) => warn!("Unbalanced remove_interest call, no interest registered"),
     }
@@ -223,6 +227,7 @@ pub fn remove_interest() {
 #[instrument(level = "debug")]
 pub async fn shutdown() {
     INTEREST.store(0, Ordering::SeqCst);
+    clear_servo_freshness();
     INTEREST_CHANGED.notify_waiters();
     if tokio::time::timeout(
         SERVO_REQUEST_TIMEOUT,
@@ -352,6 +357,8 @@ async fn actuators_watcher() {
                         )
                         .await;
                     } else {
+                        last_servo_at = None;
+                        clear_servo_freshness();
                         // Best-effort disable; shutdown() also times this out.
                         let _ = tokio::time::timeout(
                             SERVO_REQUEST_TIMEOUT,

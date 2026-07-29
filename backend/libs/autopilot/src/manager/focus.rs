@@ -66,7 +66,12 @@ impl Manager {
                 // The focus servo input is the script:
                 let function =
                     ChannelFunction::try_from(current_parameters.script_function as u8 as i16)
-                        .unwrap();
+                        .map_err(|error| {
+                            anyhow::anyhow!(
+                                "Invalid script_function {:?} for focus channel: {error:?}",
+                                current_parameters.script_function
+                            )
+                        })?;
 
                 let mut param = self.mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
