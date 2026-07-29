@@ -645,6 +645,7 @@ import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
 import { type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, BaseAutoWhiteBalanceSceneValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
 import { backendClient } from '@/utils/backendClient'
+import { createPendingFields } from '@/utils/pendingFields'
 import { useCameraState } from '@/utils/useCameraState'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
 import type { CameraStateEvent } from '@/bindings/radcam_api'
@@ -808,10 +809,7 @@ const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
 })
 /** Bumped on camera switch so in-flight actuator POSTs ignore stale `.finally` cleanup. */
 const actuatorsRequestGeneration = ref(0)
-/** Monotonic seq so only the newest image-param write may apply its response body. */
-let baseParamWriteSeq = 0
-/** Fields with an optimistic write that must not be clobbered by WS/GET. */
-const dirtyBaseParamFields = new Set<keyof BaseParameterSetting>()
+const pendingBase = createPendingFields<keyof BaseParameterSetting, unknown>()
 const correlationToggleInFlight = ref(false)
 const isConfigured = ref<boolean>(false)
 const showWelcomeDialog = ref<boolean>(true)
@@ -877,8 +875,8 @@ watch(
     hasUserEditedVideo.value = false
     hasUnsavedVideoChanges.value = false
     actuatorsRequestGeneration.value += 1
-    baseParamWriteSeq += 1
     inFlightParamWrites.value = 0
+    pendingBase.clear()
     correlationToggleInFlight.value = false
     isConfigured.value = false
     showAdvancedHardware.value = false
@@ -916,7 +914,6 @@ watch(
     actuatorsSetRollback.value = { focus: null, zoom: null, tilt: null }
     actuatorsSetQueued.value = { focus: null, zoom: null, tilt: null }
     actuatorsSetInFlight.value = { focus: false, zoom: false, tilt: false }
-    dirtyBaseParamFields.clear()
   },
 )
 
@@ -1075,10 +1072,9 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = actuatorsRequestGeneration.value
-  const writeSeq = ++baseParamWriteSeq
   const previous = baseParams.value[param]
+  const { token, epoch } = pendingBase.begin(param, previous, value)
   baseParams.value = { ...baseParams.value, [param]: value }
-  dirtyBaseParamFields.add(param)
   inFlightParamWrites.value++
 
   const payload = {
@@ -1094,13 +1090,17 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
     .then((data) => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== actuatorsRequestGeneration.value ||
-        writeSeq !== baseParamWriteSeq
+        generation !== actuatorsRequestGeneration.value
       ) {
         return
       }
-      baseParams.value = data as BaseParameterSetting
-      dirtyBaseParamFields.clear()
+      const incoming = data as BaseParameterSetting
+      pendingBase.settleSuccess(param, token, epoch, () => {
+        baseParams.value = pendingBase.mergeRemote(incoming, {
+          ...incoming,
+          [param]: value,
+        } as BaseParameterSetting)
+      })
     })
     .catch((error) => {
       const message = `Error sending ${String(param)} control with value '${value}'`
@@ -1111,10 +1111,18 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
       ) {
         return
       }
-      if (baseParams.value[param] === value) {
-        baseParams.value = { ...baseParams.value, [param]: previous }
-      }
-      dirtyBaseParamFields.delete(param)
+      pendingBase.settleFail(
+        param,
+        token,
+        epoch,
+        (attempted) => baseParams.value[param] === attempted,
+        (prev) => {
+          baseParams.value = {
+            ...baseParams.value,
+            [param]: prev as BaseParameterSetting[typeof param],
+          }
+        },
+      )
     })
     .finally(() => {
       if (generation !== actuatorsRequestGeneration.value) return
@@ -1188,17 +1196,10 @@ const applyCameraStateEvent = (body: unknown) => {
     update_video_parameter_values(data.video_parameters as VideoParameterSettings)
   }
   if (data.base_parameters) {
-    const incoming = data.base_parameters as BaseParameterSetting
-    if (dirtyBaseParamFields.size === 0) {
-      baseParams.value = incoming
-    } else {
-      baseParams.value = {
-        ...incoming,
-        ...Object.fromEntries(
-          [...dirtyBaseParamFields].map((key) => [key, baseParams.value[key]]),
-        ),
-      } as BaseParameterSetting
-    }
+    baseParams.value = pendingBase.mergeRemote(
+      data.base_parameters as BaseParameterSetting,
+      baseParams.value,
+    )
   }
 }
 
@@ -1410,7 +1411,6 @@ const getBaseParameters = () => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = actuatorsRequestGeneration.value
-  const writeSeqAtStart = baseParamWriteSeq
   const payload = {
     camera_uuid: cameraUuid,
     action: "getImageAdjustment",
@@ -1420,14 +1420,14 @@ const getBaseParameters = () => {
     .then(data => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== actuatorsRequestGeneration.value ||
-        writeSeqAtStart !== baseParamWriteSeq ||
-        inFlightParamWrites.value > 0 ||
-        dirtyBaseParamFields.size > 0
+        generation !== actuatorsRequestGeneration.value
       ) {
         return
       }
-      baseParams.value = data as BaseParameterSetting
+      baseParams.value = pendingBase.mergeRemote(
+        data as BaseParameterSetting,
+        baseParams.value,
+      )
       console.log(data)
     })
     .catch(error => {
