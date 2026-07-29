@@ -535,8 +535,10 @@ watch(warningToastMessage, (message, _previous, onCleanup) => {
   if (!message) return
 
   const cameraUuid = selectedCameraUUID.value
-  const backendOwned =
-    cameraUuid != null && !!uiByCamera.get(cameraUuid)?.warning_toast
+  const cachedToast =
+    cameraUuid != null ? uiByCamera.get(cameraUuid)?.warning_toast ?? null : null
+  // Only auto-dismissUi when the displayed text is the backend-owned toast.
+  const backendOwned = cachedToast != null && cachedToast === message
   const timeout = setTimeout(() => {
     if (backendOwned && cameraUuid) {
       backendClient.dismissUi(cameraUuid, 'warning_toast')

@@ -260,22 +260,19 @@ const updateVideoParameters = () => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
+      if (
+        props.selectedCameraUuid === cameraUuid &&
+        generation === streamsRequestGeneration.value
+      ) {
+        // Clear dirty latch / sync downloaded* even when we also reboot.
+        update_video_parameter_values(data as VideoParameterSettings)
+      }
       if (shouldRestart) {
         // Always reboot the camera that accepted the venc change, even if the
         // user switched selection afterward.
         handedOffRestart = true
         doRestart(cameraUuid)
-        return
       }
-      if (
-        props.selectedCameraUuid !== cameraUuid ||
-        generation !== streamsRequestGeneration.value
-      ) {
-        return
-      }
-      const settings: VideoParameterSettings =
-        data as VideoParameterSettings
-      update_video_parameter_values(settings)
     })
     .catch((error) =>
       console.error(

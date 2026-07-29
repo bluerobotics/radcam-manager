@@ -1229,8 +1229,9 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const sendQueuedActuatorState = (param: ActuatorKey): void => {
-  if (!props.selectedCameraUuid || props.disabled) return
+const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false): void => {
+  if (!props.selectedCameraUuid) return
+  if (props.disabled && !allowWhileDisabled) return
   if (actuatorsSetInFlight.value[param]) return
 
   const value = actuatorsSetQueued.value[param]
@@ -1261,9 +1262,10 @@ const sendQueuedActuatorState = (param: ActuatorKey): void => {
 
       actuatorsSetInFlight.value[param] = false
 
-      // If a newer value was queued while this request was in-flight, send it now.
+      // If a newer value was queued while this request was in-flight, send it now
+      // even if the UI is disabled (loading/reboot) so the drain cannot strand.
       if (actuatorsSetQueued.value[param] !== null) {
-        sendQueuedActuatorState(param)
+        sendQueuedActuatorState(param, true)
       } else {
         // Clear the desired latch when nothing is queued so whole-percent SERVO
         // feedback cannot leave a 0.1-step focus value stuck forever.
@@ -1312,6 +1314,7 @@ const getBaseParameters = () => {
   }
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = actuatorsRequestGeneration.value
   const payload = {
     camera_uuid: cameraUuid,
     action: "getImageAdjustment",
@@ -1319,7 +1322,13 @@ const getBaseParameters = () => {
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== actuatorsRequestGeneration.value ||
+        inFlightParamWrites.value > 0
+      ) {
+        return
+      }
       baseParams.value = data as BaseParameterSetting
       console.log(data)
     })
