@@ -11,9 +11,10 @@ use serde::{Deserialize, Serialize};
 use tracing::*;
 
 pub use actuators_watch::{
-    add_interest as add_actuators_state_interest, cached_actuators_state,
-    interest_count as actuators_interest_count, remove_interest as remove_actuators_state_interest,
-    shutdown as shutdown_actuators_stream, subscribe as subscribe_actuators_state,
+    add_interest as add_actuators_state_interest, cache_is_fresh as actuators_cache_is_fresh,
+    cached_actuators_state, interest_count as actuators_interest_count,
+    remove_interest as remove_actuators_state_interest, shutdown as shutdown_actuators_stream,
+    subscribe as subscribe_actuators_state,
 };
 pub use manager::{clear_saved_settings, init};
 
@@ -83,10 +84,10 @@ pub(crate) async fn control_inner(
             serde_json::to_value({})?
         }
         Action::GetActuatorsState => {
-            // Prefer the SERVO watcher's cache under a shared lock when the stream
-            // is active. With no interest, fall back to a one-shot SERVO wait so
-            // REST callers still get measured positions.
-            if actuators_watch::interest_count() > 0 {
+            // Prefer the SERVO watcher's cache when interest is on *and* a recent
+            // sample exists. Otherwise one-shot wait so subscribe/REST are not
+            // served stale defaults from disk.
+            if actuators_watch::interest_count() > 0 && actuators_watch::cache_is_fresh() {
                 let manager = MANAGER.get().context("Not available")?.read().await;
 
                 let actuators = manager

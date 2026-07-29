@@ -95,6 +95,7 @@ impl Manager {
 
         let state = actuators_state_from_servo(actuators, &servo_output_raw);
         actuators.state = state;
+        crate::actuators_watch::mark_servo_from_get_state();
 
         Ok(actuators.state)
     }
@@ -108,6 +109,10 @@ impl Manager {
         use ::mavlink::ardupilotmega::{COMMAND_LONG_DATA, CameraZoomType, MavCmd, SetFocusType};
 
         let focus_was_set = new_state.focus.is_some();
+
+        if new_state.tilt.is_some() && new_state.focus.is_none() && new_state.zoom.is_none() {
+            return Err(anyhow::anyhow!("Tilt setpoint is not implemented"));
+        }
 
         if let Some(focus) = new_state.focus {
             self.mavlink

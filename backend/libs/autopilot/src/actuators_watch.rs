@@ -34,6 +34,8 @@ static STATE_TX: OnceCell<broadcast::Sender<ActuatorsStateUpdate>> = OnceCell::n
 static WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
 static INTEREST: AtomicUsize = AtomicUsize::new(0);
 static INTEREST_CHANGED: Notify = Notify::const_new();
+/// Millis since UNIX_EPOCH of the last SERVO sample applied to the manager (0 = never).
+static LAST_SERVO_AT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Actuator positions derived from a MAVLink `SERVO_OUTPUT_RAW` sample.
 #[derive(Debug, Clone)]
@@ -111,6 +113,10 @@ impl EmitGate {
             .is_err()
         {
             debug!("No actuators state subscribers");
+            // Do not advance last_emitted: the sample was never delivered and
+            // must be eligible for replay once a receiver attaches.
+            self.pending.insert(camera_uuid, state);
+            return;
         }
         self.last_emitted.insert(camera_uuid, state);
         self.last_emit_at.insert(camera_uuid, now);
@@ -121,6 +127,35 @@ impl EmitGate {
 /// Current interest count for the SERVO stream (WS subscribers / bridges).
 pub fn interest_count() -> usize {
     INTEREST.load(Ordering::SeqCst)
+}
+
+/// Age of the last SERVO sample written into the manager cache, if any.
+pub fn last_servo_age() -> Option<Duration> {
+    let ms = LAST_SERVO_AT_MS.load(Ordering::SeqCst);
+    if ms == 0 {
+        return None;
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as u64;
+    Some(Duration::from_millis(now_ms.saturating_sub(ms)))
+}
+
+/// True when the cached actuators state is fresh enough to serve without a one-shot wait.
+pub fn cache_is_fresh() -> bool {
+    last_servo_age().is_some_and(|age| age < STREAM_STALE_AFTER)
+}
+
+fn mark_servo_sample() {
+    if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        LAST_SERVO_AT_MS.store(duration.as_millis() as u64, Ordering::SeqCst);
+    }
+}
+
+/// Record that actuators.state was refreshed by a one-shot SERVO wait.
+pub(crate) fn mark_servo_from_get_state() {
+    mark_servo_sample();
 }
 
 /// Latest actuators state cached on the manager for `camera_uuid`, if any.
@@ -255,6 +290,7 @@ async fn actuators_watcher() {
                             }
 
                             last_servo_at = Instant::now();
+                            mark_servo_sample();
 
                             let Some(manager) = MANAGER.get() else {
                                 continue;
