@@ -37,6 +37,27 @@ pub struct CameraUiState {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub warning_toast: Option<String>,
+    /// One-push white balance lifecycle shared across clients. Absent = idle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub one_push_awb: Option<OnePushAwbStatus>,
+}
+
+/// Phase of a backend-owned one-push white balance run.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum OnePushAwbPhase {
+    /// Camera is adjusting gains after `onceAWB`.
+    Running,
+    /// Settled; clients must keep WB controls disabled briefly.
+    Cooldown,
+}
+
+/// Shared one-push white balance status broadcast on [`CameraUiState`].
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, TS)]
+pub struct OnePushAwbStatus {
+    /// Current phase of the run.
+    pub phase: OnePushAwbPhase,
 }
 
 /// Partial camera state pushed to subscribed WebSocket clients.
