@@ -28,21 +28,21 @@ export function runActuatorFlightSelfCheck(): void {
     !shouldRollbackActuatorUi({
       ownsFlight: true,
       queued: null,
-      desired: null,
+      desiredBeforeClear: 80,
       ui: 80,
       attempted: 80,
       rollback: 50,
       valuesMatch: match,
     })
   ) {
-    throw new Error('actuatorFlight: expected rollback when attempt still on UI')
+    throw new Error('actuatorFlight: expected rollback when attempt still desired')
   }
 
   if (
     shouldRollbackActuatorUi({
       ownsFlight: false,
       queued: null,
-      desired: null,
+      desiredBeforeClear: 80,
       ui: 80,
       attempted: 80,
       rollback: 50,
@@ -56,7 +56,7 @@ export function runActuatorFlightSelfCheck(): void {
     shouldRollbackActuatorUi({
       ownsFlight: true,
       queued: 90,
-      desired: null,
+      desiredBeforeClear: 80,
       ui: 80,
       attempted: 80,
       rollback: 50,
@@ -70,7 +70,7 @@ export function runActuatorFlightSelfCheck(): void {
     shouldRollbackActuatorUi({
       ownsFlight: true,
       queued: null,
-      desired: 90,
+      desiredBeforeClear: 90,
       ui: 90,
       attempted: 80,
       rollback: 50,
@@ -78,6 +78,20 @@ export function runActuatorFlightSelfCheck(): void {
     })
   ) {
     throw new Error('actuatorFlight: newer desired must block rollback')
+  }
+
+  if (
+    shouldRollbackActuatorUi({
+      ownsFlight: true,
+      queued: null,
+      desiredBeforeClear: null,
+      ui: 80,
+      attempted: 80,
+      rollback: 50,
+      valuesMatch: match,
+    })
+  ) {
+    throw new Error('actuatorFlight: SERVO-matched (desired null) must not rollback')
   }
 
   console.log('actuatorFlight self-check ok')
