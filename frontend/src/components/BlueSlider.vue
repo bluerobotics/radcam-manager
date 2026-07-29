@@ -457,6 +457,7 @@ watch(
       }
       // Foreign / correlation-driven update — take it.
       clearCommitLock()
+      lastSentValue.value = next
     }
     currentSliderValue.value = next
   },
