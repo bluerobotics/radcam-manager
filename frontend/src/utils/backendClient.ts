@@ -467,6 +467,8 @@ class BackendClient {
       const previous = this.subscribedCameraUuid
       // Single active wire UUID: drop previous counts and unsubscribe once.
       this.cameraSubscribeCounts.delete(previous)
+      // Null before unsubscribe so the deferred/open guard does not drop the frame.
+      this.subscribedCameraUuid = null
       this.sendCameraSubscription('unsubscribe', previous)
     }
 
