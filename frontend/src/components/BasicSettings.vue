@@ -1457,7 +1457,11 @@ const doWhiteBalance = async () => {
 
 const doRestart = (cameraUuid?: string) => {
   const uuid = cameraUuid ?? props.selectedCameraUuid
-  if (!uuid || props.disabled) {
+  if (!uuid) {
+    return
+  }
+  // Explicit captured UUID must still reboot even if the current selection is disabled.
+  if (cameraUuid == null && props.disabled) {
     return
   }
 
@@ -1565,10 +1569,17 @@ const saveHardwareSetup = async (): Promise<void> => {
 
   console.log('Saving hardware setup:', payload)
 
+  const generation = actuatorsRequestGeneration.value
+
   backendClient
     .request('POST', '/autopilot/control', payload)
     .then((data) => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== actuatorsRequestGeneration.value
+      ) {
+        return
+      }
       console.log("Got an answer from the setActuatorsConfig request", data)
 
       const newParams = (data as ActuatorsConfig)?.parameters
@@ -1587,6 +1598,7 @@ const resetToRecommendedDefaults = async (): Promise<void> => {
   if (!props.selectedCameraUuid || props.disabled) return
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = actuatorsRequestGeneration.value
   const payload = {
     camera_uuid: cameraUuid,
     action: 'resetActuatorsConfig',
@@ -1595,7 +1607,12 @@ const resetToRecommendedDefaults = async (): Promise<void> => {
   backendClient
     .request('POST', '/autopilot/control', payload)
     .then((data) => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== actuatorsRequestGeneration.value
+      ) {
+        return
+      }
       console.log("Got an answer from the setActuatorsConfig request", data)
 
       const newParams = (data as ActuatorsConfig)?.parameters

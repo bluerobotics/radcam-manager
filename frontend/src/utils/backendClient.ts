@@ -98,6 +98,10 @@ class BackendClient {
   private cameraSubscribeCounts = new Map<string, number>()
   private pendingSubscribe: string | null = null
   private subscribeQueued = false
+  /** True once camera/state arrives for the active subscribe target. */
+  private hasCameraState = false
+  /** Re-subscribe on next camera/list only after unknown_camera rejection. */
+  private subscribeNeedsRetry = false
 
   private wsUrl(): string {
     const url = new URL('v1/ws', window.location.href)
@@ -316,15 +320,29 @@ class BackendClient {
     }
 
     if (message.type === 'event') {
-      // Re-subscribe after MCM list arrives if an earlier subscribe was rejected
-      // while cameras were still coming online.
+      // Re-subscribe after MCM list arrives only when we still need state
+      // (boot race) or the last reject was unknown_camera — not on every list churn.
       if (message.event === 'camera/list' && this.subscribedCameraUuid) {
-        this.queueSubscribe(this.subscribedCameraUuid)
+        if (!this.hasCameraState || this.subscribeNeedsRetry) {
+          this.queueSubscribe(this.subscribedCameraUuid)
+        }
       }
       if (message.event === 'camera/subscribe_rejected' && this.subscribedCameraUuid) {
-        const body = message.body as { camera_uuid?: string } | null
+        const body = message.body as { camera_uuid?: string; reason?: string } | null
         if (!body?.camera_uuid || body.camera_uuid === this.subscribedCameraUuid) {
-          this.queueSubscribe(this.subscribedCameraUuid)
+          if (body?.reason === 'unknown_camera') {
+            this.subscribeNeedsRetry = true
+            this.queueSubscribe(this.subscribedCameraUuid)
+          } else {
+            console.warn('Camera subscribe rejected:', body?.reason ?? 'unknown')
+          }
+        }
+      }
+      if (message.event === 'camera/state' && this.subscribedCameraUuid) {
+        const body = message.body as { camera_uuid?: string } | null
+        if (body?.camera_uuid === this.subscribedCameraUuid) {
+          this.hasCameraState = true
+          this.subscribeNeedsRetry = false
         }
       }
 
@@ -436,6 +454,8 @@ class BackendClient {
     }
 
     this.subscribedCameraUuid = cameraUuid
+    this.hasCameraState = false
+    this.subscribeNeedsRetry = false
     // Always send subscribe so the backend re-pushes UI + snapshot for this
     // consumer (refcount > 0 alone used to skip the frame and leave remounts blank).
     this.queueSubscribe(cameraUuid)

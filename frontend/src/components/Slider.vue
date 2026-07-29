@@ -56,8 +56,11 @@ let sliderInterval: number | null = null
 let isSliding = false
 
 watch(() => props.current, (newVal) => {
-  current.value = newVal;
-});
+  current.value = newVal
+  if (!isSliding) {
+    lastSentValue.value = newVal
+  }
+})
 
 onBeforeUnmount(() => {
   if (sliderInterval) {
