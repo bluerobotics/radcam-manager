@@ -111,7 +111,11 @@ impl Manager {
         let focus_was_set = new_state.focus.is_some();
 
         if new_state.tilt.is_some() {
-            return Err(anyhow::anyhow!("Tilt setpoint is not implemented"));
+            if new_state.focus.is_none() && new_state.zoom.is_none() {
+                return Err(anyhow::anyhow!("Tilt setpoint is not implemented"));
+            }
+            // Clients that echo a full ActuatorsState still need focus/zoom to apply.
+            warn!("Ignoring unimplemented tilt setpoint; applying focus/zoom only");
         }
 
         if let Some(focus) = new_state.focus {

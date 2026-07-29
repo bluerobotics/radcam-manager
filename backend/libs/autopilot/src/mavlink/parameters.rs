@@ -459,7 +459,7 @@ impl MavlinkComponent {
                 }
             };
 
-            let (Ok(sent_value), Ok(recv_value)) = (
+            let (Ok(got_value), Ok(sent_value)) = (
                 recv_parameter.param_value(encoding),
                 parameter.param_value(encoding),
             ) else {
@@ -467,9 +467,9 @@ impl MavlinkComponent {
                 return Err(anyhow!("Failed checking param values for {name} after set"));
             };
 
-            if recv_value != sent_value {
+            if got_value != sent_value {
                 return Err(anyhow!(
-                    "Failed setting parameter {:?}: Autopilot didn't accept the value: Sent {sent_value:?}, got {recv_value:?}",
+                    "Failed setting parameter {:?}: Autopilot didn't accept the value: Sent {sent_value:?}, got {got_value:?}",
                     parameter.name
                 ));
             }
