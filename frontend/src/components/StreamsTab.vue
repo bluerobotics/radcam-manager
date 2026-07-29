@@ -146,7 +146,16 @@ const selectedVideoParameters = ref<VideoParameterSettings>({
 })
 const downloadedVideoParameters = ref<VideoParameterSettings>({})
 const selectedVideoResolution = ref<VideoResolutionValue | null>(null)
-const needs_restart = ref<boolean>(false)
+const needs_restart = computed(() => {
+  const selected = selectedVideoParameters.value
+  const downloaded = downloadedVideoParameters.value
+  return (
+    selected.encode_profile !== downloaded.encode_profile ||
+    selected.encode_type !== downloaded.encode_type ||
+    selected.pic_width !== downloaded.pic_width ||
+    selected.pic_height !== downloaded.pic_height
+  )
+})
 const hasUserEditedVideo = ref(false)
 const streamsRequestGeneration = ref(0)
 let suppressUserEditFlag = false
@@ -166,11 +175,8 @@ watch(
       awaitingHydrate = false
       return
     }
-    // MainStream is pushed on camera/state; other channels still need a fetch.
-    const channel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
-    if (channel !== VideoChannelValue.MainStream) {
-      getVideoParameters(true)
-    }
+    // Always fetch so awaitingHydrate cannot latch forever if state never arrives.
+    getVideoParameters(true)
   },
   { immediate: true },
 )
@@ -191,31 +197,6 @@ watch(
     if (newValue !== oldValue) {
       getVideoParameters(true)
     }
-  }
-)
-
-watch(
-  () => selectedVideoParameters.value.encode_profile,
-  async (newValue) => {
-    needs_restart.value = newValue !== downloadedVideoParameters.value.encode_profile
-  }
-)
-watch(
-  () => selectedVideoParameters.value.encode_type,
-  async (newValue) => {
-    needs_restart.value = newValue !== downloadedVideoParameters.value.encode_type
-  }
-)
-watch(
-  () => selectedVideoParameters.value.pic_width,
-  async (newValue) => {
-    needs_restart.value = newValue !== downloadedVideoParameters.value.pic_width
-  }
-)
-watch(
-  () => selectedVideoParameters.value.pic_height,
-  async (newValue) => {
-    needs_restart.value = newValue !== downloadedVideoParameters.value.pic_height
   }
 )
 
@@ -268,6 +249,7 @@ const updateVideoParameters = () => {
 
   const video_parameter_settings = selectedVideoParameters.value
   const shouldRestart = needs_restart.value
+  let handedOffRestart = false
 
   const payload = {
     camera_uuid: cameraUuid,
@@ -278,17 +260,22 @@ const updateVideoParameters = () => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then((data) => {
+      if (shouldRestart) {
+        // Always reboot the camera that accepted the venc change, even if the
+        // user switched selection afterward.
+        handedOffRestart = true
+        doRestart(cameraUuid)
+        return
+      }
       if (
         props.selectedCameraUuid !== cameraUuid ||
         generation !== streamsRequestGeneration.value
       ) {
         return
       }
-      if (!shouldRestart) {
-        const settings: VideoParameterSettings =
-          data as VideoParameterSettings
-        update_video_parameter_values(settings)
-      }
+      const settings: VideoParameterSettings =
+        data as VideoParameterSettings
+      update_video_parameter_values(settings)
     })
     .catch((error) =>
       console.error(
@@ -300,10 +287,8 @@ const updateVideoParameters = () => {
       if (generation !== streamsRequestGeneration.value) {
         return
       }
-      if (shouldRestart) {
-        // Reboot the camera that accepted the venc change.
-        doRestart(cameraUuid)
-      } else {
+      // Restart path owns the spinner via doRestart after a successful POST.
+      if (!handedOffRestart) {
         processingUpdate.value = false
       }
     })
@@ -314,11 +299,18 @@ const doRestart = (cameraUuid?: string) => {
   if (!uuid) {
     return
   }
+  // Explicit captured UUID must still reboot even if the current selection is disabled.
+  if (cameraUuid == null && props.disabled) {
+    return
+  }
 
   const generation = streamsRequestGeneration.value
+  const manageSpinner = props.selectedCameraUuid === uuid
   console.log("Restarting...")
 
-  processingUpdate.value = true
+  if (manageSpinner) {
+    processingUpdate.value = true
+  }
 
   const payload = {
     camera_uuid: uuid,
@@ -335,7 +327,6 @@ const doRestart = (cameraUuid?: string) => {
         return
       }
       console.log("Got an answer from the restarting request", data)
-      needs_restart.value = false
     })
     .catch((error) =>
       console.error(
@@ -344,6 +335,7 @@ const doRestart = (cameraUuid?: string) => {
       )
     )
     .finally(() => {
+      if (!manageSpinner) return
       if (generation !== streamsRequestGeneration.value) return
       processingUpdate.value = false
     })

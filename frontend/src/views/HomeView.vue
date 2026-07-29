@@ -348,7 +348,13 @@ watch(selectedCameraUUID, (uuid, previousUuid) => {
 
   const ui = uiByCamera.get(uuid)
   if (ui) {
-    applyCameraUi(ui)
+    // Don't resurrect stale loading/rebooting overlays after unsubscribe.
+    applyCameraUi({
+      ...ui,
+      loading: false,
+      loading_message: null,
+      rebooting: false,
+    })
   } else {
     uiLoading.value = false
     uiRebooting.value = false
@@ -454,33 +460,39 @@ const rebootCamera = (): void => {
 }
 
 const runAutopilotControl = (action: string, errorMessage: string): void => {
-  if (!selectedCameraUUID.value || uiLoading.value || uiRebooting.value) return
+  const cameraUuid = selectedCameraUUID.value
+  if (!cameraUuid || uiLoading.value || uiRebooting.value) return
 
   backendClient
     .request('POST', '/autopilot/control', {
-      camera_uuid: selectedCameraUUID.value,
+      camera_uuid: cameraUuid,
       action,
     })
     .then((data) => {
+      if (selectedCameraUUID.value !== cameraUuid) return
       console.log(data)
     })
     .catch((error) => {
+      if (selectedCameraUUID.value !== cameraUuid) return
       warningToastMessage.value = `${errorMessage}: ${formatRequestError(error)}`
     })
 }
 
 const runCameraControl = (action: string, errorMessage: string): void => {
-  if (!selectedCameraUUID.value || uiLoading.value || uiRebooting.value) return
+  const cameraUuid = selectedCameraUUID.value
+  if (!cameraUuid || uiLoading.value || uiRebooting.value) return
 
   backendClient
     .request('POST', '/camera/control', {
-      camera_uuid: selectedCameraUUID.value,
+      camera_uuid: cameraUuid,
       action,
     })
     .then((data) => {
+      if (selectedCameraUUID.value !== cameraUuid) return
       console.log(data)
     })
     .catch((error) => {
+      if (selectedCameraUUID.value !== cameraUuid) return
       warningToastMessage.value = `${errorMessage}: ${formatRequestError(error)}`
     })
 }
