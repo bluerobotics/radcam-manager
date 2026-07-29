@@ -80,6 +80,7 @@ async fn websocket_connection(socket: WebSocket) {
     let request_permits = Arc::new(Semaphore::new(MAX_INFLIGHT_REQUESTS));
     let snapshot_permits = Arc::new(Semaphore::new(MAX_INFLIGHT_SNAPSHOTS));
     let lag_recovering = Arc::new(AtomicBool::new(false));
+    let lag_needs_resync = Arc::new(AtomicBool::new(false));
     let close_notify = Arc::new(Notify::new());
     let mut last_pong_at = Instant::now();
     let mut last_stats_text: Option<String> = None;
@@ -199,6 +200,7 @@ async fn websocket_connection(socket: WebSocket) {
                             &response_tx,
                             &snapshot_permits,
                             &lag_recovering,
+                            &lag_needs_resync,
                             &close_notify,
                         );
                     }
@@ -242,41 +244,50 @@ fn spawn_lag_recovery(
     response_tx: &mpsc::Sender<String>,
     snapshot_permits: &Arc<Semaphore>,
     lag_recovering: &Arc<AtomicBool>,
+    lag_needs_resync: &Arc<AtomicBool>,
     close_notify: &Arc<Notify>,
 ) {
     if lag_recovering.swap(true, Ordering::SeqCst) {
+        lag_needs_resync.store(true, Ordering::SeqCst);
         return;
     }
 
     let response_tx = response_tx.clone();
     let close_notify = close_notify.clone();
     let snapshot_permits = snapshot_permits.clone();
+    let lag_needs_resync = lag_needs_resync.clone();
     let lag_guard = LagGuard(lag_recovering.clone());
     tokio::spawn(
         async move {
             let _lag_guard = lag_guard;
-            for camera_uuid in camera_state::connection_cameras(connection_id) {
-                let Ok(permit) = snapshot_permits.clone().try_acquire_owned() else {
-                    debug!(%connection_id, %camera_uuid, "No permit for lag-recovery snapshot; pushing actuators only");
-                    // Slow watcher does not backfill actuators_state; push manager cache.
-                    if let Some(event) =
-                        camera_state::actuators_state_event(camera_uuid).await
-                        && let Some(text) = state_event_text(&event)
+            loop {
+                lag_needs_resync.store(false, Ordering::SeqCst);
+                for camera_uuid in camera_state::connection_cameras(connection_id) {
+                    let Ok(permit) = snapshot_permits.clone().try_acquire_owned() else {
+                        debug!(%connection_id, %camera_uuid, "No permit for lag-recovery snapshot; pushing actuators only");
+                        // Slow watcher does not backfill actuators_state; push manager cache.
+                        if let Some(event) =
+                            camera_state::actuators_state_event(camera_uuid).await
+                            && let Some(text) = state_event_text(&event)
+                            && !queue_text(connection_id, &response_tx, &close_notify, text)
+                        {
+                            return;
+                        }
+                        continue;
+                    };
+                    let event = camera_state::snapshot(camera_uuid).await;
+                    drop(permit);
+                    if !camera_state::connection_subscribed(connection_id, camera_uuid) {
+                        continue;
+                    }
+                    if let Some(text) = state_event_text(&event)
                         && !queue_text(connection_id, &response_tx, &close_notify, text)
                     {
                         return;
                     }
-                    continue;
-                };
-                let event = camera_state::snapshot(camera_uuid).await;
-                drop(permit);
-                if !camera_state::connection_subscribed(connection_id, camera_uuid) {
-                    continue;
                 }
-                if let Some(text) = state_event_text(&event)
-                    && !queue_text(connection_id, &response_tx, &close_notify, text)
-                {
-                    return;
+                if !lag_needs_resync.load(Ordering::SeqCst) {
+                    break;
                 }
             }
         }

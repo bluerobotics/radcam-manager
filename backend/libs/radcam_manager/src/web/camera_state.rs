@@ -36,6 +36,7 @@ static ACTUATORS_BRIDGE_STARTED: AtomicBool = AtomicBool::new(false);
 static SLOW_WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
 static CAMERA_LIST_WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
 static ACTUATORS_LAG_RESYNCING: AtomicBool = AtomicBool::new(false);
+static ACTUATORS_LAG_NEEDS_RESYNC: AtomicBool = AtomicBool::new(false);
 static REGISTRY: OnceCell<Mutex<Registry>> = OnceCell::new();
 static STATE_TX: OnceCell<broadcast::Sender<CameraStateEvent>> = OnceCell::new();
 static ACTUATORS_DEFAULT_CONFIG: tokio::sync::OnceCell<serde_json::Value> =
@@ -221,12 +222,18 @@ pub(crate) fn cached_state_event(camera_uuid: Uuid) -> CameraStateEvent {
 /// `last_states` when the SERVO cache is stale for this camera.
 #[instrument(level = "debug", skip_all, fields(%camera_uuid))]
 pub(crate) async fn actuators_state_event(camera_uuid: Uuid) -> Option<CameraStateEvent> {
-    let actuators_state = autopilot::handle_control(ActuatorsControl {
+    let actuators_state = match autopilot::handle_control(ActuatorsControl {
         camera_uuid,
         action: AutopilotAction::GetActuatorsState,
     })
     .await
-    .ok()?;
+    {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(%camera_uuid, "GetActuatorsState for actuators_state_event failed: {error:?}");
+            return None;
+        }
+    };
     let mut event = CameraStateEvent {
         camera_uuid,
         actuators_state: Some(actuators_state),
@@ -565,15 +572,22 @@ fn ensure_actuators_bridge() {
                         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                         .is_err()
                     {
+                        ACTUATORS_LAG_NEEDS_RESYNC.store(true, Ordering::SeqCst);
                         continue;
                     }
-                    let cameras: Vec<Uuid> = {
-                        let registry = registry().lock().unwrap();
-                        registry.camera_interest.keys().copied().collect()
-                    };
                     tokio::spawn(async move {
                         let _guard = ActuatorsLagResyncGuard;
-                        resync_actuators_from_manager(cameras).await;
+                        loop {
+                            ACTUATORS_LAG_NEEDS_RESYNC.store(false, Ordering::SeqCst);
+                            let cameras: Vec<Uuid> = {
+                                let registry = registry().lock().unwrap();
+                                registry.camera_interest.keys().copied().collect()
+                            };
+                            resync_actuators_from_manager(cameras).await;
+                            if !ACTUATORS_LAG_NEEDS_RESYNC.load(Ordering::SeqCst) {
+                                break;
+                            }
+                        }
                     });
                 }
             }
