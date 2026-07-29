@@ -990,6 +990,7 @@ const doRestoreBase = async () => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
+  inFlightBaseWrites.value++
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustment",
@@ -1014,6 +1015,7 @@ const doRestoreBase = async () => {
     })
     .finally(() => {
       if (generation !== imageRequestGeneration.value) return
+      inFlightBaseWrites.value = Math.max(0, inFlightBaseWrites.value - 1)
       processingBaseRestore.value = false
     })
 }
@@ -1059,6 +1061,7 @@ const doRestoreAdvanced = async () => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = imageRequestGeneration.value
+  inFlightAdvancedWrites.value++
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
@@ -1080,6 +1083,7 @@ const doRestoreAdvanced = async () => {
     })
     .finally(() => {
       if (generation !== imageRequestGeneration.value) return
+      inFlightAdvancedWrites.value = Math.max(0, inFlightAdvancedWrites.value - 1)
       processingAdvancedRestore.value = false
     })
 }

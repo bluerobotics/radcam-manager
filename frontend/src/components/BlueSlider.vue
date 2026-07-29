@@ -32,7 +32,6 @@
           :class="isEditingCurrentSliderValue ? 'pointer-events-auto' : 'pointer-events-none select-none'"
           :style="{
             left: pillLeft,
-            marginLeft: '5px',
             backgroundColor: color || '#0B5087',
           }"
         >
