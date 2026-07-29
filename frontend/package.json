@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build --force",
+    "selfcheck": "npx --yes tsx src/utils/runSelfChecks.ts",
     "lint": "eslint . --fix"
   },
   "dependencies": {

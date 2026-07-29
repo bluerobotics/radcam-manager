@@ -28,13 +28,16 @@ export function ownsActuatorFlight(
 
 /**
  * Whether a failed POST should restore the pre-gesture UI value.
- * Caller should clear the desired latch for `attempted` before calling when
- * that latch still targets this attempt.
+ *
+ * Pass `desired` as it was *before* clearing the latch for this attempt.
+ * If SERVO already matched `attempted` (desired already cleared by state),
+ * skip rollback — hardware already reflects the command.
  */
 export function shouldRollbackActuatorUi(args: {
   ownsFlight: boolean
   queued: number | null
-  desired: number | null
+  /** Desired latch before any fail-path clear for this attempt. */
+  desiredBeforeClear: number | null
   ui: number | null
   attempted: number
   rollback: number | null
@@ -42,7 +45,17 @@ export function shouldRollbackActuatorUi(args: {
 }): boolean {
   if (!args.ownsFlight) return false
   if (args.queued !== null) return false
-  if (args.desired !== null) return false
+  // Newer desire still pending — leave optimistic UI alone.
+  if (
+    args.desiredBeforeClear !== null &&
+    !args.valuesMatch(args.desiredBeforeClear, args.attempted)
+  ) {
+    return false
+  }
+  // Desired already cleared because SERVO matched — do not snap back.
+  if (args.desiredBeforeClear === null) {
+    return false
+  }
   if (args.rollback === null || args.ui === null) return false
   return args.valuesMatch(args.ui, args.attempted)
 }
