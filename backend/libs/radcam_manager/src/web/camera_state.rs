@@ -493,7 +493,7 @@ fn state_sender() -> &'static broadcast::Sender<CameraStateEvent> {
 }
 
 #[instrument(level = "debug", skip_all, fields(%event.camera_uuid))]
-fn emit(mut event: CameraStateEvent) {
+pub(crate) fn emit(mut event: CameraStateEvent) {
     record_partial(&mut event);
     // record_partial is a no-op without interest; skip waking every WS filter.
     if !has_interest(event.camera_uuid) {
@@ -693,6 +693,7 @@ fn ensure_camera_list_watcher() {
                 Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
                     let known: HashSet<Uuid> =
                         mcm_client::cameras().await.keys().copied().collect();
+                    crate::web::one_push_awb::retain_known_cameras(&known);
                     retain_known_cameras(&known);
                     camera_ui::retain_known_cameras(&known);
                 }
