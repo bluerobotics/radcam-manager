@@ -39,7 +39,28 @@ const MAX_INFLIGHT_SNAPSHOTS: usize = 4;
 struct ConnectionGuard(ConnectionId);
 
 /// Clears the lag-recovery flag when the recovery task ends or panics.
-struct LagGuard(Arc<AtomicBool>);
+struct LagGuard {
+    flag: Arc<AtomicBool>,
+    armed: bool,
+}
+
+impl LagGuard {
+    fn new(flag: Arc<AtomicBool>) -> Self {
+        Self { flag, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for LagGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.flag.store(false, Ordering::SeqCst);
+        }
+    }
+}
 
 /// Why an outbound WebSocket message was not delivered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,12 +74,6 @@ enum SendFailure {
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         cleanup(self.0);
-    }
-}
-
-impl Drop for LagGuard {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
     }
 }
 
@@ -256,10 +271,10 @@ fn spawn_lag_recovery(
     let close_notify = close_notify.clone();
     let snapshot_permits = snapshot_permits.clone();
     let lag_needs_resync = lag_needs_resync.clone();
-    let lag_guard = LagGuard(lag_recovering.clone());
+    let lag_recovering = lag_recovering.clone();
+    let mut lag_guard = LagGuard::new(lag_recovering.clone());
     tokio::spawn(
         async move {
-            let _lag_guard = lag_guard;
             loop {
                 lag_needs_resync.store(false, Ordering::SeqCst);
                 for camera_uuid in camera_state::connection_cameras(connection_id) {
@@ -271,6 +286,8 @@ fn spawn_lag_recovery(
                             && let Some(text) = state_event_text(&event)
                             && !queue_text(connection_id, &response_tx, &close_notify, text)
                         {
+                            // Connection is dying; do not leave a sticky dirty bit.
+                            lag_needs_resync.store(false, Ordering::SeqCst);
                             return;
                         }
                         continue;
@@ -283,12 +300,27 @@ fn spawn_lag_recovery(
                     if let Some(text) = state_event_text(&event)
                         && !queue_text(connection_id, &response_tx, &close_notify, text)
                     {
+                        lag_needs_resync.store(false, Ordering::SeqCst);
                         return;
                     }
                 }
-                if !lag_needs_resync.load(Ordering::SeqCst) {
+                if lag_needs_resync.load(Ordering::SeqCst) {
+                    continue;
+                }
+                lag_recovering.store(false, Ordering::SeqCst);
+                if !lag_needs_resync.swap(false, Ordering::SeqCst) {
+                    lag_guard.disarm();
                     break;
                 }
+                if lag_recovering
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    continue;
+                }
+                lag_needs_resync.store(true, Ordering::SeqCst);
+                lag_guard.disarm();
+                break;
             }
         }
         .instrument(Span::current()),

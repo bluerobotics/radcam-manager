@@ -302,23 +302,28 @@ async fn actuators_watcher() {
                                 continue;
                             };
 
+                            let interested = INTEREST.load(Ordering::SeqCst) > 0;
+
                             let mut manager = manager.write().await;
                             let mut updated = Vec::new();
                             for (camera_uuid, actuators) in &mut manager.settings.actuators {
                                 let state =
                                     manager::actuators_state_from_servo(actuators, &servo_output_raw);
                                 actuators.state = state;
-                                updated.push(*camera_uuid);
-                                gate.try_emit(*camera_uuid, state, &sender);
+                                if interested {
+                                    updated.push(*camera_uuid);
+                                    gate.try_emit(*camera_uuid, state, &sender);
+                                }
                             }
                             drop(manager);
 
-                            last_servo_at = Some(Instant::now());
-                            for camera_uuid in updated {
-                                mark_servo_sample(camera_uuid);
+                            if interested {
+                                last_servo_at = Some(Instant::now());
+                                for camera_uuid in updated {
+                                    mark_servo_sample(camera_uuid);
+                                }
+                                gate.flush_pending(&sender);
                             }
-
-                            gate.flush_pending(&sender);
                         }
                         Ok(_) => continue,
                         Err(broadcast::error::RecvError::Closed) => {
@@ -359,6 +364,8 @@ async fn actuators_watcher() {
                     } else {
                         last_servo_at = None;
                         clear_servo_freshness();
+                        gate.last_emitted.clear();
+                        gate.pending.clear();
                         // Best-effort disable; shutdown() also times this out.
                         let _ = tokio::time::timeout(
                             SERVO_REQUEST_TIMEOUT,
