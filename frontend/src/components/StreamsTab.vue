@@ -162,6 +162,32 @@ let suppressUserEditFlag = false
 let awaitingHydrate = false
 /** Ignore camera/state venc pushes until reboot overlay clears. */
 let awaitingRestartHydrate = false
+/** Fallback so awaitingRestartHydrate cannot stick if disabled never flips. */
+let restartHydrateTimeout: number | null = null
+const RESTART_HYDRATE_TIMEOUT_MS = 30_000
+
+const clearRestartHydrateLatch = (): void => {
+  awaitingRestartHydrate = false
+  if (restartHydrateTimeout !== null) {
+    clearTimeout(restartHydrateTimeout)
+    restartHydrateTimeout = null
+  }
+}
+
+const armRestartHydrateLatch = (): void => {
+  clearRestartHydrateLatch()
+  awaitingRestartHydrate = true
+  const generation = streamsRequestGeneration.value
+  restartHydrateTimeout = window.setTimeout(() => {
+    restartHydrateTimeout = null
+    if (
+      awaitingRestartHydrate &&
+      generation === streamsRequestGeneration.value
+    ) {
+      awaitingRestartHydrate = false
+    }
+  }, RESTART_HYDRATE_TIMEOUT_MS)
+}
 
 watch(
   () => props.selectedCameraUuid,
@@ -169,7 +195,7 @@ watch(
     streamsRequestGeneration.value += 1
     hasUserEditedVideo.value = false
     processingUpdate.value = false
-    awaitingRestartHydrate = false
+    clearRestartHydrateLatch()
     // Hold dirty latch until the first successful hydrate for this camera.
     suppressUserEditFlag = true
     awaitingHydrate = true
@@ -187,8 +213,9 @@ watch(
 watch(
   () => props.disabled,
   (disabled, wasDisabled) => {
+    // Overlay cleared — re-fetch and clear latch only after a successful hydrate.
     if (wasDisabled && !disabled && awaitingRestartHydrate) {
-      awaitingRestartHydrate = false
+      getVideoParameters(true)
     }
   },
 )
@@ -229,7 +256,13 @@ const applyCameraStateEvent = (body: unknown) => {
   const data = body as Record<string, unknown>
   if (data.camera_uuid !== props.selectedCameraUuid) return
   if (!data.video_parameters) return
-  if (hasUserEditedVideo.value || awaitingRestartHydrate) return
+  if (hasUserEditedVideo.value) return
+  if (awaitingRestartHydrate) {
+    // First post-restart video snapshot — accept and clear the latch.
+    update_video_parameter_values(data.video_parameters as VideoParameterSettings)
+    clearRestartHydrateLatch()
+    return
+  }
 
   const settings = data.video_parameters as VideoParameterSettings
   const currentChannel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
@@ -288,7 +321,7 @@ const updateVideoParameters = () => {
           props.selectedCameraUuid === cameraUuid &&
           generation === streamsRequestGeneration.value
         ) {
-          awaitingRestartHydrate = true
+          armRestartHydrateLatch()
         }
       }
     })
@@ -349,7 +382,7 @@ const doRestart = (cameraUuid?: string) => {
         error.message
       )
       if (generation === streamsRequestGeneration.value) {
-        awaitingRestartHydrate = false
+        clearRestartHydrateLatch()
       }
     })
     .finally(() => {
@@ -390,6 +423,9 @@ const getVideoParameters = (update: boolean) => {
 
       if (update) {
         update_video_parameter_values(settings)
+        if (awaitingRestartHydrate) {
+          clearRestartHydrateLatch()
+        }
       }
     })
     .catch((error) => {
