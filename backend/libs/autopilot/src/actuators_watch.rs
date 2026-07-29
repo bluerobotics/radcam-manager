@@ -396,20 +396,18 @@ async fn actuators_watcher() {
 
 #[instrument(level = "debug", skip_all)]
 async fn open_receiver() -> Option<(broadcast::Receiver<Message>, u8)> {
-    let manager = MANAGER.get()?.read().await;
-    let receiver = manager.mavlink.get_receiver().await;
-    let target_system = manager.mavlink.inner.system_id;
+    let mavlink = crate::mavlink::component().ok()?;
+    let receiver = mavlink.get_receiver().await;
+    let target_system = mavlink.system_id();
     Some((receiver, target_system))
 }
 
 #[instrument(level = "debug")]
 async fn request_servo_stream(interval_us: f32) {
-    let Some(manager) = MANAGER.get() else {
+    let Ok(mavlink) = crate::mavlink::component() else {
         return;
     };
-    let manager = manager.read().await;
-    if let Err(error) = manager
-        .mavlink
+    if let Err(error) = mavlink
         .set_message_interval(SERVO_OUTPUT_RAW_DATA::ID, interval_us)
         .await
     {
