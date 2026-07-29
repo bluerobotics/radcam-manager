@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use mlua::Lua;
 use tera::Tera;
 use tracing::*;
@@ -326,6 +327,10 @@ impl Manager {
         script_channel
     );
 
+    /// Fetch a SERVO sample then evaluate script health.
+    ///
+    /// Callers that already hold `MANAGER.write()` must not use this — wait for
+    /// SERVO under a read lock and call [`Self::apply_focus_script_health_sample`].
     pub async fn check_focus_script_health(&mut self, camera_uuid: &Uuid) {
         let Some(actuators) = self.settings.actuators.get(camera_uuid) else {
             return;
@@ -340,12 +345,35 @@ impl Manager {
             Err(_) => return,
         };
 
+        self.apply_focus_script_health_sample(camera_uuid, &servo_output_raw)
+            .await;
+    }
+
+    /// Evaluate focus-script health from an already-fetched SERVO sample.
+    pub async fn apply_focus_script_health_sample(
+        &mut self,
+        camera_uuid: &Uuid,
+        servo_output_raw: &SERVO_OUTPUT_RAW_DATA,
+    ) {
+        let (script_channel, focus_channel, enabled) = {
+            let Some(actuators) = self.settings.actuators.get(camera_uuid) else {
+                return;
+            };
+            (
+                actuators.parameters.script_channel,
+                actuators.parameters.focus_channel,
+                actuators.parameters.enable_focus_and_zoom_correlation,
+            )
+        };
+
+        if !enabled {
+            return;
+        }
+
         // script_channel (e.g. SERVO12) = CameraFocus = input to the Lua script
-        let script_input_raw =
-            get_output_raw_from_channel(&servo_output_raw, actuators.parameters.script_channel);
+        let script_input_raw = get_output_raw_from_channel(servo_output_raw, script_channel);
         // focus_channel (e.g. SERVO10) = Script1 = output from the Lua script
-        let script_output_raw =
-            get_output_raw_from_channel(&servo_output_raw, actuators.parameters.focus_channel);
+        let script_output_raw = get_output_raw_from_channel(servo_output_raw, focus_channel);
 
         if let (Some(input_raw), Some(output_raw)) = (script_input_raw, script_output_raw)
             && self.script_health.update(input_raw, output_raw)

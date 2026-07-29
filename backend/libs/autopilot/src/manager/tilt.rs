@@ -121,6 +121,8 @@ impl Manager {
             .await?;
         self.update_tilt_mnt_pitch_max(camera_uuid, parameters, force_apply)
             .await?;
+        self.update_tilt_mnt_type(camera_uuid, parameters, force_apply)
+            .await?;
 
         Ok(())
     }
@@ -166,10 +168,6 @@ impl Manager {
         INT32
     );
 
-    // Intentionally kept even though tilt is not wired end-to-end yet: this is
-    // half-finished mount-type apply for upcoming tilt support. Do not delete
-    // as "dead code" — call sites will land with the tilt feature.
-    #[allow(dead_code)]
     #[instrument(level = "debug", skip(self))]
     pub async fn update_tilt_mnt_type(
         &mut self,
@@ -186,11 +184,12 @@ impl Manager {
 
         let encoding = self.mavlink.encoding().await;
 
+        // Debug name is MNT1/MNT2 (same as pitch macros), not the SERVO function u8.
         let mount_id = match current_parameters.camera_id {
             api::CameraID::CAM1 => TiltChannelFunction::MNT1,
             api::CameraID::CAM2 => TiltChannelFunction::MNT2,
-        } as u8;
-        let param_name = format!("MNT{mount_id}_TYPE");
+        };
+        let param_name = format!("{mount_id:?}_TYPE");
 
         let new_value = match (parameters.tilt_mnt_type, force_apply) {
             (Some(value), _) => value,
