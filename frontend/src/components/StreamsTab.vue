@@ -258,8 +258,11 @@ const applyCameraStateEvent = (body: unknown) => {
   if (!data.video_parameters) return
   if (hasUserEditedVideo.value) return
   if (awaitingRestartHydrate) {
-    // First post-restart video snapshot — accept and clear the latch.
-    update_video_parameter_values(data.video_parameters as VideoParameterSettings)
+    const settings = data.video_parameters as VideoParameterSettings
+    const currentChannel = selectedVideoParameters.value.channel ?? VideoChannelValue.MainStream
+    if (settings.channel != null && settings.channel !== currentChannel) return
+    // First matching post-restart video snapshot — accept and clear the latch.
+    update_video_parameter_values(settings)
     clearRestartHydrateLatch()
     return
   }
