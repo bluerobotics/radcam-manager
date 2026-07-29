@@ -49,7 +49,22 @@ struct Registry {
 }
 
 /// Clears the actuators lag-resync flag when the task ends or panics.
-struct ActuatorsLagResyncGuard;
+///
+/// Call [`ActuatorsLagResyncGuard::disarm`] before a clean exit that already
+/// cleared `ACTUATORS_LAG_RESYNCING`, so Drop does not clobber a successor task.
+struct ActuatorsLagResyncGuard {
+    armed: bool,
+}
+
+impl ActuatorsLagResyncGuard {
+    fn new() -> Self {
+        Self { armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 struct CameraSnapshot {
@@ -63,7 +78,9 @@ struct CameraSnapshot {
 
 impl Drop for ActuatorsLagResyncGuard {
     fn drop(&mut self) {
-        ACTUATORS_LAG_RESYNCING.store(false, Ordering::SeqCst);
+        if self.armed {
+            ACTUATORS_LAG_RESYNCING.store(false, Ordering::SeqCst);
+        }
     }
 }
 
@@ -576,7 +593,7 @@ fn ensure_actuators_bridge() {
                         continue;
                     }
                     tokio::spawn(async move {
-                        let _guard = ActuatorsLagResyncGuard;
+                        let mut guard = ActuatorsLagResyncGuard::new();
                         loop {
                             ACTUATORS_LAG_NEEDS_RESYNC.store(false, Ordering::SeqCst);
                             let cameras: Vec<Uuid> = {
@@ -584,9 +601,26 @@ fn ensure_actuators_bridge() {
                                 registry.camera_interest.keys().copied().collect()
                             };
                             resync_actuators_from_manager(cameras).await;
-                            if !ACTUATORS_LAG_NEEDS_RESYNC.load(Ordering::SeqCst) {
+                            if ACTUATORS_LAG_NEEDS_RESYNC.load(Ordering::SeqCst) {
+                                continue;
+                            }
+                            // Release before the final dirty check so a concurrent
+                            // Lagged can either spawn a successor or set dirty.
+                            ACTUATORS_LAG_RESYNCING.store(false, Ordering::SeqCst);
+                            if !ACTUATORS_LAG_NEEDS_RESYNC.swap(false, Ordering::SeqCst) {
+                                guard.disarm();
                                 break;
                             }
+                            if ACTUATORS_LAG_RESYNCING
+                                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                .is_ok()
+                            {
+                                continue;
+                            }
+                            // Successor already running; hand them the dirty bit.
+                            ACTUATORS_LAG_NEEDS_RESYNC.store(true, Ordering::SeqCst);
+                            guard.disarm();
+                            break;
                         }
                     });
                 }
