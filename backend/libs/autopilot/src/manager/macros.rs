@@ -52,7 +52,10 @@ macro_rules! generate_update_channel_param_function {
                         current_parameters.$field_name = new_value;
                     }
                     Err(error) => {
-                        warn!("Failed setting parameter: {error:?}")
+                        return Err(anyhow::anyhow!(
+                            "Failed setting parameter {}: {error:?}",
+                            stringify!($field_name)
+                        ));
                     }
                 }
             } else {
@@ -120,7 +123,10 @@ macro_rules! generate_update_mount_param_function {
                         has_changed = true;
                     }
                     Err(error) => {
-                        warn!("Failed setting parameter: {error:?}")
+                        return Err(anyhow::anyhow!(
+                            "Failed setting parameter {}: {error:?}",
+                            stringify!($field_name)
+                        ));
                     }
                 }
             } else {

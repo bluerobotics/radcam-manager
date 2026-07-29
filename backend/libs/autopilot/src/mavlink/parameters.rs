@@ -432,8 +432,16 @@ impl MavlinkComponent {
             param_type: parameter.param_type(),
         });
 
+        let mut send_retries = 5;
         loop {
             if let Err(error) = sender.send(Message::ToBeSent((header, message.clone()))) {
+                send_retries -= 1;
+                if send_retries == 0 {
+                    return Err(anyhow!(
+                        "Failed requesting parameter {}: {error:?}",
+                        parameter.name
+                    ));
+                }
                 warn!("Failed requesting parameter: {error:?}");
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -455,9 +463,8 @@ impl MavlinkComponent {
                 recv_parameter.param_value(encoding),
                 parameter.param_value(encoding),
             ) else {
-                warn!("Failed checking param!");
-
-                continue;
+                let name = &parameter.name;
+                return Err(anyhow!("Failed checking param values for {name} after set"));
             };
 
             if recv_value != sent_value {
