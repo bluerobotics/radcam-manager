@@ -95,7 +95,7 @@ impl Manager {
 
         let state = actuators_state_from_servo(actuators, &servo_output_raw);
         actuators.state = state;
-        crate::actuators_watch::mark_servo_from_get_state();
+        crate::actuators_watch::mark_servo_from_get_state(*camera_uuid);
 
         Ok(actuators.state)
     }
@@ -110,7 +110,7 @@ impl Manager {
 
         let focus_was_set = new_state.focus.is_some();
 
-        if new_state.tilt.is_some() && new_state.focus.is_none() && new_state.zoom.is_none() {
+        if new_state.tilt.is_some() {
             return Err(anyhow::anyhow!("Tilt setpoint is not implemented"));
         }
 

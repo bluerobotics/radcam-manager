@@ -87,7 +87,9 @@ pub(crate) async fn control_inner(
             // Prefer the SERVO watcher's cache when interest is on *and* a recent
             // sample exists. Otherwise one-shot wait so subscribe/REST are not
             // served stale defaults from disk.
-            if actuators_watch::interest_count() > 0 && actuators_watch::cache_is_fresh() {
+            if actuators_watch::interest_count() > 0
+                && actuators_watch::cache_is_fresh(actuators_control.camera_uuid)
+            {
                 let manager = MANAGER.get().context("Not available")?.read().await;
 
                 let actuators = manager
