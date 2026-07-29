@@ -645,6 +645,12 @@ import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
 import { type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, BaseAutoWhiteBalanceSceneValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
 import { backendClient } from '@/utils/backendClient'
+import {
+  createActuatorTokenSource,
+  ownsActuatorFlight,
+  shouldRollbackActuatorUi,
+  type ActuatorFlight,
+} from '@/utils/actuatorFlight'
 import { createPendingFields } from '@/utils/pendingFields'
 import { useCameraState } from '@/utils/useCameraState'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
@@ -797,10 +803,11 @@ const armDesiredLatch = (key: ActuatorKey, value: number): void => {
 
 // Coalesce actuator set requests so only one request per actuator can be in-flight, always
 // sending the most recent value (prevents request pile-up).
-const actuatorsSetInFlight = ref<Record<ActuatorKey, boolean>>({
-  focus: false,
-  zoom: false,
-  tilt: false,
+const actuatorTokens = createActuatorTokenSource()
+const actuatorsSetInFlight = ref<Record<ActuatorKey, ActuatorFlight | null>>({
+  focus: null,
+  zoom: null,
+  tilt: null,
 })
 const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
   focus: null,
@@ -913,7 +920,7 @@ watch(
     ;(['focus', 'zoom', 'tilt'] as const).forEach(clearDesiredLatch)
     actuatorsSetRollback.value = { focus: null, zoom: null, tilt: null }
     actuatorsSetQueued.value = { focus: null, zoom: null, tilt: null }
-    actuatorsSetInFlight.value = { focus: false, zoom: false, tilt: false }
+    actuatorsSetInFlight.value = { focus: null, zoom: null, tilt: null }
   },
 )
 
@@ -1304,15 +1311,16 @@ const updateActuatorsConfig = (param: keyof ActuatorsParametersConfig, value: an
 const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false): void => {
   if (!props.selectedCameraUuid) return
   if (props.disabled && !allowWhileDisabled) return
-  if (actuatorsSetInFlight.value[param]) return
+  if (actuatorsSetInFlight.value[param] !== null) return
 
   const value = actuatorsSetQueued.value[param]
   if (value === null) return
 
   const cameraUuid = props.selectedCameraUuid
   const generation = actuatorsRequestGeneration.value
+  const token = actuatorTokens.next()
   actuatorsSetQueued.value[param] = null
-  actuatorsSetInFlight.value[param] = true
+  actuatorsSetInFlight.value[param] = { token, value }
 
   const payload: ActuatorsControl = {
     camera_uuid: cameraUuid,
@@ -1326,6 +1334,8 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
       const message = `Error updating ${param}`
       console.log(message, error.message)
       if (generation !== actuatorsRequestGeneration.value) return
+      if (!ownsActuatorFlight(actuatorsSetInFlight.value[param], token)) return
+
       // Failed command will never match SERVO — drop the latch for this value.
       if (
         desiredActuatorsState.value[param] !== null &&
@@ -1333,13 +1343,17 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
       ) {
         clearDesiredLatch(param)
       }
-      // Roll back optimistic UI if nothing newer is queued/desired.
+      // Roll back optimistic UI if this flight still owns the slot and nothing newer is pending.
       if (
-        actuatorsSetQueued.value[param] === null &&
-        desiredActuatorsState.value[param] === null &&
-        actuatorsState.value[param] !== null &&
-        approxEqual(actuatorsState.value[param]!, value, param) &&
-        actuatorsSetRollback.value[param] !== null
+        shouldRollbackActuatorUi({
+          ownsFlight: true,
+          queued: actuatorsSetQueued.value[param],
+          desired: desiredActuatorsState.value[param],
+          ui: actuatorsState.value[param],
+          attempted: value,
+          rollback: actuatorsSetRollback.value[param],
+          valuesMatch: (a, b) => approxEqual(a, b, param),
+        })
       ) {
         actuatorsState.value[param] = actuatorsSetRollback.value[param]
       }
@@ -1349,8 +1363,11 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
       if (generation !== actuatorsRequestGeneration.value) {
         return
       }
+      if (!ownsActuatorFlight(actuatorsSetInFlight.value[param], token)) {
+        return
+      }
 
-      actuatorsSetInFlight.value[param] = false
+      actuatorsSetInFlight.value[param] = null
 
       // If a newer value was queued while this request was in-flight, send it now
       // even if the UI is disabled (loading/reboot) so the drain cannot strand.
@@ -1370,7 +1387,7 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
   // Capture pre-gesture value once so a failed POST can roll back.
   if (
     actuatorsSetQueued.value[key] === null &&
-    !actuatorsSetInFlight.value[key]
+    actuatorsSetInFlight.value[key] === null
   ) {
     actuatorsSetRollback.value[key] = actuatorsState.value[key]
   }
