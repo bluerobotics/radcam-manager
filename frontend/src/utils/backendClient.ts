@@ -102,6 +102,8 @@ class BackendClient {
   private hasCameraState = false
   /** Re-subscribe on next camera/list only after unknown_camera rejection. */
   private subscribeNeedsRetry = false
+  /** Hard-stop list retries after camera_cap until the user re-selects. */
+  private subscribeBlocked = false
 
   private wsUrl(): string {
     const url = new URL('v1/ws', window.location.href)
@@ -327,7 +329,9 @@ class BackendClient {
       // Re-subscribe after MCM list arrives only when we still need state
       // (boot race) or the last reject was unknown_camera — not on every list churn.
       if (message.event === 'camera/list' && this.subscribedCameraUuid) {
-        if (!this.hasCameraState || this.subscribeNeedsRetry) {
+        if (this.subscribeBlocked) {
+          // Over capacity — wait for an explicit subscribeCamera (user action).
+        } else if (!this.hasCameraState || this.subscribeNeedsRetry) {
           this.queueSubscribe(this.subscribedCameraUuid)
         }
       }
@@ -337,7 +341,10 @@ class BackendClient {
           if (body?.reason === 'unknown_camera') {
             // Retry from the next camera/list — do not immediate-resubscribe (storm).
             this.subscribeNeedsRetry = true
+            this.subscribeBlocked = false
           } else if (body?.reason === 'camera_cap') {
+            this.subscribeBlocked = true
+            this.subscribeNeedsRetry = false
             this.notifyWarning('Camera subscribe rejected: camera limit reached')
           } else {
             console.warn('Camera subscribe rejected:', body?.reason ?? 'unknown')
@@ -462,6 +469,7 @@ class BackendClient {
     this.subscribedCameraUuid = cameraUuid
     this.hasCameraState = false
     this.subscribeNeedsRetry = false
+    this.subscribeBlocked = false
     // Always send subscribe so the backend re-pushes UI + snapshot for this
     // consumer (refcount > 0 alone used to skip the frame and leave remounts blank).
     this.queueSubscribe(cameraUuid)
