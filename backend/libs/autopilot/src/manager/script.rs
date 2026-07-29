@@ -327,37 +327,18 @@ impl Manager {
         script_channel
     );
 
-    /// Fetch a SERVO sample then evaluate script health.
-    ///
-    /// Callers that already hold `MANAGER.write()` must not use this — wait for
-    /// SERVO under a read lock and call [`Self::apply_focus_script_health_sample`].
-    pub async fn check_focus_script_health(&mut self, camera_uuid: &Uuid) {
-        let Some(actuators) = self.settings.actuators.get(camera_uuid) else {
-            return;
-        };
-
-        if !actuators.parameters.enable_focus_and_zoom_correlation {
-            return;
-        }
-
-        let servo_output_raw = match self.mavlink.request_servo_output_raw().await {
-            Ok(data) => data,
-            Err(_) => return,
-        };
-
-        self.apply_focus_script_health_sample(camera_uuid, &servo_output_raw)
-            .await;
-    }
-
     /// Evaluate focus-script health from an already-fetched SERVO sample.
-    pub async fn apply_focus_script_health_sample(
+    ///
+    /// Returns `true` when a Lua reload should be attempted. Callers must invoke
+    /// `reload_lua_scripts` **without** holding `MANAGER.write()`.
+    pub fn apply_focus_script_health_sample(
         &mut self,
         camera_uuid: &Uuid,
         servo_output_raw: &SERVO_OUTPUT_RAW_DATA,
-    ) {
+    ) -> bool {
         let (script_channel, focus_channel, enabled) = {
             let Some(actuators) = self.settings.actuators.get(camera_uuid) else {
-                return;
+                return false;
             };
             (
                 actuators.parameters.script_channel,
@@ -367,24 +348,18 @@ impl Manager {
         };
 
         if !enabled {
-            return;
+            return false;
         }
 
         // script_channel (e.g. SERVO12) = CameraFocus = input to the Lua script
-        let script_input_raw =
-            get_output_raw_from_channel(servo_output_raw, script_channel);
+        let script_input_raw = get_output_raw_from_channel(servo_output_raw, script_channel);
         // focus_channel (e.g. SERVO10) = Script1 = output from the Lua script
-        let script_output_raw =
-            get_output_raw_from_channel(servo_output_raw, focus_channel);
+        let script_output_raw = get_output_raw_from_channel(servo_output_raw, focus_channel);
 
-        if let (Some(input_raw), Some(output_raw)) = (script_input_raw, script_output_raw)
-            && self.script_health.update(input_raw, output_raw)
-        {
-            warn!("Attempting Lua script reload due to stale focus output");
-            if let Err(error) = self.mavlink.reload_lua_scripts(true).await {
-                error!("Failed to reload Lua scripts: {error:?}");
-            }
+        if let (Some(input_raw), Some(output_raw)) = (script_input_raw, script_output_raw) {
+            return self.script_health.update(input_raw, output_raw);
         }
+        false
     }
 }
 
