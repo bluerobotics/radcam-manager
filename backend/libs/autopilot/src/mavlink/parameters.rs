@@ -92,10 +92,7 @@ impl MavlinkComponent {
 
             let encoding_c_cast = data
                 .capabilities
-                .contains(MavProtocolCapability::MAV_PROTOCOL_CAPABILITY_PARAM_FLOAT)
-                || data
-                    .capabilities
-                    .contains(MavProtocolCapability::MAV_PROTOCOL_CAPABILITY_PARAM_ENCODE_C_CAST);
+                .contains(MavProtocolCapability::MAV_PROTOCOL_CAPABILITY_PARAM_ENCODE_C_CAST);
             let encoding_bytewise = data
                 .capabilities
                 .contains(MavProtocolCapability::MAV_PROTOCOL_CAPABILITY_PARAM_ENCODE_BYTEWISE);

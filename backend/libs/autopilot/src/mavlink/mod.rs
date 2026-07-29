@@ -370,12 +370,12 @@ impl MavlinkComponent {
             match tokio::time::timeout(tokio::time::Duration::from_secs(1), wait_command_ack).await
             {
                 Ok(Ok(())) => return Ok(()),
-                Ok(Err(err)) => {
-                    if err.to_string().contains("MAV_RESULT_UNSUPPORTED") {
+                Ok(Err(error)) => {
+                    if error.to_string().contains("MAV_RESULT_UNSUPPORTED") {
                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         continue;
                     }
-                    return Err(err);
+                    return Err(error);
                 }
                 Err(_) => {
                     warn!("Timeout for command {:?}, retrying", command.command);
@@ -414,6 +414,7 @@ impl MavlinkComponent {
     }
 
     /// One-shot request for `SERVO_OUTPUT_RAW`. Holds the mavlink txn for the whole RPC.
+    #[instrument(level = "debug", skip(self))]
     pub async fn request_servo_output_raw(&self) -> Result<SERVO_OUTPUT_RAW_DATA> {
         let target_system = self.inner.system_id;
         let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
