@@ -927,6 +927,7 @@ const getBaseParameters = () => {
   }
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = imageRequestGeneration.value
   const payload = {
     camera_uuid: cameraUuid,
     action: "getImageAdjustment",
@@ -934,7 +935,13 @@ const getBaseParameters = () => {
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== imageRequestGeneration.value ||
+        inFlightBaseWrites.value > 0
+      ) {
+        return
+      }
       baseParams.value = data as BaseParameterSetting
       console.log(data)
     })
@@ -966,12 +973,9 @@ const doWhiteBalance = async () => {
     .catch(error => {
       console.error("Error sending onceAWB control:", error.message)
     }).finally(() => {
-      // Always clear the spinner; only skip follow-up fetch on switch.
+      if (generation !== imageRequestGeneration.value) return
       processingWhiteBalance.value = false
-      if (
-        generation === imageRequestGeneration.value &&
-        props.selectedCameraUuid === cameraUuid
-      ) {
+      if (props.selectedCameraUuid === cameraUuid) {
         getBaseParameters()
       }
     })
@@ -985,6 +989,7 @@ const doRestoreBase = async () => {
   processingBaseRestore.value = true
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = imageRequestGeneration.value
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustment",
@@ -996,13 +1001,19 @@ const doRestoreBase = async () => {
   backendClient
     .request('POST', '/camera/control', payload)
     .then(data => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== imageRequestGeneration.value
+      ) {
+        return
+      }
       baseParams.value = data as BaseParameterSetting
     })
     .catch(error => {
       console.error("Error sending base image restore control:", error.message)
     })
     .finally(() => {
+      if (generation !== imageRequestGeneration.value) return
       processingBaseRestore.value = false
     })
 }
@@ -1047,6 +1058,7 @@ const doRestoreAdvanced = async () => {
   processingAdvancedRestore.value = true
 
   const cameraUuid = props.selectedCameraUuid
+  const generation = imageRequestGeneration.value
   const payload: CameraControl = {
     camera_uuid: cameraUuid,
     action: "setImageAdjustmentEx",
@@ -1055,13 +1067,19 @@ const doRestoreAdvanced = async () => {
 
   backendClient.request('POST', '/camera/control', payload)
     .then(data => {
-      if (props.selectedCameraUuid !== cameraUuid) return
+      if (
+        props.selectedCameraUuid !== cameraUuid ||
+        generation !== imageRequestGeneration.value
+      ) {
+        return
+      }
       advancedParams.value = data as AdvancedParameterSetting
     })
     .catch(error => {
       console.error("Error restoring advanced parameters:", error.message)
     })
     .finally(() => {
+      if (generation !== imageRequestGeneration.value) return
       processingAdvancedRestore.value = false
     })
 }
