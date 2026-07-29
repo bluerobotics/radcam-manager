@@ -2,8 +2,8 @@
  * Per-field optimistic write ownership.
  *
  * Each in-flight field write gets a token. Success/fail only settles that token.
- * Remote merges never overwrite pending keys. Restore bumps epoch so late
- * per-field settles are ignored.
+ * Remote merges always keep `entry.value` for pending keys (never trust a caller
+ * local). Restore bumps epoch so late per-field settles are ignored.
  */
 export type PendingEntry<V> = {
   token: number
@@ -26,7 +26,7 @@ export function createPendingFields<K extends string, V>() {
     key: K,
     token: number,
     settleEpoch: number,
-    applySettled: (previousLocal: V) => void,
+    applySettled: (attempted: V) => void,
   ): boolean => {
     if (settleEpoch !== epoch) return false
     const entry = pending.get(key)
@@ -53,16 +53,12 @@ export function createPendingFields<K extends string, V>() {
     return true
   }
 
-  const mergeRemote = <T extends Record<string, unknown>>(
-    incoming: T,
-    local: T,
-  ): T => {
+  /** Merge remote snapshot; pending keys always win via `entry.value`. */
+  const mergeRemote = <T extends Record<string, unknown>>(incoming: T): T => {
     if (pending.size === 0) return incoming
     const merged = { ...incoming }
-    for (const key of pending.keys()) {
-      if (key in local) {
-        ;(merged as Record<string, unknown>)[key] = local[key as keyof T]
-      }
+    for (const [key, entry] of pending) {
+      ;(merged as Record<string, unknown>)[key] = entry.value
     }
     return merged
   }
