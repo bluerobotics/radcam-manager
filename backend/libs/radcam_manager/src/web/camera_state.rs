@@ -35,6 +35,7 @@ const MAX_CAMERAS_PER_CONNECTION: usize = 8;
 static ACTUATORS_BRIDGE_STARTED: AtomicBool = AtomicBool::new(false);
 static SLOW_WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
 static CAMERA_LIST_WATCHER_STARTED: AtomicBool = AtomicBool::new(false);
+static ACTUATORS_LAG_RESYNCING: AtomicBool = AtomicBool::new(false);
 static REGISTRY: OnceCell<Mutex<Registry>> = OnceCell::new();
 static STATE_TX: OnceCell<broadcast::Sender<CameraStateEvent>> = OnceCell::new();
 static ACTUATORS_DEFAULT_CONFIG: tokio::sync::OnceCell<serde_json::Value> =
@@ -206,15 +207,19 @@ pub(crate) fn cached_state_event(camera_uuid: Uuid) -> CameraStateEvent {
 }
 
 /// Actuators-only event from the autopilot manager cache (for lag recovery).
+///
+/// Updates `last_states` so remounts see the same positions.
 #[instrument(level = "debug", skip_all, fields(%camera_uuid))]
 pub(crate) async fn actuators_state_event(camera_uuid: Uuid) -> Option<CameraStateEvent> {
     let state = autopilot::cached_actuators_state(camera_uuid).await?;
     let actuators_state = serde_json::to_value(state).ok()?;
-    Some(CameraStateEvent {
+    let mut event = CameraStateEvent {
         camera_uuid,
         actuators_state: Some(actuators_state),
         ..Default::default()
-    })
+    };
+    record_partial(&mut event);
+    Some(event)
 }
 
 /// Fetch a full camera snapshot for initial subscribe / lag recovery.
@@ -542,12 +547,19 @@ fn ensure_actuators_bridge() {
                 }
                 Err(broadcast::error::RecvError::Lagged(samples)) => {
                     debug!("Actuators bridge lagged by {samples} updates; re-pushing from manager");
+                    if ACTUATORS_LAG_RESYNCING
+                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_err()
+                    {
+                        continue;
+                    }
                     let cameras: Vec<Uuid> = {
                         let registry = registry().lock().unwrap();
                         registry.camera_interest.keys().copied().collect()
                     };
                     tokio::spawn(async move {
                         resync_actuators_from_manager(cameras).await;
+                        ACTUATORS_LAG_RESYNCING.store(false, Ordering::SeqCst);
                     });
                 }
             }
@@ -747,6 +759,8 @@ fn snapshot_to_event(
     snapshot: CameraSnapshot,
     actuators_default_config: Option<serde_json::Value>,
 ) -> CameraStateEvent {
+    // Omit ui: live dismissals must not be overwritten by a long-running snapshot.
+    // Subscribe pushes UI separately before the snapshot.
     CameraStateEvent {
         camera_uuid,
         actuators_default_config,
@@ -756,7 +770,7 @@ fn snapshot_to_event(
         video_parameters: snapshot.video_parameters,
         base_parameters: snapshot.base_parameters,
         advanced_parameters: snapshot.advanced_parameters,
-        ui: Some(camera_ui::get(camera_uuid)),
+        ui: None,
     }
 }
 
