@@ -2,10 +2,10 @@
 //! (REST and WebSocket alike) produces the same UI overlay and state updates.
 
 use autopilot::api::ActuatorsControl;
-use radcam_commands::CameraControl;
+use radcam_commands::{Action as CameraAction, CameraControl};
 use serde_json::Value;
 
-use crate::web::{camera_state, camera_ui};
+use crate::web::{camera_state, camera_ui, one_push_awb};
 
 /// Wire / HTTP body when the requested camera UUID is not in the MCM list.
 pub(crate) const UNKNOWN_CAMERA: &str = "unknown camera";
@@ -41,12 +41,23 @@ pub(crate) async fn camera_control(camera_control: CameraControl) -> Result<Valu
         return Err(ControlError::unknown_camera());
     }
     let action = camera_control.action.clone();
+
+    // Concurrent onceAWB while Running/Cooldown is a no-op success (do not restart).
+    if matches!(
+        &action,
+        CameraAction::SetImageAdjustmentEx(params) if params.once_awb == Some(1)
+    ) && one_push_awb::is_busy(camera_uuid)
+    {
+        return Ok(Value::Null);
+    }
+
     camera_ui::start_camera_action(camera_uuid, &action);
 
     match radcam_commands::handle_control(camera_control).await {
         Ok(value) => {
             camera_ui::finish_camera_action(camera_uuid, &action);
             camera_state::emit_camera_control_update(camera_uuid, &action, &value);
+            one_push_awb::on_control_success(camera_uuid, &action);
             Ok(value)
         }
         Err(error) => {
