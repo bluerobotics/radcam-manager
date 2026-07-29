@@ -240,6 +240,8 @@ class BackendClient {
         this.connectPromise = null
         this.stopStaleCheck()
         this.setConnectionState('disconnected')
+        // Force list-driven re-subscribe after reconnect — prior state may be gone.
+        this.hasCameraState = false
         this.rejectAllPending(new Error('WebSocket closed'))
 
         if (!settled) {
@@ -478,7 +480,7 @@ class BackendClient {
   /** Re-push subscribe for the active camera without changing refcounts (tab remount). */
   refreshCameraSubscription(): void {
     if (this.subscribedCameraUuid) {
-      this.subscribeBlocked = false
+      // Do not clear subscribeBlocked — tab remount must not retry past camera_cap.
       this.queueSubscribe(this.subscribedCameraUuid)
     }
   }

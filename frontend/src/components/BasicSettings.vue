@@ -760,6 +760,39 @@ const desiredActuatorsState = ref<Record<ActuatorKey, number | null>>({
   zoom: null,
   tilt: null,
 })
+/** Drop desired latch if SERVO never enters epsilon (stuck / unreachable). */
+const DESIRED_LATCH_TIMEOUT_MS = 5_000
+const desiredLatchTimers: Partial<Record<ActuatorKey, number>> = {}
+/** Value to restore on failed POST when no newer command is pending. */
+const actuatorsSetRollback = ref<Record<ActuatorKey, number | null>>({
+  focus: null,
+  zoom: null,
+  tilt: null,
+})
+
+const clearDesiredLatch = (key: ActuatorKey): void => {
+  desiredActuatorsState.value[key] = null
+  const timer = desiredLatchTimers[key]
+  if (timer != null) {
+    clearTimeout(timer)
+    delete desiredLatchTimers[key]
+  }
+}
+
+const armDesiredLatch = (key: ActuatorKey, value: number): void => {
+  desiredActuatorsState.value[key] = value
+  const timer = desiredLatchTimers[key]
+  if (timer != null) clearTimeout(timer)
+  desiredLatchTimers[key] = window.setTimeout(() => {
+    delete desiredLatchTimers[key]
+    if (
+      desiredActuatorsState.value[key] !== null &&
+      approxEqual(desiredActuatorsState.value[key]!, value, key)
+    ) {
+      desiredActuatorsState.value[key] = null
+    }
+  }, DESIRED_LATCH_TIMEOUT_MS)
+}
 
 // Coalesce actuator set requests so only one request per actuator can be in-flight, always
 // sending the most recent value (prevents request pile-up).
@@ -777,6 +810,8 @@ const actuatorsSetQueued = ref<Record<ActuatorKey, number | null>>({
 const actuatorsRequestGeneration = ref(0)
 /** Monotonic seq so only the newest image-param write may apply its response body. */
 let baseParamWriteSeq = 0
+/** Fields with an optimistic write that must not be clobbered by WS/GET. */
+const dirtyBaseParamFields = new Set<keyof BaseParameterSetting>()
 const correlationToggleInFlight = ref(false)
 const isConfigured = ref<boolean>(false)
 const showWelcomeDialog = ref<boolean>(true)
@@ -877,9 +912,11 @@ watch(
     intendedFocusAndZoomParams.value = { ...emptyParams }
     currentFocusAndZoomParams.value = { ...emptyParams }
     defaultFocusAndZoomParams.value = { ...emptyParams }
-    desiredActuatorsState.value = { focus: null, zoom: null, tilt: null }
+    ;(['focus', 'zoom', 'tilt'] as const).forEach(clearDesiredLatch)
+    actuatorsSetRollback.value = { focus: null, zoom: null, tilt: null }
     actuatorsSetQueued.value = { focus: null, zoom: null, tilt: null }
     actuatorsSetInFlight.value = { focus: false, zoom: false, tilt: false }
+    dirtyBaseParamFields.clear()
   },
 )
 
@@ -1041,6 +1078,7 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
   const writeSeq = ++baseParamWriteSeq
   const previous = baseParams.value[param]
   baseParams.value = { ...baseParams.value, [param]: value }
+  dirtyBaseParamFields.add(param)
   inFlightParamWrites.value++
 
   const payload = {
@@ -1062,18 +1100,21 @@ const updateBaseParameter = (param: keyof BaseParameterSetting, value: any) => {
         return
       }
       baseParams.value = data as BaseParameterSetting
+      dirtyBaseParamFields.clear()
     })
     .catch((error) => {
       const message = `Error sending ${String(param)} control with value '${value}'`
       console.log(message, error.message)
       if (
         props.selectedCameraUuid !== cameraUuid ||
-        generation !== actuatorsRequestGeneration.value ||
-        writeSeq !== baseParamWriteSeq
+        generation !== actuatorsRequestGeneration.value
       ) {
         return
       }
-      baseParams.value = { ...baseParams.value, [param]: previous }
+      if (baseParams.value[param] === value) {
+        baseParams.value = { ...baseParams.value, [param]: previous }
+      }
+      dirtyBaseParamFields.delete(param)
     })
     .finally(() => {
       if (generation !== actuatorsRequestGeneration.value) return
@@ -1112,7 +1153,7 @@ const applyActuatorsState = (state: ActuatorsState) => {
 
     if (desired !== null) {
       if (received !== null && received !== undefined && approxEqual(received, desired, key)) {
-        desiredActuatorsState.value[key] = null
+        clearDesiredLatch(key)
         actuatorsState.value[key] = received
       }
       return
@@ -1143,12 +1184,20 @@ const applyCameraStateEvent = (body: unknown) => {
   if (data.actuators_state) {
     applyActuatorsState(data.actuators_state as ActuatorsState)
   }
-  if (data.video_parameters) {
+  if (data.video_parameters && !hasUserEditedVideo.value) {
     update_video_parameter_values(data.video_parameters as VideoParameterSettings)
   }
   if (data.base_parameters) {
-    if (inFlightParamWrites.value === 0) {
-      baseParams.value = data.base_parameters as BaseParameterSetting
+    const incoming = data.base_parameters as BaseParameterSetting
+    if (dirtyBaseParamFields.size === 0) {
+      baseParams.value = incoming
+    } else {
+      baseParams.value = {
+        ...incoming,
+        ...Object.fromEntries(
+          [...dirtyBaseParamFields].map((key) => [key, baseParams.value[key]]),
+        ),
+      } as BaseParameterSetting
     }
   }
 }
@@ -1277,8 +1326,21 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
       console.log(message, error.message)
       if (generation !== actuatorsRequestGeneration.value) return
       // Failed command will never match SERVO — drop the latch for this value.
-      if (desiredActuatorsState.value[param] === value) {
-        desiredActuatorsState.value[param] = null
+      if (
+        desiredActuatorsState.value[param] !== null &&
+        approxEqual(desiredActuatorsState.value[param]!, value, param)
+      ) {
+        clearDesiredLatch(param)
+      }
+      // Roll back optimistic UI if nothing newer is queued/desired.
+      if (
+        actuatorsSetQueued.value[param] === null &&
+        desiredActuatorsState.value[param] === null &&
+        actuatorsState.value[param] !== null &&
+        approxEqual(actuatorsState.value[param]!, value, param) &&
+        actuatorsSetRollback.value[param] !== null
+      ) {
+        actuatorsState.value[param] = actuatorsSetRollback.value[param]
       }
     })
     .finally(() => {
@@ -1293,6 +1355,8 @@ const sendQueuedActuatorState = (param: ActuatorKey, allowWhileDisabled = false)
       // even if the UI is disabled (loading/reboot) so the drain cannot strand.
       if (actuatorsSetQueued.value[param] !== null) {
         sendQueuedActuatorState(param, true)
+      } else {
+        actuatorsSetRollback.value[param] = null
       }
     })
 }
@@ -1302,9 +1366,17 @@ const updateActuatorsState = (param: keyof ActuatorsState, value: number) => {
 
   const key = param as ActuatorKey
 
+  // Capture pre-gesture value once so a failed POST can roll back.
+  if (
+    actuatorsSetQueued.value[key] === null &&
+    !actuatorsSetInFlight.value[key]
+  ) {
+    actuatorsSetRollback.value[key] = actuatorsState.value[key]
+  }
+
   // Optimistic UI update: do not wait for feedback to reflect user input.
   actuatorsState.value[key] = value
-  desiredActuatorsState.value[key] = value
+  armDesiredLatch(key, value)
 
   // Coalesce requests per actuator to prevent backlog.
   const existingQueued = actuatorsSetQueued.value[key]
@@ -1338,6 +1410,7 @@ const getBaseParameters = () => {
 
   const cameraUuid = props.selectedCameraUuid
   const generation = actuatorsRequestGeneration.value
+  const writeSeqAtStart = baseParamWriteSeq
   const payload = {
     camera_uuid: cameraUuid,
     action: "getImageAdjustment",
@@ -1348,7 +1421,9 @@ const getBaseParameters = () => {
       if (
         props.selectedCameraUuid !== cameraUuid ||
         generation !== actuatorsRequestGeneration.value ||
-        inFlightParamWrites.value > 0
+        writeSeqAtStart !== baseParamWriteSeq ||
+        inFlightParamWrites.value > 0 ||
+        dirtyBaseParamFields.size > 0
       ) {
         return
       }

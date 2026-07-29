@@ -276,7 +276,8 @@ const pillLeft = computed(() =>
 const skipEditCommit = ref(false)
 
 const sendValue = (val: number) => {
-  if (val === lastSentValue.value) return
+  const eps = Math.max(1e-6, rawStep.value * 0.25)
+  if (Math.abs(val - lastSentValue.value) <= eps) return
   lastSentValue.value = val
   emit('update:modelValue', val)
 }
@@ -377,6 +378,7 @@ const handlePointerCancel = (): void => endInteracting()
 
 const startInteracting = (): void => {
   if (props.disabled || isEditingCurrentSliderValue.value) return
+  if (isInteracting.value) return
   isInteracting.value = true
   clearCommitLock()
   window.addEventListener('pointerup', handlePointerUp)
