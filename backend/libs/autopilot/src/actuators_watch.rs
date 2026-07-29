@@ -365,6 +365,7 @@ async fn actuators_watcher() {
                         last_servo_at = None;
                         clear_servo_freshness();
                         gate.last_emitted.clear();
+                        gate.last_emit_at.clear();
                         gate.pending.clear();
                         // Best-effort disable; shutdown() also times this out.
                         let _ = tokio::time::timeout(
