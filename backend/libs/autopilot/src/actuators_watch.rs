@@ -504,7 +504,7 @@ mod tests {
         };
 
         gate.try_emit(camera_uuid, state, &sender);
-        assert!(gate.last_emitted.get(&camera_uuid).is_none());
+        assert!(!gate.last_emitted.contains_key(&camera_uuid));
         assert!(gate.pending.contains_key(&camera_uuid));
     }
 

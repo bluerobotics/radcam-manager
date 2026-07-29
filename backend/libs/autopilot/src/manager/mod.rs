@@ -29,6 +29,96 @@ pub static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 /// Lock order: CONFIG_APPLY → MANAGER → mavlink txn.
 pub static CONFIG_APPLY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Hold [`CONFIG_APPLY`] for `under_apply`. If it returns `true`, drop the mutex,
+/// run `reboot`, re-acquire, then run `finalize`.
+#[instrument(level = "debug", skip_all)]
+pub async fn reboot_outside_apply_with<U, R, F>(
+    under_apply: U,
+    reboot: R,
+    finalize: F,
+) -> Result<()>
+where
+    U: std::future::Future<Output = Result<bool>>,
+    R: std::future::Future<Output = Result<()>>,
+    F: std::future::Future<Output = Result<()>>,
+{
+    let mut apply = CONFIG_APPLY.lock().await;
+    let needs_reboot = under_apply.await?;
+    if needs_reboot {
+        drop(apply);
+        reboot.await?;
+        apply = CONFIG_APPLY.lock().await;
+        finalize.await?;
+    }
+    drop(apply);
+    Ok(())
+}
+
+/// Hold [`CONFIG_APPLY`] for `under_apply`. If it returns `true`, drop the mutex,
+/// reboot the autopilot, re-acquire, then run `finalize`.
+pub async fn reboot_outside_apply<U, F>(under_apply: U, finalize: F) -> Result<()>
+where
+    U: std::future::Future<Output = Result<bool>>,
+    F: std::future::Future<Output = Result<()>>,
+{
+    reboot_outside_apply_with(
+        under_apply,
+        async { crate::mavlink::component()?.reboot_autopilot().await },
+        finalize,
+    )
+    .await
+}
+
+#[cfg(test)]
+mod apply_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::reboot_outside_apply_with;
+
+    #[tokio::test]
+    async fn finalize_runs_only_after_reboot_when_needed() {
+        let phase = AtomicUsize::new(0);
+        reboot_outside_apply_with(
+            async {
+                assert_eq!(phase.load(Ordering::SeqCst), 0);
+                phase.store(1, Ordering::SeqCst);
+                Ok(true)
+            },
+            async {
+                assert_eq!(phase.load(Ordering::SeqCst), 1);
+                phase.store(2, Ordering::SeqCst);
+                Ok(())
+            },
+            async {
+                assert_eq!(phase.load(Ordering::SeqCst), 2);
+                phase.store(3, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(phase.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn finalize_skipped_when_no_reboot() {
+        let finalized = AtomicUsize::new(0);
+        reboot_outside_apply_with(
+            async { Ok(false) },
+            async {
+                panic!("reboot must not run");
+            },
+            async {
+                finalized.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(finalized.load(Ordering::SeqCst), 0);
+    }
+}
+
 #[derive(Debug)]
 pub struct Manager {
     pub autopilot_scripts_file: String,
@@ -58,26 +148,6 @@ impl State {
             .collect();
 
         Ok(Self { actuators })
-    }
-
-    #[instrument(level = "debug", skip(self))]
-    pub async fn save(&self) -> Result<()> {
-        let actuators = self
-            .actuators
-            .iter()
-            .map(|(uuid, actuator_settings)| (*uuid, actuator_settings.into()))
-            .collect();
-
-        let settings = &mut SETTINGS_MANAGER
-            .get()
-            .context("Not available")?
-            .write()
-            .await
-            .settings;
-
-        *settings.get_actuators_mut() = actuators;
-
-        settings.save().await
     }
 }
 
@@ -289,14 +359,32 @@ pub async fn init(
 
 #[instrument(level = "debug")]
 pub async fn clear_saved_settings() -> Result<()> {
+    let mut apply = CONFIG_APPLY.lock().await;
+
     settings::clear().await?;
 
-    let _apply = CONFIG_APPLY.lock().await;
-    let manager = MANAGER.get().context("Not available")?;
-    let mut guard = manager.write().await;
-    guard.remove_script().await?;
-    guard.script_health = ScriptHealthTracker::default();
-    guard.settings = State::from_settings().await?;
+    let path = {
+        let manager = MANAGER.get().context("Not available")?.read().await;
+        manager.autopilot_scripts_file.clone()
+    };
+
+    Manager::delete_script_file(&path).await?;
+    let needs_reboot = Manager::disable_or_reload_lua().await?;
+
+    if needs_reboot {
+        drop(apply);
+        crate::mavlink::component()?.reboot_autopilot().await?;
+        apply = CONFIG_APPLY.lock().await;
+    }
+
+    // Post-conditions always (reload Done path and post-reboot): never await under write.
+    let settings = State::from_settings().await?;
+    {
+        let mut guard = MANAGER.get().context("Not available")?.write().await;
+        guard.script_health = ScriptHealthTracker::default();
+        guard.settings = settings;
+    }
+    drop(apply);
 
     Ok(())
 }
