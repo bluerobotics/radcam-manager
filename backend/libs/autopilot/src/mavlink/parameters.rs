@@ -438,11 +438,11 @@ impl MavlinkComponent {
                 send_retries -= 1;
                 if send_retries == 0 {
                     return Err(anyhow!(
-                        "Failed requesting parameter {}: {error:?}",
+                        "Failed sending PARAM_SET for {}: {error:?}",
                         parameter.name
                     ));
                 }
-                warn!("Failed requesting parameter: {error:?}");
+                warn!("Failed sending PARAM_SET: {error:?}");
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 continue;
