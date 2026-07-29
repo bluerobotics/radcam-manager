@@ -286,8 +286,12 @@ fn spawn_lag_recovery(
                             && let Some(text) = state_event_text(&event)
                             && !queue_text(connection_id, &response_tx, &close_notify, text)
                         {
-                            // Connection is dying; do not leave a sticky dirty bit.
+                            // Connection is dying: release recovering with the same
+                            // hand-off as a clean exit so a concurrent Lagged cannot
+                            // leave a sticky dirty bit.
                             lag_needs_resync.store(false, Ordering::SeqCst);
+                            lag_recovering.store(false, Ordering::SeqCst);
+                            lag_guard.disarm();
                             return;
                         }
                         continue;
@@ -301,6 +305,8 @@ fn spawn_lag_recovery(
                         && !queue_text(connection_id, &response_tx, &close_notify, text)
                     {
                         lag_needs_resync.store(false, Ordering::SeqCst);
+                        lag_recovering.store(false, Ordering::SeqCst);
+                        lag_guard.disarm();
                         return;
                     }
                 }

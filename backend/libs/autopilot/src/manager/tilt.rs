@@ -192,16 +192,16 @@ impl Manager {
         } as u8;
         let param_name = format!("MNT{mount_id}_TYPE");
 
-        let new_value = match (parameters.tilt_mnt_pitch_max, force_apply) {
+        let new_value = match (parameters.tilt_mnt_type, force_apply) {
             (Some(value), _) => value,
-            (None, true) => current_parameters.tilt_mnt_pitch_max,
+            (None, true) => current_parameters.tilt_mnt_type,
             (None, false) => return Ok(()),
         };
         let mut param = self.mavlink.get_param(&param_name, false).await?;
         let old_value_encoded = param.param_value(encoding)?;
         param
             .value
-            .set_value(ParamType::INT32(new_value), encoding)?;
+            .set_value(ParamType::INT32(new_value as i32), encoding)?;
         let new_value_encoded = param.param_value(encoding)?;
         if (old_value_encoded != new_value_encoded) || force_apply {
             match self.mavlink.set_param(param).await {
@@ -209,12 +209,12 @@ impl Manager {
                     if old_value_encoded != new_value_encoded {
                         info!(
                             "{} changed from {:?} to {:?}",
-                            stringify!(tilt_mnt_pitch_max),
-                            current_parameters.tilt_mnt_pitch_max,
+                            stringify!(tilt_mnt_type),
+                            current_parameters.tilt_mnt_type,
                             new_value
                         );
                     }
-                    current_parameters.tilt_mnt_pitch_max = new_value;
+                    current_parameters.tilt_mnt_type = new_value;
 
                     // TODO: Reboot required after change!
                 }

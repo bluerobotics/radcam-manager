@@ -79,6 +79,7 @@ impl State {
 }
 
 impl Manager {
+    #[allow(dead_code)] // Convenience when the caller already holds MANAGER.write().
     #[instrument(level = "debug", skip(self))]
     pub async fn get_state(&mut self, camera_uuid: &Uuid) -> Result<api::ActuatorsState> {
         let actuators = self
@@ -100,15 +101,50 @@ impl Manager {
         Ok(actuators.state)
     }
 
+    #[allow(dead_code)] // Convenience when the caller already holds MANAGER.write().
     #[instrument(level = "debug", skip(self))]
     pub async fn update_state(
         &mut self,
         camera_uuid: &Uuid,
         new_state: &api::ActuatorsState,
     ) -> Result<api::ActuatorsState> {
+        let focus_was_set = new_state.focus.is_some();
+        self.apply_state_setpoints(camera_uuid, new_state).await?;
+
+        // Prefer measured SERVO positions so the WS stream does not treat the
+        // requested setpoint as authoritative when the autopilot never moved.
+        match self.get_state(camera_uuid).await {
+            Ok(measured) => {
+                if focus_was_set {
+                    self.check_focus_script_health(camera_uuid).await;
+                }
+                Ok(measured)
+            }
+            Err(error) => {
+                if focus_was_set {
+                    self.check_focus_script_health(camera_uuid).await;
+                }
+                // Do not fall back to the unverified setpoint — that lied to the UI.
+                Err(error)
+            }
+        }
+    }
+
+    /// Send focus/zoom setpoints without waiting for SERVO (caller measures separately).
+    #[instrument(level = "debug", skip(self))]
+    pub async fn apply_state_setpoints(
+        &mut self,
+        _camera_uuid: &Uuid,
+        new_state: &api::ActuatorsState,
+    ) -> Result<()> {
         use ::mavlink::ardupilotmega::{COMMAND_LONG_DATA, CameraZoomType, MavCmd, SetFocusType};
 
-        let focus_was_set = new_state.focus.is_some();
+        // Ensure the camera has an actuators entry before we send commands.
+        let _ = self
+            .settings
+            .actuators
+            .get(_camera_uuid)
+            .context(crate::ACTUATORS_NOT_CONFIGURED)?;
 
         if new_state.tilt.is_some() {
             if new_state.focus.is_none() && new_state.zoom.is_none() {
@@ -150,27 +186,7 @@ impl Manager {
                 .context("Failed sending MAV_CMD_SET_CAMERA_ZOOM command")?;
         }
 
-        // Prefer measured SERVO positions so the WS stream does not treat the
-        // requested setpoint as authoritative when the autopilot never moved.
-        match self.get_state(camera_uuid).await {
-            Ok(mut measured) => {
-                // Tilt was not commanded; do not imply it was applied.
-                if new_state.tilt.is_some() {
-                    measured.tilt = None;
-                }
-                if focus_was_set {
-                    self.check_focus_script_health(camera_uuid).await;
-                }
-                Ok(measured)
-            }
-            Err(error) => {
-                if focus_was_set {
-                    self.check_focus_script_health(camera_uuid).await;
-                }
-                // Do not fall back to the unverified setpoint — that lied to the UI.
-                Err(error)
-            }
-        }
+        Ok(())
     }
 
     #[instrument(level = "debug", skip(self))]
