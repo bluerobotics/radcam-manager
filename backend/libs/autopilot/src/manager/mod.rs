@@ -80,22 +80,10 @@ impl State {
 impl Manager {
     /// Send focus/zoom setpoints without waiting for SERVO (caller measures separately).
     ///
-    /// Only needs `&self` so callers can send MAVLink commands without holding
-    /// `MANAGER.write()` across ACK retries.
-    #[instrument(level = "debug", skip(self))]
-    pub async fn apply_state_setpoints(
-        &self,
-        _camera_uuid: &Uuid,
-        new_state: &api::ActuatorsState,
-    ) -> Result<()> {
+    /// Does not touch `MANAGER` — caller must validate the camera has actuators first.
+    #[instrument(level = "debug")]
+    pub async fn apply_state_setpoints(new_state: &api::ActuatorsState) -> Result<()> {
         use ::mavlink::ardupilotmega::{COMMAND_LONG_DATA, CameraZoomType, MavCmd, SetFocusType};
-
-        // Ensure the camera has an actuators entry before we send commands.
-        let _ = self
-            .settings
-            .actuators
-            .get(_camera_uuid)
-            .context(crate::ACTUATORS_NOT_CONFIGURED)?;
 
         if new_state.tilt.is_some() {
             if new_state.focus.is_none() && new_state.zoom.is_none() {
@@ -105,8 +93,10 @@ impl Manager {
             warn!("Ignoring unimplemented tilt setpoint; applying focus/zoom only");
         }
 
+        let mavlink = crate::mavlink::component()?;
+
         if let Some(focus) = new_state.focus {
-            crate::mavlink::component()?
+            mavlink
                 .send_command(COMMAND_LONG_DATA {
                     target_system: 1,
                     target_component: 1,
@@ -122,7 +112,7 @@ impl Manager {
         }
 
         if let Some(zoom) = new_state.zoom {
-            crate::mavlink::component()?
+            mavlink
                 .send_command(COMMAND_LONG_DATA {
                     target_system: 1,
                     target_component: 1,
