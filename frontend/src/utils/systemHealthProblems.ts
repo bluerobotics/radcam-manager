@@ -8,6 +8,8 @@ export type HealthProblemKind =
   | 'mcm'
   | 'autopilot'
   | 'camera'
+  | 'camera_stream'
+  | 'camera_onvif_auth'
   | 'lua'
   | 'lua_script'
 
@@ -34,6 +36,10 @@ export type HealthProblemsInput = {
   cameraConnectivity: CameraConnectivity
   /** True when the selected camera is configured but absent from MCM discovery. */
   cameraExpectedMissing?: boolean
+  /** MCM video stream failure detail when the stream stayed broken. */
+  cameraStreamError?: string | null
+  /** MCM ONVIF authentication failure detail when login with expected credentials fails. */
+  cameraOnvifAuthError?: string | null
   /** Peak MCM consecutive failures observed this episode (for duration text). */
   mcmAttemptsPeak: number
 }
@@ -103,6 +109,28 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
         input.cameraExpectedMissing === true,
       )
       if (camera) problems.push(camera)
+
+      if (input.cameraStreamError && input.cameraConnectivity === 'online') {
+        problems.push({
+          kind: 'camera_stream',
+          severity: 'warning',
+          title: 'Camera video stream not running',
+          body: `${input.cameraLabel} is responding, but its video stream is not running. RadCam Manager is restarting it automatically.`,
+          detail: input.cameraStreamError,
+          progress: 'Restarting the video stream…',
+        })
+      }
+
+      if (input.cameraOnvifAuthError && input.cameraConnectivity === 'online') {
+        problems.push({
+          kind: 'camera_onvif_auth',
+          severity: 'error',
+          title: 'Camera ONVIF password does not match',
+          body: `${input.cameraLabel} is responding to RadCam Manager, but the BlueOS video service cannot log in over ONVIF with the expected factory credentials (admin / blue), so there is no video. Restore the camera's ONVIF password to admin / blue.`,
+          detail: input.cameraOnvifAuthError,
+          progress: 'Waiting for ONVIF login to succeed…',
+        })
+      }
     }
   }
 
@@ -159,6 +187,10 @@ export function recoveryTitle(
         return 'Autopilot connection restored'
       case 'camera':
         return 'Camera connection restored'
+      case 'camera_stream':
+        return 'Camera video stream restored'
+      case 'camera_onvif_auth':
+        return 'Camera ONVIF login restored'
       case 'lua_script':
         return 'Autopilot script updated'
       default:
@@ -194,6 +226,12 @@ export function recoveryMessage(
   }
   if (resolvedKinds.includes('camera')) {
     parts.push('Camera connection is working again')
+  }
+  if (resolvedKinds.includes('camera_stream')) {
+    parts.push('Camera video stream is running again')
+  }
+  if (resolvedKinds.includes('camera_onvif_auth')) {
+    parts.push('ONVIF login succeeded and video is available again')
   }
   if (resolvedKinds.includes('lua')) {
     parts.push('Focus and zoom correlation is ready')

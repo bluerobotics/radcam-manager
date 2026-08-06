@@ -324,6 +324,167 @@ export function runHealthDialogSelfCheck(): void {
     throw new Error(`healthDialog: bad lua_script recovery line: ${recoveryMessage(['lua_script'], 0, false)}`)
   }
 
+  const onvifAuth = collectHealthProblems(
+    baseInput({
+      systemHealth: {
+        mcm: 'online',
+        cameras_discovered: 0,
+        expected_missing: [],
+        autopilot: 'online',
+        lua_scripting_disabled: false,
+        lua_script: 'ok',
+        diagnostics: {
+          mavlink_reconnects: 0,
+          mavlink_frames_lagged: 0,
+          state_events_lagged: 0,
+          mcm_consecutive_failures: 0,
+          script_reloads: 0,
+          backend_version: 'test',
+        },
+      },
+      cameraUuid: 'cam',
+      cameraLabel: 'RadCam',
+      cameraConnectivity: 'online',
+      cameraOnvifAuthError: 'ONVIF authentication failed: wrong password',
+    }),
+  )
+  if (onvifAuth.length !== 1 || onvifAuth[0]?.title !== 'Camera ONVIF password does not match') {
+    throw new Error(`healthDialog: expected ONVIF auth problem, got ${onvifAuth[0]?.title}`)
+  }
+  if (onvifAuth[0]?.kind !== 'camera_onvif_auth') {
+    throw new Error(`healthDialog: expected camera_onvif_auth kind, got ${onvifAuth[0]?.kind}`)
+  }
+
+  if (recoveryTitle(['camera_stream'], false) !== 'Camera video stream restored') {
+    throw new Error(`healthDialog: bad camera_stream recovery title: ${recoveryTitle(['camera_stream'], false)}`)
+  }
+  if (
+    recoveryMessage(['camera_stream'], 0, false)
+    !== 'Camera video stream is running again. Click Close to continue.'
+  ) {
+    throw new Error(`healthDialog: bad camera_stream recovery line: ${recoveryMessage(['camera_stream'], 0, false)}`)
+  }
+
+  if (recoveryTitle(['camera_onvif_auth'], false) !== 'Camera ONVIF login restored') {
+    throw new Error(`healthDialog: bad camera_onvif_auth recovery title: ${recoveryTitle(['camera_onvif_auth'], false)}`)
+  }
+  if (
+    recoveryMessage(['camera_onvif_auth'], 0, false)
+    !== 'ONVIF login succeeded and video is available again. Click Close to continue.'
+  ) {
+    throw new Error(`healthDialog: bad camera_onvif_auth recovery line: ${recoveryMessage(['camera_onvif_auth'], 0, false)}`)
+  }
+
+  const streamError = collectHealthProblems(
+    baseInput({
+      systemHealth: {
+        mcm: 'online',
+        cameras_discovered: 1,
+        expected_missing: [],
+        autopilot: 'online',
+        lua_scripting_disabled: false,
+        lua_script: 'ok',
+        diagnostics: {
+          mavlink_reconnects: 0,
+          mavlink_frames_lagged: 0,
+          state_events_lagged: 0,
+          mcm_consecutive_failures: 0,
+          script_reloads: 0,
+          backend_version: 'test',
+        },
+      },
+      cameraUuid: 'cam',
+      cameraLabel: 'RadCam',
+      cameraConnectivity: 'online',
+      cameraStreamError: 'pipeline error',
+    }),
+  )
+  if (streamError.length !== 1 || streamError[0]?.title !== 'Camera video stream not running') {
+    throw new Error(`healthDialog: expected stream problem, got ${streamError[0]?.title}`)
+  }
+  if (streamError[0]?.kind !== 'camera_stream') {
+    throw new Error(`healthDialog: expected camera_stream kind, got ${streamError[0]?.kind}`)
+  }
+
+  const streamErrorWhileUnreachable = collectHealthProblems(
+    baseInput({
+      systemHealth: {
+        mcm: 'online',
+        cameras_discovered: 1,
+        expected_missing: [],
+        autopilot: 'online',
+        lua_scripting_disabled: false,
+        lua_script: 'ok',
+        diagnostics: {
+          mavlink_reconnects: 0,
+          mavlink_frames_lagged: 0,
+          state_events_lagged: 0,
+          mcm_consecutive_failures: 0,
+          script_reloads: 0,
+          backend_version: 'test',
+        },
+      },
+      cameraUuid: 'cam',
+      cameraLabel: 'RadCam',
+      cameraConnectivity: 'unreachable',
+      cameraStreamError: 'MCM stream state: stopped',
+    }),
+  )
+  if (streamErrorWhileUnreachable.some((problem) => problem.title === 'Camera video stream not running')) {
+    throw new Error('healthDialog: stream error must stay hidden while camera is unreachable')
+  }
+  if (streamErrorWhileUnreachable.length !== 1 || streamErrorWhileUnreachable[0]?.title !== 'Camera unavailable') {
+    throw new Error(`healthDialog: expected unreachable only, got ${streamErrorWhileUnreachable.map((p) => p.title).join(', ')}`)
+  }
+
+
+  const suppressed = collectHealthProblems(
+    baseInput({
+      cameraUuid: 'cam',
+      cameraLabel: 'RadCam',
+      cameraConnectivity: 'online',
+      cameraOnvifAuthError: 'ONVIF authentication failed: wrong password',
+      cameraStreamError: 'pipeline error',
+    }),
+  )
+  if (suppressed.length !== 2) {
+    throw new Error(`healthDialog: expected MCM+camera-unknown problems, got ${suppressed.length}`)
+  }
+  if (suppressed.some((problem) => problem.title === 'Camera ONVIF password does not match')) {
+    throw new Error('healthDialog: ONVIF auth must be suppressed while MCM is down')
+  }
+  if (suppressed.some((problem) => problem.title === 'Camera video stream not running')) {
+    throw new Error('healthDialog: stream error must be suppressed while MCM is down')
+  }
+
+  const onvifAuthWhileUnreachable = collectHealthProblems(
+    baseInput({
+      systemHealth: {
+        mcm: 'online',
+        cameras_discovered: 1,
+        expected_missing: [],
+        autopilot: 'online',
+        lua_scripting_disabled: false,
+        lua_script: 'ok',
+        diagnostics: {
+          mavlink_reconnects: 0,
+          mavlink_frames_lagged: 0,
+          state_events_lagged: 0,
+          mcm_consecutive_failures: 0,
+          script_reloads: 0,
+          backend_version: 'test',
+        },
+      },
+      cameraUuid: 'cam',
+      cameraLabel: 'RadCam',
+      cameraConnectivity: 'unreachable',
+      cameraOnvifAuthError: 'ONVIF authentication failed: wrong password',
+    }),
+  )
+  if (onvifAuthWhileUnreachable.some((problem) => problem.title === 'Camera ONVIF password does not match')) {
+    throw new Error('healthDialog: ONVIF auth must stay hidden while camera is unreachable')
+  }
+
   console.log('healthDialog self-check ok')
 }
 
