@@ -6,7 +6,7 @@ use tracing::*;
 
 use crate::mcm_types::{
     ApiVideoSource, AuthenticateOnvifDeviceRequest, CaptureConfiguration, Format, Info,
-    OnvifDevice, OnvifDeviceInformation, PostStream, StreamInformation, StreamStatus,
+    OnvifDevice, OnvifDeviceInformation, PostStream, RemoveStream, StreamInformation, StreamStatus,
     VideoCaptureConfiguration, VideoEncodeType, VideoSourceOnvif, VideoSourceOnvifType,
     VideoSourceType,
 };
@@ -129,9 +129,11 @@ impl MCMClient {
                 let stream_endpoints = device.video_and_stream.stream_information.endpoints;
 
                 Some(Stream {
-                    name: name.to_owned(),
+                    name: device.video_and_stream.name.clone(),
                     source_endpoint,
                     stream_endpoints,
+                    state: device.state,
+                    error: device.error.clone(),
                 })
             })
             .collect::<Vec<Stream>>();
@@ -162,6 +164,19 @@ impl MCMClient {
     #[instrument(level = "debug", skip(self))]
     async fn get_streams(&self) -> Result<Vec<StreamStatus>> {
         web_client::get(&self.address, "streams", (), ()).await
+    }
+
+    #[instrument(level = "debug", skip(self))]
+    pub async fn delete_stream(&self, name: &str) -> Result<Vec<StreamStatus>> {
+        web_client::delete(
+            &self.address,
+            "delete_stream",
+            (),
+            RemoveStream {
+                name: name.to_owned(),
+            },
+        )
+        .await
     }
 
     #[instrument(level = "debug", skip(self))]
