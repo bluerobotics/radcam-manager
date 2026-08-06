@@ -86,6 +86,36 @@ pub(crate) fn set_connectivity(camera_uuid: Uuid, connectivity: CameraConnectivi
     camera_state::emit_ui(camera_uuid, state);
 }
 
+/// Set or clear the shared video stream error for all clients.
+#[instrument(level = "debug")]
+pub(crate) fn set_stream_error(camera_uuid: Uuid, error: Option<String>) {
+    let state = {
+        let mut lock = ui().lock().unwrap();
+        let entry = lock.entry(camera_uuid).or_insert_with(new_entry);
+        if entry.state.stream_error == error {
+            return;
+        }
+        entry.state.stream_error = error;
+        entry.state.clone()
+    };
+    camera_state::emit_ui(camera_uuid, state);
+}
+
+/// Set or clear the shared ONVIF authentication error for all clients.
+#[instrument(level = "debug")]
+pub(crate) fn set_onvif_auth_error(camera_uuid: Uuid, error: Option<String>) {
+    let state = {
+        let mut lock = ui().lock().unwrap();
+        let entry = lock.entry(camera_uuid).or_insert_with(new_entry);
+        if entry.state.onvif_auth_error == error {
+            return;
+        }
+        entry.state.onvif_auth_error = error;
+        entry.state.clone()
+    };
+    camera_state::emit_ui(camera_uuid, state);
+}
+
 /// Dismiss a UI overlay field for all clients.
 #[instrument(level = "debug")]
 pub(crate) fn dismiss(camera_uuid: Uuid, field: UiDismissField) {

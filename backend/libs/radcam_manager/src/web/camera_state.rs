@@ -695,9 +695,21 @@ fn ensure_camera_list_watcher() {
                                 connectivity::last_hostname(camera_uuid).await
                             {
                                 let tcp_ok = connectivity::tcp_probe(hostname, 80).await;
-                                connectivity::classify_table(false, true, false, tcp_ok, true)
+                                connectivity::classify_table(connectivity::ClassifyEvidence {
+                                    in_mcm_list: false,
+                                    expected: true,
+                                    camera_answered: false,
+                                    tcp_ok,
+                                    probed: true,
+                                })
                             } else {
-                                radcam_api::CameraConnectivity::Missing
+                                connectivity::classify_table(connectivity::ClassifyEvidence {
+                                    in_mcm_list: false,
+                                    expected: true,
+                                    camera_answered: false,
+                                    tcp_ok: false,
+                                    probed: false,
+                                })
                             };
                             (camera_uuid, next)
                         })
@@ -944,19 +956,33 @@ async fn fetch_slow_snapshot(camera_uuid: Uuid, previous: &CameraSnapshot) -> Ca
         video_parameters.is_ok() || base_parameters.is_ok() || advanced_parameters.is_ok();
 
     let connectivity_reason;
+    let evidence = connectivity::ClassifyEvidence {
+        in_mcm_list,
+        expected,
+        camera_answered,
+        tcp_ok,
+        probed,
+    };
     let next = if skip_camera_http {
         connectivity_reason = if probed {
             "all camera fetches skipped; tcp :80 refused"
         } else {
             "all camera fetches skipped; no known hostname"
         };
-        connectivity::classify_table(in_mcm_list, expected, false, tcp_ok, probed)
+        connectivity::classify_table(connectivity::ClassifyEvidence {
+            camera_answered: false,
+            ..evidence
+        })
     } else if camera_answered {
         connectivity_reason = "camera HTTP answered";
-        connectivity::classify_table(in_mcm_list, expected, true, false, probed)
+        connectivity::classify_table(connectivity::ClassifyEvidence {
+            camera_answered: true,
+            tcp_ok: false,
+            ..evidence
+        })
     } else {
         connectivity_reason = "all camera fetches failed; tcp :80 accepted";
-        connectivity::classify_table(in_mcm_list, expected, false, tcp_ok, probed)
+        connectivity::classify_table(evidence)
     };
     connectivity::publish(camera_uuid, next, connectivity_reason);
 
