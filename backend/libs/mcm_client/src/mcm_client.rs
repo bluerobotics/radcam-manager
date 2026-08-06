@@ -6,9 +6,9 @@ use tracing::*;
 
 use crate::mcm_types::{
     ApiVideoSource, AuthenticateOnvifDeviceRequest, CaptureConfiguration, Format, Info,
-    OnvifDevice, OnvifDeviceInformation, PostStream, RemoveStream, StreamInformation, StreamStatus,
-    UnauthenticateOnvifDeviceRequest, VideoCaptureConfiguration, VideoEncodeType, VideoSourceOnvif,
-    VideoSourceOnvifType, VideoSourceType,
+    OnvifDevice, OnvifDeviceInformation, PostStream, StreamInformation, StreamStatus,
+    VideoCaptureConfiguration, VideoEncodeType, VideoSourceOnvif, VideoSourceOnvifType,
+    VideoSourceType,
 };
 
 use super::{Camera, Credentials, Stream};
@@ -155,15 +155,6 @@ impl MCMClient {
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub(crate) async fn unauthenticate(&self, camera: &Camera) -> Result<()> {
-        let data = UnauthenticateOnvifDeviceRequest {
-            device_uuid: camera.uuid,
-        };
-
-        web_client::delete(&self.address, "onvif/authentication", (), data).await
-    }
-
-    #[instrument(level = "debug", skip(self))]
     async fn get_streams(&self) -> Result<Vec<StreamStatus>> {
         web_client::get(&self.address, "streams", (), ()).await
     }
@@ -212,18 +203,6 @@ impl MCMClient {
         };
 
         web_client::post(&self.address, "streams", data, ()).await
-    }
-
-    #[instrument(level = "debug", skip(self))]
-    async fn delete_stream(&self) -> Result<Vec<Camera>> {
-        let data = RemoveStream { name: todo!() };
-
-        let devices = web_client::delete(&self.address, "delete_stream", (), data).await?;
-
-        Ok(radcams_from_onvif_devices(
-            devices,
-            self.skip_hardware_check,
-        ))
     }
 }
 
