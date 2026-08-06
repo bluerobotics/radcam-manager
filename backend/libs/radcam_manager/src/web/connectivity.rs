@@ -44,6 +44,7 @@ struct StitchHealthParams<'a> {
     autopilot_detail: Option<String>,
     lua_scripting_disabled: bool,
     lua_script: radcam_api::LuaScriptStatus,
+    lua_script_detail: Option<String>,
     diagnostics: radcam_api::Diagnostics,
     state_events_lagged: u64,
 }
@@ -286,6 +287,7 @@ fn stitch_system_health(
             .flatten(),
         lua_scripting_disabled: params.lua_scripting_disabled,
         lua_script: params.lua_script,
+        lua_script_detail: params.lua_script_detail,
         diagnostics,
     }
 }
@@ -297,6 +299,7 @@ pub(crate) async fn system_health() -> SystemHealth {
     let discovered = mcm_client::cameras().await;
     let configured = autopilot::configured_cameras().await;
     let (autopilot, autopilot_detail) = autopilot::health();
+    let (lua_script, lua_script_detail) = autopilot::lua_script_status();
 
     let mut hostnames = HashMap::new();
     for uuid in &configured {
@@ -315,7 +318,8 @@ pub(crate) async fn system_health() -> SystemHealth {
             autopilot,
             autopilot_detail,
             lua_scripting_disabled: autopilot::lua_scripting_disabled(),
-            lua_script: autopilot::lua_script_status(),
+            lua_script,
+            lua_script_detail,
             diagnostics: autopilot::diagnostics(),
             state_events_lagged: camera_state::state_events_lagged(),
         },
@@ -439,6 +443,7 @@ mod tests {
                 autopilot_detail: Some("suppressed".into()),
                 lua_scripting_disabled: false,
                 lua_script: radcam_api::LuaScriptStatus::Ok,
+                lua_script_detail: None,
                 diagnostics: Diagnostics::default(),
                 state_events_lagged: 0,
             },
@@ -470,6 +475,7 @@ mod tests {
                 autopilot_detail: Some("no frames".into()),
                 lua_scripting_disabled: false,
                 lua_script: radcam_api::LuaScriptStatus::Ok,
+                lua_script_detail: None,
                 diagnostics: Diagnostics::default(),
                 state_events_lagged: 0,
             },
