@@ -72,7 +72,17 @@ impl Settings {
         }
 
         if path.exists() {
-            return read_inner(path, path).await;
+            match read_inner(path, path).await {
+                Ok(settings) => return Ok(settings),
+                Err(error) => {
+                    warn!("Failed reading settings from {path:?}: {error:?}");
+                    // Removing it keeps the backup intact: the save that follows a recovery
+                    // would otherwise copy this unreadable file over the good copy.
+                    if let Err(error) = fs::remove_file(path).await {
+                        warn!("Failed removing unreadable settings {path:?}: {error:?}");
+                    }
+                }
+            }
         }
 
         let dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -299,6 +309,25 @@ mod tests {
         leftovers.sort();
 
         assert_eq!(leftovers, vec!["settings.json.bak".to_string()]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_settings_file_falls_back_to_the_backup() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("settings.json");
+
+        Settings::try_new(path.clone(), IndexMap::default()).await?;
+        let expected = fs::read_to_string(&path).await?;
+
+        // The state a power cut mid-write used to leave: good backup, torn live file.
+        fs::copy(&path, path.with_file_name("settings.json.bak")).await?;
+        fs::write(&path, "{\"v1\": {\"actuators\"").await?;
+
+        Settings::from_path(&path).await?;
+
+        assert_eq!(fs::read_to_string(&path).await?, expected);
 
         Ok(())
     }
