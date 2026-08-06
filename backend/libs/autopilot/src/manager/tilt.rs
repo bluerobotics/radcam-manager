@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use settings::TiltChannelFunction;
 use tracing::*;
 use uuid::Uuid;
@@ -6,8 +7,15 @@ use uuid::Uuid;
 use crate::{
     api, generate_update_channel_param_function, generate_update_mount_param_function,
     manager::Manager,
-    parameters::{ChannelFunction, ParamType},
+    parameters::{ActuatorsParameters, ChannelFunction, ParamType},
 };
+
+pub(super) fn tilt_mount_id(camera_id: api::CameraID) -> TiltChannelFunction {
+    match camera_id {
+        api::CameraID::CAM1 => TiltChannelFunction::MNT1,
+        api::CameraID::CAM2 => TiltChannelFunction::MNT2,
+    }
+}
 
 impl Manager {
     #[instrument(level = "debug", skip(parameters))]
@@ -74,11 +82,7 @@ impl Manager {
             // Sets the new tilt_channel:
             {
                 let param_name = format!("SERVO{}_FUNCTION", *channel as u8);
-
-                let function = match camera_id {
-                    api::CameraID::CAM1 => ChannelFunction::Mount1Pitch,
-                    api::CameraID::CAM2 => ChannelFunction::Mount2Pitch,
-                };
+                let function = Self::tilt_channel_function(camera_id);
 
                 let mut param = mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
@@ -135,8 +139,39 @@ impl Manager {
         Self::update_tilt_mnt_type(camera_uuid, parameters, force_apply).await
     }
 
+    fn tilt_channel_function(camera_id: api::CameraID) -> ChannelFunction {
+        match camera_id {
+            api::CameraID::CAM1 => ChannelFunction::Mount1Pitch,
+            api::CameraID::CAM2 => ChannelFunction::Mount2Pitch,
+        }
+    }
+
+    fn expect_owned_tilt_servo_function(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let channel = parameters.tilt_channel as u8;
+        let function = Self::tilt_channel_function(parameters.camera_id);
+        map.insert(
+            format!("SERVO{channel}_FUNCTION"),
+            ParamType::INT16(function as i16),
+        );
+    }
+
+    fn expect_owned_tilt_mnt_type(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let mount_id = tilt_mount_id(parameters.camera_id);
+        map.insert(
+            format!("{mount_id:?}_TYPE"),
+            ParamType::INT32(parameters.tilt_mnt_type as i32),
+        );
+    }
+
     generate_update_channel_param_function!(
         update_tilt_channel_min,
+        expect_owned_tilt_channel_min,
         tilt_channel_min,
         "SERVO",
         "MIN",
@@ -146,6 +181,7 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_tilt_channel_max,
+        expect_owned_tilt_channel_max,
         tilt_channel_max,
         "SERVO",
         "MAX",
@@ -155,6 +191,7 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_tilt_channel_trim,
+        expect_owned_tilt_channel_trim,
         tilt_channel_trim,
         "SERVO",
         "TRIM",
@@ -164,6 +201,7 @@ impl Manager {
 
     generate_update_mount_param_function!(
         update_tilt_mnt_pitch_min,
+        expect_owned_tilt_mnt_pitch_min,
         tilt_mnt_pitch_min,
         "PITCH_MIN",
         INT32
@@ -171,6 +209,7 @@ impl Manager {
 
     generate_update_mount_param_function!(
         update_tilt_mnt_pitch_max,
+        expect_owned_tilt_mnt_pitch_max,
         tilt_mnt_pitch_max,
         "PITCH_MAX",
         INT32
@@ -195,11 +234,7 @@ impl Manager {
                 .or_default()
                 .parameters;
 
-            // Debug name is MNT1/MNT2 (same as pitch macros), not the SERVO function u8.
-            let mount_id = match current_parameters.camera_id {
-                api::CameraID::CAM1 => TiltChannelFunction::MNT1,
-                api::CameraID::CAM2 => TiltChannelFunction::MNT2,
-            };
+            let mount_id = tilt_mount_id(current_parameters.camera_id);
             let param_name = format!("{mount_id:?}_TYPE");
 
             let new_value = match (parameters.tilt_mnt_type, force_apply) {
@@ -249,4 +284,17 @@ impl Manager {
 
         Ok(false)
     }
+}
+
+pub(super) fn push_owned_expectations(
+    parameters: &ActuatorsParameters,
+    map: &mut IndexMap<String, ParamType>,
+) {
+    Manager::expect_owned_tilt_servo_function(parameters, map);
+    Manager::expect_owned_tilt_channel_min(parameters, map);
+    Manager::expect_owned_tilt_channel_trim(parameters, map);
+    Manager::expect_owned_tilt_channel_max(parameters, map);
+    Manager::expect_owned_tilt_mnt_pitch_min(parameters, map);
+    Manager::expect_owned_tilt_mnt_pitch_max(parameters, map);
+    Manager::expect_owned_tilt_mnt_type(parameters, map);
 }

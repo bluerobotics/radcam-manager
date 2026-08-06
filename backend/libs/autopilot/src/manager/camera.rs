@@ -1,14 +1,19 @@
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use tracing::*;
 use uuid::Uuid;
 
 use crate::{
     api,
     manager::Manager,
-    parameters::{CameraType, ParamType},
+    parameters::{ActuatorsParameters, CameraType, ParamType},
 };
 
 impl Manager {
+    fn enabled_camera_type_value() -> ParamType {
+        ParamType::UINT8(CameraType::Servo as u8)
+    }
+
     #[instrument(level = "debug", skip(parameters))]
     pub async fn update_camera_parameters(
         camera_uuid: &Uuid,
@@ -75,7 +80,7 @@ impl Manager {
                 let old_value = param.value;
                 param
                     .value
-                    .set_value(ParamType::UINT8(CameraType::Servo as u8), encoding)?;
+                    .set_value(Self::enabled_camera_type_value(), encoding)?;
                 let new_value = param.value;
 
                 if overwrite || old_value != new_value {
@@ -109,4 +114,15 @@ impl Manager {
 
         Ok(autopilot_reboot_required)
     }
+}
+
+pub(super) fn push_owned_expectations(
+    parameters: &ActuatorsParameters,
+    map: &mut IndexMap<String, ParamType>,
+) {
+    let camera = parameters.camera_id as u8;
+    map.insert(
+        format!("CAM{camera}_TYPE"),
+        Manager::enabled_camera_type_value(),
+    );
 }
