@@ -13,6 +13,7 @@ use crate::web::{control_bridge, request_restart};
 pub mod blueos;
 pub mod camera;
 pub mod cockpit;
+pub mod health;
 pub mod info;
 pub mod log;
 pub mod settings;
@@ -24,6 +25,7 @@ pub fn router() -> Router {
         .nest("/camera", camera::router())
         .nest("/log", log::router())
         .nest("/info", info::router())
+        .nest("/health", health::router())
         .nest("/settings", settings::router())
         .nest(
             "/autopilot",
