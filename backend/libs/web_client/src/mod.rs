@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::OnceLock};
 
 use anyhow::Result;
 use reqwest::RequestBuilder;
@@ -6,6 +6,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use tracing::*;
 use url::Url;
 use url_params_serializer::to_url_params;
+
+static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 #[instrument(level = "debug", skip_all)]
 pub async fn get<
@@ -23,11 +25,7 @@ pub async fn get<
         to_url_params(query_params),
     )?;
 
-    send_request(
-        reqwest::Client::new().get(url),
-        serde_json::to_string(&body_data)?,
-    )
-    .await
+    send_request(client().get(url), serde_json::to_string(&body_data)?).await
 }
 
 #[instrument(level = "debug", skip_all)]
@@ -46,11 +44,7 @@ pub async fn post<
         to_url_params(query_params),
     )?;
 
-    send_request(
-        reqwest::Client::new().post(url),
-        serde_json::to_string(&body_data)?,
-    )
-    .await
+    send_request(client().post(url), serde_json::to_string(&body_data)?).await
 }
 
 #[instrument(level = "debug", skip_all)]
@@ -69,11 +63,7 @@ pub async fn put<
         to_url_params(query_params),
     )?;
 
-    send_request(
-        reqwest::Client::new().put(url),
-        serde_json::to_string(&body_data)?,
-    )
-    .await
+    send_request(client().put(url), serde_json::to_string(&body_data)?).await
 }
 
 #[instrument(level = "debug", skip_all)]
@@ -92,11 +82,7 @@ pub async fn delete<
         to_url_params(query_params),
     )?;
 
-    send_request(
-        reqwest::Client::new().delete(url),
-        serde_json::to_string(&body_data)?,
-    )
-    .await
+    send_request(client().delete(url), serde_json::to_string(&body_data)?).await
 }
 
 #[instrument(level = "debug", skip_all)]
@@ -133,4 +119,10 @@ pub async fn send_request<D: DeserializeOwned + std::fmt::Debug>(
     })?;
 
     Ok(data)
+}
+
+/// Shared client, so the 1 Hz pollers reuse connections instead of building a
+/// pool and TLS stack per request.
+fn client() -> &'static reqwest::Client {
+    CLIENT.get_or_init(reqwest::Client::new)
 }
