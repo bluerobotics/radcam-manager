@@ -41,8 +41,8 @@ export type HealthProblemsInput = {
   cameraStreamError?: string | null
   /** MCM ONVIF authentication failure detail when login with expected credentials fails. */
   cameraOnvifAuthError?: string | null
-  /** Peak MCM consecutive failures observed this episode (for duration text). */
-  mcmAttemptsPeak: number
+  problemFirstSeen?: Partial<Record<HealthProblemKind, number>>
+  nowMs?: number
 }
 
 const AUTOPILOT_PROBLEM_STATES: ReadonlySet<AutopilotHealth> = new Set([
@@ -76,7 +76,7 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
       title: 'BlueOS video service unavailable',
       body: 'RadCam Manager cannot reach the BlueOS video service, so cameras cannot be discovered or controlled.',
       detail: health.mcm_detail ?? null,
-      progress: mcmProgressLine(health, input.mcmAttemptsPeak),
+      progress: mcmProgressLine(input.problemFirstSeen?.mcm, input.nowMs),
     })
   }
 
@@ -173,7 +173,11 @@ function formatDurationShort(ms: number): string {
 export function formatProblemSince(firstSeenMs: number, nowMs: number): string {
   const date = new Date(firstSeenMs)
   const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  const elapsedMin = Math.max(1, Math.round((nowMs - firstSeenMs) / 60_000))
+  const elapsedSec = Math.max(1, Math.round((nowMs - firstSeenMs) / 1000))
+  if (elapsedSec < 60) {
+    return `since ${time} (${elapsedSec} sec)`
+  }
+  const elapsedMin = Math.round(elapsedSec / 60)
   return `since ${time} (${elapsedMin} min)`
 }
 
@@ -211,7 +215,7 @@ export function recoveryTitle(
 
 export function recoveryMessage(
   resolvedKinds: readonly HealthProblemKind[],
-  mcmAttemptsPeak: number,
+  mcmOutageMsPeak: number,
   forgetSuccess: boolean,
   withCloseHint = true,
 ): string {
@@ -223,8 +227,8 @@ export function recoveryMessage(
 
   const parts: string[] = []
   if (resolvedKinds.includes('mcm')) {
-    if (mcmAttemptsPeak > 0) {
-      const duration = formatDurationShort(mcmAttemptsPeak * MCM_PROBE_INTERVAL_MS)
+    if (mcmOutageMsPeak > 0) {
+      const duration = formatDurationShort(mcmOutageMsPeak)
       parts.push(`BlueOS video service is back (after about ${duration})`)
     } else {
       parts.push('BlueOS video service is back')
@@ -259,9 +263,10 @@ export function recoveryMessage(
   return withCloseHint ? `${body}. Click Close to continue.` : `${body}.`
 }
 
-function mcmProgressLine(health: SystemHealth, mcmAttemptsPeak: number): string {
-  const failures = Math.max(health.diagnostics.mcm_consecutive_failures, mcmAttemptsPeak, 1)
-  const elapsed = formatDurationShort(failures * MCM_PROBE_INTERVAL_MS)
+function mcmProgressLine(mcmSinceMs: number | undefined, nowMs: number | undefined): string {
+  const elapsedMs =
+    mcmSinceMs != null && nowMs != null ? Math.max(nowMs - mcmSinceMs, 1000) : 1000
+  const elapsed = formatDurationShort(elapsedMs)
   const cadence = MCM_PROBE_INTERVAL_MS / 1000
   return `Retrying every ${cadence} sec (about ${elapsed} so far)…`
 }
@@ -349,7 +354,7 @@ function parameterDriftProblem(health: SystemHealth): HealthProblem | null {
     kind: 'parameter_drift',
     severity: 'warning',
     title: 'Autopilot parameters no longer match saved setup',
-    body: 'Another ground station, a parameter reset, or a loaded parameter file changed values on the autopilot. Focus and zoom will not follow the camera until you re-apply the configuration.',
+    body: 'Another ground station, a parameter reset, or a loaded parameter file changed values on the autopilot. Autopilot-driven camera controls will not work until you re-apply the configuration.',
     detail: lines.join('\n'),
     showGoToSetup: true,
   }
@@ -421,7 +426,6 @@ function cameraProblem(
         severity: 'error',
         title: 'Camera not responding',
         body: `${label} is on the network but is not answering. Power-cycle the camera. If it keeps happening, contact support.`,
-        showReboot: true,
         progress: 'Waiting for the camera to respond…',
       }
     default:
