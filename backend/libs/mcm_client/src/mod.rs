@@ -20,12 +20,16 @@ use ts_rs::TS;
 use url::Url;
 use uuid::Uuid;
 
+use mcm_types::StreamStatusState;
+
 // note: keep this private to isolate MCM API from the rest of the code
 pub(crate) mod mcm_client;
 pub mod mcm_types;
 
 const MCM_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MCM_FAILURES_TO_DOWN: u32 = 3;
+// MCM self-heals with backoff capped at 60s; each recreate costs an MCM settings write.
+const STREAM_FAILURES_TO_RECREATE: u32 = 60;
 
 static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 static CAMERAS_TX: OnceCell<broadcast::Sender<()>> = OnceCell::new();
@@ -53,9 +57,16 @@ pub struct McmHealthSnapshot {
 }
 
 #[derive(Debug)]
+struct StreamFailure {
+    episode_key: String,
+    detail: String,
+}
+
+#[derive(Debug)]
 struct Manager {
     cameras: Cameras,
     auth_failures: HashMap<Uuid, String>,
+    stream_failures: HashMap<Uuid, StreamFailure>,
     _authentication_task_handler: JoinHandle<()>,
     _start_radcams_task_handler: JoinHandle<()>,
 }
@@ -86,6 +97,8 @@ pub struct Stream {
     name: String,
     source_endpoint: Url,
     stream_endpoints: Vec<Url>,
+    state: StreamStatusState,
+    error: Option<String>,
 }
 
 /// Constructs our manager, Should be done inside main
@@ -114,6 +127,7 @@ pub async fn init(mcm_address: SocketAddr, skip_hardware_check: bool) {
         RwLock::new(Manager {
             cameras,
             auth_failures: HashMap::new(),
+            stream_failures: HashMap::new(),
             _authentication_task_handler,
             _start_radcams_task_handler,
         })
@@ -128,6 +142,7 @@ pub async fn shutdown() {
         lock._start_radcams_task_handler.abort();
         lock.cameras.clear();
         lock.auth_failures.clear();
+        lock.stream_failures.clear();
     }
 }
 
@@ -238,6 +253,8 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
 
 #[instrument(level = "debug")]
 async fn start_radcams_streams(mcm_address: &SocketAddr) {
+    let mut stream_failure_counts: HashMap<Url, u32> = HashMap::new();
+
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
@@ -275,6 +292,8 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
                 }
             };
 
+            let mut observed_sources = HashSet::new();
+
             for source in available_radcam_sources {
                 if !source.source.ends_with("stream_0") {
                     continue; // We only want the main stream
@@ -293,22 +312,62 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
                 // credential-free.
                 let _ = available_source.set_password(None);
                 let _ = available_source.set_username("");
+                observed_sources.insert(available_source.clone());
 
-                if existing_radcam_streams.iter().any(|stream| {
+                let matching_stream = existing_radcam_streams.iter().find(|stream| {
                     let mut existing_source = stream.source_endpoint.clone();
                     let _ = existing_source.set_password(None);
                     let _ = existing_source.set_username("");
 
                     existing_source.eq(&available_source)
-                }) {
+                });
+
+                if let Some(stream) = matching_stream {
+                    if stream_needs_recreation(stream.state) {
+                        let count = stream_failure_counts
+                            .entry(available_source.clone())
+                            .or_insert(0);
+                        *count += 1;
+
+                        if *count >= STREAM_FAILURES_TO_RECREATE {
+                            set_stream_failure_for_source(
+                                &available_source,
+                                stream.state,
+                                stream.error.as_deref(),
+                            )
+                            .await;
+                            match mcm.delete_stream(&stream.name).await {
+                                Err(error) => {
+                                    warn!(
+                                        "Failed deleting failed stream {:?}: {error:?}",
+                                        stream.name
+                                    );
+                                }
+                                Ok(_) => {
+                                    *count = 0;
+                                    if let Err(error) = mcm.create_stream(source).await {
+                                        warn!("Failed recreating stream: {error:?}");
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        stream_failure_counts.remove(&available_source);
+                        clear_stream_failure_for_source(&available_source).await;
+                    }
+
                     continue;
                 }
+
+                stream_failure_counts.remove(&available_source);
 
                 if let Err(error) = mcm.create_stream(source).await {
                     warn!("Failed creating stream: {error:?}");
                     continue;
                 }
             }
+
+            stream_failure_counts.retain(|source, _| observed_sources.contains(source));
         }
     }
 }
@@ -317,6 +376,17 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
 pub async fn authentication_failure(uuid: &Uuid) -> Option<String> {
     let manager = MANAGER.get()?;
     manager.read().await.auth_failures.get(uuid).cloned()
+}
+
+/// Per-camera video stream failure, when MCM's stream stayed broken through self-heal backoff.
+pub async fn stream_failure(uuid: &Uuid) -> Option<String> {
+    let manager = MANAGER.get()?;
+    manager
+        .read()
+        .await
+        .stream_failures
+        .get(uuid)
+        .map(|failure| failure.detail.clone())
 }
 
 #[instrument(level = "debug")]
@@ -523,9 +593,14 @@ pub async fn remove_camera(uuid: &Uuid) -> Result<Camera> {
     let mut lock = MANAGER.get().unwrap().write().await;
 
     let camera = lock.cameras.swap_remove(uuid).context("context")?;
+    lock.stream_failures.remove(uuid);
     notify_cameras();
 
     Ok(camera)
+}
+
+fn stream_needs_recreation(state: StreamStatusState) -> bool {
+    state == StreamStatusState::Stopped
 }
 
 async fn record_auth_failure(uuid: Uuid, error: String) {
@@ -551,6 +626,85 @@ async fn prune_auth_failures(visible: &HashSet<Uuid>) {
         .await
         .auth_failures
         .retain(|uuid, _| visible.contains(uuid));
+}
+
+async fn set_stream_failure_for_source(
+    source: &Url,
+    state: StreamStatusState,
+    error: Option<&str>,
+) {
+    let Some(uuid) = camera_uuid_for_stream_source(source).await else {
+        return;
+    };
+    let episode_key = stream_failure_episode_key(state);
+    let detail = stream_failure_detail(error);
+    let Some(manager) = MANAGER.get() else {
+        return;
+    };
+    let changed = {
+        let mut lock = manager.write().await;
+        match lock.stream_failures.get(&uuid) {
+            Some(existing) if existing.episode_key == episode_key => {
+                if existing.detail != detail
+                    && let Some(record) = lock.stream_failures.get_mut(&uuid)
+                {
+                    record.detail = detail;
+                }
+                false
+            }
+            _ => {
+                lock.stream_failures.insert(
+                    uuid,
+                    StreamFailure {
+                        episode_key,
+                        detail,
+                    },
+                );
+                true
+            }
+        }
+    };
+    if changed {
+        notify_cameras();
+    }
+}
+
+async fn clear_stream_failure_for_source(source: &Url) {
+    let Some(uuid) = camera_uuid_for_stream_source(source).await else {
+        return;
+    };
+    let Some(manager) = MANAGER.get() else {
+        return;
+    };
+    let changed = manager
+        .write()
+        .await
+        .stream_failures
+        .remove(&uuid)
+        .is_some();
+    if changed {
+        notify_cameras();
+    }
+}
+
+fn stream_failure_episode_key(state: StreamStatusState) -> String {
+    format!("{state:?}")
+}
+
+fn stream_failure_detail(error: Option<&str>) -> String {
+    error
+        .map(str::to_string)
+        .unwrap_or_else(|| "MCM stream state: stopped".to_string())
+}
+
+async fn camera_uuid_for_stream_source(source: &Url) -> Option<Uuid> {
+    let host = source.host_str()?;
+    let ip = host.parse::<Ipv4Addr>().ok()?;
+    cameras()
+        .await
+        .iter()
+        .find(|(_, camera)| camera.hostname == ip)
+        .map(|(uuid, _)| *uuid)
 }
 
 #[cfg(test)]
@@ -650,4 +804,13 @@ async fn test_camera_manager_full_cycle() {
         Some(test_camera.hostname)
     );
     assert_eq!(camera_address(&Uuid::nil()).await, None);
+}
+
+#[test]
+fn stream_needs_recreation_predicate() {
+    // Only Stopped means current failure; Idle may still carry a stale MCM error string.
+    assert!(!stream_needs_recreation(StreamStatusState::Idle));
+    assert!(!stream_needs_recreation(StreamStatusState::Running));
+    assert!(!stream_needs_recreation(StreamStatusState::Unknown));
+    assert!(stream_needs_recreation(StreamStatusState::Stopped));
 }

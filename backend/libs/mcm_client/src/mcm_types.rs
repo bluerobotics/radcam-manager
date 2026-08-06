@@ -86,10 +86,23 @@ pub struct VideoCaptureConfiguration {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
 pub struct RedirectCaptureConfiguration {}
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamStatusState {
+    Running,
+    Idle,
+    Stopped,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
 pub struct StreamStatus {
     pub id: uuid::Uuid,
     pub running: bool,
+    #[serde(default)]
+    pub state: StreamStatusState,
     pub error: Option<String>,
     pub video_and_stream: VideoAndStreamInformation,
     pub mavlink: Option<MavlinkComponent>,
