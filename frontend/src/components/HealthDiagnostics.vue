@@ -88,6 +88,7 @@ const rawHealthText = computed((): string => {
     `last_heartbeat_age_ms: ${formatOptional(diagnostics.last_heartbeat_age_ms)}`,
     `last_servo_age_ms: ${formatOptional(diagnostics.last_servo_age_ms)}`,
     `backend_version: ${diagnostics.backend_version}`,
+    `settings_error: ${formatOptional(diagnostics.settings_error)}`,
   ]
   if (props.cameraConnectivity != null) {
     lines.push(`camera_connectivity: ${props.cameraConnectivity}`)
