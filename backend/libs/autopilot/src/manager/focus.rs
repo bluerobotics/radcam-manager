@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use tracing::*;
 use uuid::Uuid;
 
 use crate::{
     api, generate_update_channel_param_function,
     manager::Manager,
-    parameters::{ChannelFunction, ParamType},
+    parameters::{ActuatorsParameters, ChannelFunction, ParamType},
 };
 
 impl Manager {
@@ -75,13 +76,7 @@ impl Manager {
                 let param_name = format!("SERVO{}_FUNCTION", *channel as u8);
 
                 // The focus servo input is the script:
-                let function = ChannelFunction::try_from(script_function as u8 as i16).map_err(
-                    |error| {
-                        anyhow::anyhow!(
-                            "Invalid script_function {script_function:?} for focus channel: {error:?}"
-                        )
-                    },
-                )?;
+                let function = Self::focus_channel_function(script_function)?;
 
                 let mut param = mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
@@ -138,8 +133,31 @@ impl Manager {
         Ok(())
     }
 
+    fn focus_channel_function(script_function: api::ScriptFunction) -> Result<ChannelFunction> {
+        ChannelFunction::try_from(script_function as u8 as i16).map_err(|error| {
+            anyhow::anyhow!(
+                "Invalid script_function {script_function:?} for focus channel: {error:?}"
+            )
+        })
+    }
+
+    fn expect_owned_focus_servo_function(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let Ok(function) = Self::focus_channel_function(parameters.script_function) else {
+            return;
+        };
+        let channel = parameters.focus_channel as u8;
+        map.insert(
+            format!("SERVO{channel}_FUNCTION"),
+            ParamType::INT16(function as i16),
+        );
+    }
+
     generate_update_channel_param_function!(
         update_focus_channel_min,
+        expect_owned_focus_channel_min,
         focus_channel_min,
         "SERVO",
         "MIN",
@@ -149,6 +167,7 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_focus_channel_max,
+        expect_owned_focus_channel_max,
         focus_channel_max,
         "SERVO",
         "MAX",
@@ -158,10 +177,21 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_focus_channel_trim,
+        expect_owned_focus_channel_trim,
         focus_channel_trim,
         "SERVO",
         "TRIM",
         UINT16,
         focus_channel
     );
+}
+
+pub(super) fn push_owned_expectations(
+    parameters: &ActuatorsParameters,
+    map: &mut IndexMap<String, ParamType>,
+) {
+    Manager::expect_owned_focus_servo_function(parameters, map);
+    Manager::expect_owned_focus_channel_min(parameters, map);
+    Manager::expect_owned_focus_channel_trim(parameters, map);
+    Manager::expect_owned_focus_channel_max(parameters, map);
 }
