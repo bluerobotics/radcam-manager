@@ -146,6 +146,7 @@ pub fn diagnostics() -> Diagnostics {
         mavlink_reconnects: mavlink::reconnect_count(),
         mavlink_frames_lagged: guard.frames_lagged,
         backend_version: backend_version_string(),
+        settings_error: settings::last_save_error(),
         ..Default::default()
     };
 
