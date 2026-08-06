@@ -51,6 +51,10 @@ pub enum LuaScriptStatus {
     /// A script is installed, but it is not the one this configuration generates —
     /// stale after a manager upgrade, or hand-edited.
     Outdated,
+    /// The expected script is installed, but the autopilot reported it erroring. A
+    /// firmware upgrade that changed a scripting API reaches the user this way.
+    /// The message is in [`SystemHealth::lua_script_detail`].
+    Failing,
 }
 
 /// Health of the RadCam Manager to Mavlink Camera Manager link.
@@ -166,6 +170,10 @@ pub struct SystemHealth {
     pub lua_scripting_disabled: bool,
     /// Whether the installed Lua script matches this configuration.
     pub lua_script: LuaScriptStatus,
+    /// What the autopilot said when the script failed, e.g. the Lua file and line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lua_script_detail: Option<String>,
     /// Support counters.
     pub diagnostics: Diagnostics,
 }
