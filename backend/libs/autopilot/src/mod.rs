@@ -338,6 +338,10 @@ pub(crate) async fn control_inner(
             if removed.is_some() {
                 manager::Manager::save_actuators_settings().await?;
                 info!(%camera_uuid, "Forgot actuators configuration for camera");
+
+                drop(_apply);
+                manager::owned_parameters::rebuild().await;
+                manager::owned_parameters::reevaluate_after_apply().await;
             }
             serde_json::Value::Null
         }
