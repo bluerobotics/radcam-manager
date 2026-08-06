@@ -61,7 +61,9 @@ impl MavlinkComponent {
         let heartbeat_task_handle = tokio::spawn(Self::heartbeat_task(inner.clone()));
 
         Self::configure_parameter_encoding(inner.clone()).await;
+        crate::health::set_syncing(true);
         Self::update_all_params(inner.clone()).await;
+        crate::health::set_syncing(false);
 
         let params_sync_task_handle = tokio::spawn(Self::params_sync_task(inner.clone()));
 
@@ -203,6 +205,17 @@ impl MavlinkComponent {
 
     #[instrument(level = "debug", skip(self))]
     pub async fn reboot_autopilot(&self) -> Result<()> {
+        struct RebootingGuard;
+
+        impl Drop for RebootingGuard {
+            fn drop(&mut self) {
+                crate::health::set_rebooting(false);
+            }
+        }
+
+        crate::health::set_rebooting(true);
+        let _guard = RebootingGuard;
+
         // This is a workaround to this issue: https://github.com/bluerobotics/radcam-manager/issues/57
         blueos_client::reboot_autopilot().await?;
 
@@ -226,7 +239,7 @@ impl MavlinkComponent {
         self.wait_autopilot().await?;
 
         Self::configure_parameter_encoding(self.inner.clone()).await;
-        // Bound so a wedged autopilot cannot stall reboot forever.
+        crate::health::set_syncing(true);
         if tokio::time::timeout(
             tokio::time::Duration::from_secs(60),
             Self::update_all_params(self.inner.clone()),
@@ -236,6 +249,7 @@ impl MavlinkComponent {
         {
             warn!("Timed out refreshing parameters after autopilot reboot");
         }
+        crate::health::set_syncing(false);
 
         Ok(())
     }
@@ -369,7 +383,10 @@ impl MavlinkComponent {
 
             match tokio::time::timeout(tokio::time::Duration::from_secs(1), wait_command_ack).await
             {
-                Ok(Ok(())) => return Ok(()),
+                Ok(Ok(())) => {
+                    crate::health::rpc_ok();
+                    return Ok(());
+                }
                 Ok(Err(error)) => {
                     if error.to_string().contains("MAV_RESULT_UNSUPPORTED") {
                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -383,10 +400,12 @@ impl MavlinkComponent {
             }
         }
 
-        Err(anyhow!(
+        let reason = format!(
             "Command {:?} timed out after {max_retries} retries",
             command.command
-        ))
+        );
+        crate::health::rpc_failed(&reason);
+        Err(anyhow!(reason))
     }
 
     /// Subscribe to the shared MAVLink message broadcast for this component.
@@ -473,7 +492,10 @@ impl MavlinkComponent {
 
         match tokio::time::timeout(tokio::time::Duration::from_secs(1), wait_message).await {
             Ok(res) => res,
-            Err(_) => Err(anyhow!("Timeout waiting")),
+            Err(_) => {
+                crate::health::rpc_failed("SERVO_OUTPUT_RAW not delivered within 1s after ACK");
+                Err(anyhow!("Timeout waiting"))
+            }
         }
     }
 }
@@ -574,4 +596,8 @@ impl ComponentInner {
     pub async fn get_receiver(&self) -> broadcast::Receiver<Message> {
         self.connection.get_receiver()
     }
+}
+
+pub(crate) fn reconnect_count() -> u64 {
+    connection::reconnect_count()
 }

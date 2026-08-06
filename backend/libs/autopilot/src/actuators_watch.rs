@@ -40,6 +40,18 @@ static INTEREST_CHANGED: Notify = Notify::const_new();
 /// Instant of the last SERVO-backed sample per camera (missing = never / invalidated).
 static LAST_SERVO_AT: Lazy<Mutex<HashMap<Uuid, Instant>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+static LAST_SERVO_GLOBAL_AT: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+static LAST_STREAM_REQUEST_AT: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+
+/// Liveness of the high-rate `SERVO_OUTPUT_RAW` stream.
+pub struct ServoStreamHealth {
+    /// Current interest count; 0 means we deliberately asked for no stream.
+    pub interest: usize,
+    /// When the stream was last requested, if ever.
+    pub last_request_at: Option<Instant>,
+    /// Newest SERVO sample seen by the watcher, regardless of configured cameras.
+    pub last_sample_at: Option<Instant>,
+}
 
 /// Actuator positions derived from a MAVLink `SERVO_OUTPUT_RAW` sample.
 #[derive(Debug, Clone)]
@@ -153,6 +165,15 @@ pub fn cache_is_fresh(camera_uuid: Uuid) -> bool {
     last_servo_age(camera_uuid).is_some_and(|age| age < STREAM_STALE_AFTER)
 }
 
+/// SERVO stream interest, request and sample timestamps for health classification.
+pub fn stream_health() -> ServoStreamHealth {
+    ServoStreamHealth {
+        interest: INTEREST.load(Ordering::SeqCst),
+        last_request_at: LAST_STREAM_REQUEST_AT.lock().ok().and_then(|at| *at),
+        last_sample_at: LAST_SERVO_GLOBAL_AT.lock().ok().and_then(|at| *at),
+    }
+}
+
 fn mark_servo_sample(camera_uuid: Uuid) {
     if let Ok(mut map) = LAST_SERVO_AT.lock() {
         map.insert(camera_uuid, Instant::now());
@@ -162,6 +183,12 @@ fn mark_servo_sample(camera_uuid: Uuid) {
 fn clear_servo_freshness() {
     if let Ok(mut map) = LAST_SERVO_AT.lock() {
         map.clear();
+    }
+    if let Ok(mut at) = LAST_SERVO_GLOBAL_AT.lock() {
+        *at = None;
+    }
+    if let Ok(mut at) = LAST_STREAM_REQUEST_AT.lock() {
+        *at = None;
     }
 }
 
@@ -307,6 +334,10 @@ async fn actuators_watcher() {
                                 continue;
                             }
 
+                            if let Ok(mut at) = LAST_SERVO_GLOBAL_AT.lock() {
+                                *at = Some(Instant::now());
+                            }
+
                             let Some(manager) = MANAGER.get() else {
                                 continue;
                             };
@@ -404,6 +435,12 @@ async fn open_receiver() -> Option<(broadcast::Receiver<Message>, u8)> {
 
 #[instrument(level = "debug")]
 async fn request_servo_stream(interval_us: f32) {
+    if interval_us != STREAM_DISABLED_INTERVAL_US
+        && let Ok(mut at) = LAST_STREAM_REQUEST_AT.lock()
+    {
+        *at = Some(Instant::now());
+    }
+
     let Ok(mavlink) = crate::mavlink::component() else {
         return;
     };
