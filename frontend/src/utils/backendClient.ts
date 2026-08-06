@@ -29,6 +29,25 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
 
 export type { ConnectionStats }
 
+export type BackendVersionObservation = {
+  initial: string | null
+  changed: boolean
+}
+
+export function observeBackendVersion(
+  state: BackendVersionObservation,
+  backendVersion: string | undefined,
+): void {
+  if (!backendVersion || state.changed) return
+  if (state.initial === null) {
+    state.initial = backendVersion
+    return
+  }
+  if (backendVersion !== state.initial) {
+    state.changed = true
+  }
+}
+
 // Above reboot wait budget (150s) and matching camera_ui::REBOOT_GRACE (180s).
 const REQUEST_TIMEOUT_MS = 180_000
 const REQUEST_MAX_ATTEMPTS = 3
@@ -106,6 +125,11 @@ class BackendClient {
   private subscribeNeedsRetry = false
   /** Hard-stop list retries after camera_cap until the user re-selects. */
   private subscribeBlocked = false
+  private backendVersionObservation: BackendVersionObservation = {
+    initial: null,
+    changed: false,
+  }
+  private backendVersionChangeHandlers = new Set<() => void>()
 
   private wsUrl(): string {
     const url = new URL('v1/ws', window.location.href)
@@ -146,6 +170,29 @@ class BackendClient {
     this.transportErrorHandlers.add(handler)
     return () => {
       this.transportErrorHandlers.delete(handler)
+    }
+  }
+
+  onBackendVersionChanged(handler: () => void): () => void {
+    this.backendVersionChangeHandlers.add(handler)
+    if (this.backendVersionObservation.changed) {
+      handler()
+    }
+    return () => {
+      this.backendVersionChangeHandlers.delete(handler)
+    }
+  }
+
+  private noteBackendVersion(diagnostics: { backend_version?: string } | null | undefined): void {
+    const before = this.backendVersionObservation.changed
+    observeBackendVersion(
+      this.backendVersionObservation,
+      diagnostics?.backend_version,
+    )
+    if (!before && this.backendVersionObservation.changed) {
+      for (const changeHandler of this.backendVersionChangeHandlers) {
+        changeHandler()
+      }
     }
   }
 
@@ -356,6 +403,10 @@ class BackendClient {
         } else if (!this.hasCameraState || this.subscribeNeedsRetry) {
           this.queueSubscribe(this.subscribedCameraUuid)
         }
+      }
+      if (message.event === 'system/health') {
+        const body = message.body as { diagnostics?: { backend_version?: string } } | null
+        this.noteBackendVersion(body?.diagnostics)
       }
       if (message.event === 'camera/subscribe_rejected' && this.subscribedCameraUuid) {
         const body = message.body as { camera_uuid?: string; reason?: string } | null
