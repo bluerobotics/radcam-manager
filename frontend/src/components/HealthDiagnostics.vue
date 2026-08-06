@@ -84,6 +84,7 @@ const rawHealthText = computed((): string => {
     `mavlink_frames_lagged: ${diagnostics.mavlink_frames_lagged}`,
     `state_events_lagged: ${diagnostics.state_events_lagged}`,
     `mcm_consecutive_failures: ${diagnostics.mcm_consecutive_failures}`,
+    `script_reloads: ${diagnostics.script_reloads}`,
     `last_frame_age_ms: ${formatOptional(diagnostics.last_frame_age_ms)}`,
     `last_heartbeat_age_ms: ${formatOptional(diagnostics.last_heartbeat_age_ms)}`,
     `last_servo_age_ms: ${formatOptional(diagnostics.last_servo_age_ms)}`,
