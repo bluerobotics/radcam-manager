@@ -35,7 +35,9 @@ static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
 static CAMERAS_TX: OnceCell<broadcast::Sender<()>> = OnceCell::new();
 static HEALTH: OnceCell<Mutex<HealthState>> = OnceCell::new();
 static HEALTH_TX: OnceCell<broadcast::Sender<()>> = OnceCell::new();
-/// Survives a camera dropping out of discovery, so its HTTP API stays addressable.
+/// Per-camera hostname retained after the camera drops out of MCM discovery so its HTTP
+/// API stays addressable; entries are only removed on an explicit Forget, not on
+/// `remove_camera`.
 static LAST_HOSTNAMES: OnceCell<Mutex<HashMap<Uuid, Ipv4Addr>>> = OnceCell::new();
 
 struct HealthState {
@@ -607,25 +609,43 @@ async fn record_auth_failure(uuid: Uuid, error: String) {
     let Some(manager) = MANAGER.get() else {
         return;
     };
-    manager.write().await.auth_failures.insert(uuid, error);
+    let changed = {
+        let mut lock = manager.write().await;
+        if lock.auth_failures.get(&uuid) == Some(&error) {
+            false
+        } else {
+            lock.auth_failures.insert(uuid, error);
+            true
+        }
+    };
+    if changed {
+        notify_cameras();
+    }
 }
 
 async fn clear_auth_failure(uuid: &Uuid) {
     let Some(manager) = MANAGER.get() else {
         return;
     };
-    manager.write().await.auth_failures.remove(uuid);
+    let changed = manager.write().await.auth_failures.remove(uuid).is_some();
+    if changed {
+        notify_cameras();
+    }
 }
 
 async fn prune_auth_failures(visible: &HashSet<Uuid>) {
     let Some(manager) = MANAGER.get() else {
         return;
     };
-    manager
-        .write()
-        .await
-        .auth_failures
-        .retain(|uuid, _| visible.contains(uuid));
+    let changed = {
+        let mut lock = manager.write().await;
+        let before = lock.auth_failures.len();
+        lock.auth_failures.retain(|uuid, _| visible.contains(uuid));
+        lock.auth_failures.len() != before
+    };
+    if changed {
+        notify_cameras();
+    }
 }
 
 async fn set_stream_failure_for_source(
@@ -676,6 +696,9 @@ async fn clear_stream_failure_for_source(source: &Url) {
     let Some(manager) = MANAGER.get() else {
         return;
     };
+    if !manager.read().await.stream_failures.contains_key(&uuid) {
+        return;
+    }
     let changed = manager
         .write()
         .await
@@ -700,8 +723,11 @@ fn stream_failure_detail(error: Option<&str>) -> String {
 async fn camera_uuid_for_stream_source(source: &Url) -> Option<Uuid> {
     let host = source.host_str()?;
     let ip = host.parse::<Ipv4Addr>().ok()?;
-    cameras()
+    let manager = MANAGER.get()?;
+    manager
+        .read()
         .await
+        .cameras
         .iter()
         .find(|(_, camera)| camera.hostname == ip)
         .map(|(uuid, _)| *uuid)
