@@ -212,6 +212,10 @@ fn custom_rolling_appender<P: AsRef<std::path::Path>>(
 ) -> tracing_appender::rolling::RollingFileAppender {
     tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(rotation)
+        // The log directory is a bind mount on the vehicle's SD card, and hourly files
+        // accumulate for as long as the extension runs. Three days is enough to debug
+        // a dive that already happened.
+        .max_log_files(72)
         .filename_prefix(prefix)
         .filename_suffix(suffix)
         .build(dir)
