@@ -12,6 +12,7 @@ export type HealthProblemKind =
   | 'camera_onvif_auth'
   | 'lua'
   | 'lua_script'
+  | 'parameter_drift'
 
 export type HealthProblem = {
   kind: HealthProblemKind
@@ -57,6 +58,9 @@ const SEVERITY_RANK: Record<HealthProblem['severity'], number> = {
   info: 2,
 }
 
+/** Max drift lines in the problem detail before summarizing the rest. */
+const PARAMETER_DRIFT_DETAIL_LIMIT = 3
+
 /** MCM re-probes every second while down. */
 const MCM_PROBE_INTERVAL_MS = 1000
 
@@ -79,6 +83,9 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
   if (health) {
     const autopilot = autopilotProblem(health)
     if (autopilot) problems.push(autopilot)
+
+    const drift = parameterDriftProblem(health)
+    if (drift) problems.push(drift)
 
     if (health.autopilot === 'online' && health.lua_scripting_disabled) {
       problems.push({
@@ -193,6 +200,8 @@ export function recoveryTitle(
         return 'Camera ONVIF login restored'
       case 'lua_script':
         return 'Autopilot script updated'
+      case 'parameter_drift':
+        return 'Autopilot parameters restored'
       default:
         break
     }
@@ -238,6 +247,9 @@ export function recoveryMessage(
   }
   if (resolvedKinds.includes('lua_script')) {
     parts.push('Autopilot script is up to date')
+  }
+  if (resolvedKinds.includes('parameter_drift')) {
+    parts.push('Autopilot parameters match the saved configuration again')
   }
 
   if (parts.length === 0) {
@@ -313,6 +325,33 @@ function autopilotProblem(health: SystemHealth): HealthProblem | null {
       }
     default:
       return null
+  }
+}
+
+function parameterDriftProblem(health: SystemHealth): HealthProblem | null {
+  // Re-applying configuration writes parameters over MAVLink — nothing to do until the
+  // autopilot path is usable, and a hard outage already explains why focus/zoom stopped.
+  if (health.autopilot !== 'online') return null
+
+  const drifts = health.parameter_drifts
+  if (!drifts?.length) return null
+
+  const lines = drifts.slice(0, PARAMETER_DRIFT_DETAIL_LIMIT).map(
+    (drift) =>
+      `${drift.name}: saved ${drift.expected}, autopilot has ${drift.actual}`,
+  )
+  const remaining = drifts.length - lines.length
+  if (remaining > 0) {
+    lines.push(`…and ${remaining} more`)
+  }
+
+  return {
+    kind: 'parameter_drift',
+    severity: 'warning',
+    title: 'Autopilot parameters no longer match saved setup',
+    body: 'Another ground station, a parameter reset, or a loaded parameter file changed values on the autopilot. Focus and zoom will not follow the camera until you re-apply the configuration.',
+    detail: lines.join('\n'),
+    showGoToSetup: true,
   }
 }
 

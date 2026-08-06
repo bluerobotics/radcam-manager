@@ -437,6 +437,76 @@ export function runHealthDialogSelfCheck(): void {
     throw new Error(`healthDialog: expected unreachable only, got ${streamErrorWhileUnreachable.map((p) => p.title).join(', ')}`)
   }
 
+  const driftInput = baseInput({
+    systemHealth: {
+      mcm: 'online',
+      cameras_discovered: 1,
+      expected_missing: [],
+      autopilot: 'online',
+      lua_scripting_disabled: false,
+      lua_script: 'ok',
+      parameter_drifts: [
+        { name: 'SERVO1_FUNCTION', expected: 33, actual: 0 },
+        { name: 'SERVO2_FUNCTION', expected: 34, actual: 0 },
+      ],
+      diagnostics: {
+        mavlink_reconnects: 0,
+        mavlink_frames_lagged: 0,
+        state_events_lagged: 0,
+        mcm_consecutive_failures: 0,
+        script_reloads: 0,
+        backend_version: 'test',
+      },
+    },
+  })
+  const driftProblem = collectHealthProblems(driftInput).find(
+    (problem) => problem.kind === 'parameter_drift',
+  )
+  if (!driftProblem?.showGoToSetup) {
+    throw new Error('healthDialog: parameter drift must offer hardware setup')
+  }
+  if (driftProblem.severity !== 'warning') {
+    throw new Error(`healthDialog: parameter drift must be warning, got ${driftProblem.severity}`)
+  }
+  if (!driftProblem.detail?.includes('SERVO1_FUNCTION: saved 33, autopilot has 0')) {
+    throw new Error(`healthDialog: bad drift detail: ${driftProblem.detail}`)
+  }
+  if (!evaluate(driftInput).degraded) {
+    throw new Error('healthDialog: parameter drift must be degraded')
+  }
+
+  const manyDrifts = Array.from({ length: 5 }, (_, index) => ({
+    name: `SERVO${index + 1}_FUNCTION`,
+    expected: 33 + index,
+    actual: 0,
+  }))
+  const cappedDetail = collectHealthProblems(
+    baseInput({
+      systemHealth: { ...driftInput.systemHealth!, parameter_drifts: manyDrifts },
+    }),
+  ).find((problem) => problem.kind === 'parameter_drift')?.detail
+  if (!cappedDetail?.includes('…and 2 more')) {
+    throw new Error(`healthDialog: expected capped drift detail, got ${cappedDetail}`)
+  }
+
+  const driftWhileOffline = collectHealthProblems(
+    baseInput({
+      systemHealth: { ...driftInput.systemHealth!, autopilot: 'mavlink_down' },
+    }),
+  )
+  if (driftWhileOffline.some((problem) => problem.kind === 'parameter_drift')) {
+    throw new Error('healthDialog: parameter drift must stay hidden while autopilot is down')
+  }
+
+  if (recoveryTitle(['parameter_drift'], false) !== 'Autopilot parameters restored') {
+    throw new Error(`healthDialog: bad parameter_drift recovery title: ${recoveryTitle(['parameter_drift'], false)}`)
+  }
+  if (
+    recoveryMessage(['parameter_drift'], 0, false)
+    !== 'Autopilot parameters match the saved configuration again. Click Close to continue.'
+  ) {
+    throw new Error(`healthDialog: bad parameter_drift recovery line: ${recoveryMessage(['parameter_drift'], 0, false)}`)
+  }
 
   const suppressed = collectHealthProblems(
     baseInput({
