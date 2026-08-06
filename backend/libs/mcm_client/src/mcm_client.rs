@@ -15,6 +15,11 @@ use super::{Camera, Credentials, Stream};
 
 const KNOWN_RADCAM_HARDWARE: &[&str] = &["HW0100302", "HW20200610"];
 
+/// MCM ships as its own BlueOS extension on its own release cadence, so this must not
+/// be a caret range: `"0.2.4"` means `>=0.2.4, <0.3.0`, which locks every camera out
+/// the day MCM releases 0.3.0.
+const SUPPORTED_MCM_VERSIONS: &str = ">=0.2.4";
+
 pub struct MCMClient {
     pub address: SocketAddr,
     skip_hardware_check: bool,
@@ -27,7 +32,7 @@ impl MCMClient {
         let _info = Self::get_info(address).await?;
 
         let version = semver::Version::parse(&_info.version)?;
-        let supported = semver::VersionReq::parse("0.2.4")?;
+        let supported = semver::VersionReq::parse(SUPPORTED_MCM_VERSIONS)?;
 
         if !supported.matches(&version) {
             return Err(anyhow!(
@@ -235,4 +240,19 @@ fn radcams_from_onvif_devices(devices: Vec<OnvifDevice>, skip_hardware_check: bo
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_versions_are_not_capped_at_the_next_minor() {
+        let supported = semver::VersionReq::parse(SUPPORTED_MCM_VERSIONS).unwrap();
+
+        assert!(!supported.matches(&semver::Version::parse("0.2.3").unwrap()));
+        assert!(supported.matches(&semver::Version::parse("0.2.4").unwrap()));
+        assert!(supported.matches(&semver::Version::parse("0.3.0").unwrap()));
+        assert!(supported.matches(&semver::Version::parse("1.0.0").unwrap()));
+    }
 }
