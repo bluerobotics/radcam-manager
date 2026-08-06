@@ -239,6 +239,7 @@ impl MavlinkComponent {
         }
 
         *inner.parameters.write().await = parameters;
+        crate::manager::owned_parameters::establish_baseline_from_cache().await;
     }
 
     #[instrument(level = "debug", skip(inner))]
@@ -269,19 +270,33 @@ impl MavlinkComponent {
                 }
             };
 
-            inner
-                .parameters
-                .write()
-                .await
+            let under_apply = crate::manager::CONFIG_APPLY.try_lock().is_err();
+            if !under_apply {
+                for (camera_uuid, expected) in
+                    crate::manager::owned_parameters::expectations_for_param(&parameter.name)
+                {
+                    crate::health::observe_owned_parameter_value(
+                        &camera_uuid,
+                        &parameter.name,
+                        &parameter.value,
+                        &expected,
+                        encoding,
+                        crate::health::ObserveSource::LiveChange,
+                    );
+                }
+            }
+
+            let mut cache = inner.parameters.write().await;
+            cache
                 .entry(parameter.name.clone())
-                .and_modify(|v| {
-                    if v.value != parameter.value && v.name != "STAT_RUNTIME" {
+                .and_modify(|existing| {
+                    if existing.value != parameter.value && existing.name != "STAT_RUNTIME" {
                         debug!(
                             "Parameter {:?} updated from {:?} to {:?}",
-                            v.name, v.value, parameter.value,
+                            existing.name, existing.value, parameter.value,
                         );
                     }
-                    *v = parameter.clone()
+                    *existing = parameter.clone();
                 })
                 .or_insert_with(|| {
                     trace!("New parameter added: {parameter:?}");
