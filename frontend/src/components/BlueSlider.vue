@@ -5,6 +5,7 @@
       class="min-w-[130px]"
     >
       <label
+        :for="sliderId"
         class="text-start mr-6"
         :class="theme === 'dark' ? 'text-white' : 'text-black'"
       >{{ label }}</label>
@@ -54,6 +55,7 @@
               ref="editInput"
               v-model.number="editedDisplayValue"
               type="number"
+              :aria-label="label"
               :min="displayMin"
               :max="displayMax"
               :step="displayStep"
@@ -66,6 +68,7 @@
           </div>
         </div>
         <input
+          :id="sliderId"
           v-model.number="currentSliderValue"
           type="range"
           class="absolute inset-0 w-full h-full opacity-0"
@@ -105,7 +108,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount, computed } from 'vue'
+import { ref, watch, onBeforeUnmount, computed, useId } from 'vue'
 
 const props = defineProps<{
   /** Pill color override. */
@@ -149,6 +152,7 @@ const emit = defineEmits<{
 }>()
 
 const editInput = ref<HTMLInputElement | null>(null)
+const sliderId = useId()
 
 const decimalsFromStep = (step: number): number => {
   if (!Number.isFinite(step) || step <= 0) return 0
