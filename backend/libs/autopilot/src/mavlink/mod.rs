@@ -62,6 +62,7 @@ impl MavlinkComponent {
 
         Self::configure_parameter_encoding(inner.clone()).await;
         crate::health::set_syncing(true);
+        crate::manager::owned_parameters::rebuild().await;
         Self::update_all_params(inner.clone()).await;
         crate::health::set_syncing(false);
 
@@ -244,6 +245,7 @@ impl MavlinkComponent {
 
         Self::configure_parameter_encoding(self.inner.clone()).await;
         crate::health::set_syncing(true);
+        crate::manager::owned_parameters::rebuild().await;
         if tokio::time::timeout(
             tokio::time::Duration::from_secs(60),
             Self::update_all_params(self.inner.clone()),
