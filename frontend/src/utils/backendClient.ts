@@ -330,9 +330,14 @@ class BackendClient {
     }
 
     if (message.type === 'event') {
-      // Re-subscribe after MCM list arrives only when we still need state
-      // (boot race) or the last reject was unknown_camera — not on every list churn.
-      if (message.event === 'camera/list' && this.subscribedCameraUuid) {
+      // Re-subscribe only when we still need state (boot race) or the last reject was
+      // unknown_camera — not on every list churn. system/health is a trigger too: the
+      // backend also accepts a subscribe once the camera is merely configured, and that
+      // flip is carried by health (expected_missing), never by camera/list.
+      if (
+        (message.event === 'camera/list' || message.event === 'system/health')
+        && this.subscribedCameraUuid
+      ) {
         if (this.subscribeBlocked) {
           // Over capacity — wait for an explicit subscribeCamera (user action).
         } else if (!this.hasCameraState || this.subscribeNeedsRetry) {
@@ -343,7 +348,10 @@ class BackendClient {
         const body = message.body as { camera_uuid?: string; reason?: string } | null
         if (!body?.camera_uuid || body.camera_uuid === this.subscribedCameraUuid) {
           if (body?.reason === 'unknown_camera') {
-            // Retry from the next camera/list — do not immediate-resubscribe (storm).
+            // Retry from the next list/health push — do not immediate-resubscribe (storm).
+            if (!this.subscribeNeedsRetry) {
+              console.warn('Camera subscribe rejected: unknown_camera; retrying on next list/health')
+            }
             this.subscribeNeedsRetry = true
             this.subscribeBlocked = false
           } else if (body?.reason === 'camera_cap') {
