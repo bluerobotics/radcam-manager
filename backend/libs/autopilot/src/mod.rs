@@ -304,6 +304,42 @@ pub(crate) async fn control_inner(
 
             serde_json::to_value(config)?
         }
+        Action::ForgetActuatorsConfig => {
+            let camera_uuid = actuators_control.camera_uuid;
+            let had_entry = MANAGER
+                .get()
+                .context("Not available")?
+                .read()
+                .await
+                .settings
+                .actuators
+                .contains_key(&camera_uuid);
+            if had_entry {
+                let default_params = api::ActuatorsConfig::from(&CameraActuators::default());
+                manager::reboot_outside_apply(
+                    Box::pin(async { manager::Manager::reset_config(&camera_uuid).await }),
+                    Box::pin(async {
+                        manager::Manager::finalize_config_after_reboot(
+                            &camera_uuid,
+                            default_params.parameters.as_ref(),
+                        )
+                        .await
+                    }),
+                )
+                .await?;
+            }
+
+            let _apply = manager::CONFIG_APPLY.lock().await;
+            let removed = {
+                let mut manager = MANAGER.get().context("Not available")?.write().await;
+                manager.settings.actuators.shift_remove(&camera_uuid)
+            };
+            if removed.is_some() {
+                manager::Manager::save_actuators_settings().await?;
+                info!(%camera_uuid, "Forgot actuators configuration for camera");
+            }
+            serde_json::Value::Null
+        }
     };
 
     Ok(res)
