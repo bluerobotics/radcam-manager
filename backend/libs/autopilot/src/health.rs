@@ -47,6 +47,7 @@ struct Health {
     lua_scripting_disabled_logged: bool,
     lua_script: LuaScriptStatus,
     lua_script_failure: Option<String>,
+    script_reloads: u32,
     frames_lagged: u64,
     ever_online: bool,
     pending: Option<(AutopilotHealth, Instant)>,
@@ -85,6 +86,7 @@ impl Default for Health {
             lua_scripting_disabled_logged: false,
             lua_script: LuaScriptStatus::Unknown,
             lua_script_failure: None,
+            script_reloads: 0,
             frames_lagged: 0,
             ever_online: false,
             pending: None,
@@ -133,6 +135,15 @@ pub fn lua_script_status() -> (LuaScriptStatus, Option<String>) {
     }
 }
 
+/// Count a Lua reload triggered by the script no longer answering.
+///
+/// A reload that works is a working system, so this stays a support counter rather
+/// than a problem: flagging it would fire during normal actuator use.
+pub(crate) fn note_script_reload() {
+    let mut guard = health_state().lock().expect("health lock");
+    guard.script_reloads = guard.script_reloads.saturating_add(1);
+}
+
 /// Forget a reported scripting failure, after evidence that the script runs again.
 // No ensure_started(): called from the servo sample path, and the unit test in
 // manager/script.rs must not spawn background tasks.
@@ -166,6 +177,7 @@ pub fn diagnostics() -> Diagnostics {
     let mut diagnostics = Diagnostics {
         mavlink_reconnects: mavlink::reconnect_count(),
         mavlink_frames_lagged: guard.frames_lagged,
+        script_reloads: guard.script_reloads,
         backend_version: backend_version_string(),
         settings_error: settings::last_save_error(),
         ..Default::default()

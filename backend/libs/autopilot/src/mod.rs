@@ -214,6 +214,7 @@ pub(crate) async fn control_inner(
                         };
                         if needs_reload {
                             warn!("Attempting Lua script reload due to stale focus output");
+                            crate::health::note_script_reload();
                             if let Err(error) =
                                 crate::mavlink::component()?.reload_lua_scripts(true).await
                             {
