@@ -135,6 +135,11 @@ pub struct Diagnostics {
     pub last_servo_age_ms: Option<u64>,
     /// Backend version and git sha, for the support blob.
     pub backend_version: String,
+    /// Why the last settings write failed, e.g. a read-only filesystem or a full disk.
+    /// `None` when the last write succeeded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub settings_error: Option<String>,
 }
 
 /// Backend-wide health, pushed on the `system/health` WebSocket event and
@@ -446,6 +451,7 @@ mod tests {
         let json: serde_json::Value = serde_json::to_value(&health).unwrap();
         assert!(json.get("mcm_detail").is_none());
         assert!(json.get("autopilot_detail").is_none());
+        assert!(json["diagnostics"].get("settings_error").is_none());
 
         let ui = CameraUiState::default();
         let ui_json: serde_json::Value = serde_json::to_value(&ui).unwrap();
