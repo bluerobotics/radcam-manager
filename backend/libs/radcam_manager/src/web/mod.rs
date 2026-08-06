@@ -11,6 +11,7 @@ use tracing::*;
 
 pub(crate) mod camera_state;
 pub(crate) mod camera_ui;
+pub(crate) mod connectivity;
 pub(crate) mod control_bridge;
 pub(crate) mod one_push_awb;
 pub mod routes;

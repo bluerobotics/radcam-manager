@@ -9,7 +9,7 @@ use std::{
 
 use autopilot::api::{Action as AutopilotAction, ActuatorsConfig};
 use once_cell::sync::OnceCell;
-use radcam_api::{CameraUiState, OnePushAwbStatus, UiDismissField};
+use radcam_api::{CameraConnectivity, CameraUiState, OnePushAwbStatus, UiDismissField};
 use radcam_commands::Action as CameraAction;
 use tokio::task::JoinHandle;
 use tracing::*;
@@ -66,6 +66,21 @@ pub(crate) fn set_one_push_awb(camera_uuid: Uuid, status: Option<OnePushAwbStatu
         let mut lock = ui().lock().unwrap();
         let entry = lock.entry(camera_uuid).or_insert_with(new_entry);
         entry.state.one_push_awb = status;
+        entry.state.clone()
+    };
+    camera_state::emit_ui(camera_uuid, state);
+}
+
+/// Set or clear the shared connectivity state for all clients.
+#[instrument(level = "debug")]
+pub(crate) fn set_connectivity(camera_uuid: Uuid, connectivity: CameraConnectivity) {
+    let state = {
+        let mut lock = ui().lock().unwrap();
+        let entry = lock.entry(camera_uuid).or_insert_with(new_entry);
+        if entry.state.connectivity == connectivity {
+            return;
+        }
+        entry.state.connectivity = connectivity;
         entry.state.clone()
     };
     camera_state::emit_ui(camera_uuid, state);
@@ -387,6 +402,7 @@ fn loading_message_for_autopilot_action(action: &AutopilotAction) -> Option<&'st
         AutopilotAction::SetActuatorsConfig(config) if is_full_hardware_setup(config) => {
             Some("Applying custom hardware setup…")
         }
+        AutopilotAction::ForgetActuatorsConfig => Some("Forgetting camera…"),
         _ => None,
     }
 }
