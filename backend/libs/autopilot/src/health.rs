@@ -1,0 +1,848 @@
+use std::{
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant}, // std::time::Instant: sync health_state under Mutex
+};
+
+use ::mavlink::ardupilotmega::{MavComponent, MavMessage};
+use once_cell::sync::OnceCell;
+use radcam_api::{AutopilotHealth, Diagnostics, LuaScriptStatus};
+use tokio::sync::{Notify, broadcast};
+use tracing::*;
+
+use crate::{
+    actuators_watch::{self, ServoStreamHealth},
+    mavlink::{self, Message},
+    parameters::ParamType,
+};
+
+const FRAME_SILENCE: Duration = Duration::from_secs(5);
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
+const SERVO_SILENCE: Duration = Duration::from_secs(10);
+/// One exhausted command RPC (already multi-second) is enough evidence.
+const RPC_FAILURES_TO_UNRESPONSIVE: u8 = 1;
+const DEGRADED_GRACE: Duration = Duration::from_secs(1);
+
+static HEALTH: OnceCell<Mutex<Health>> = OnceCell::new();
+static HEALTH_TX: OnceCell<broadcast::Sender<()>> = OnceCell::new();
+static BACKEND_VERSION: OnceCell<String> = OnceCell::new();
+static STARTED: AtomicBool = AtomicBool::new(false);
+static CLASSIFIER_NOTIFY: OnceCell<Notify> = OnceCell::new();
+
+struct Health {
+    state: AutopilotHealth,
+    detail: Option<String>,
+    endpoint_ok: Option<bool>,
+    endpoint_detail: Option<String>,
+    last_frame_at: Option<Instant>,
+    last_heartbeat_at: Option<Instant>,
+    consecutive_rpc_failures: u8,
+    last_rpc_error: Option<String>,
+    servo_stalled: bool,
+    syncing: bool,
+    rebooting: bool,
+    lua_scripting_disabled: bool,
+    lua_scripting_disabled_logged: bool,
+    lua_script: LuaScriptStatus,
+    frames_lagged: u64,
+    ever_online: bool,
+    pending: Option<(AutopilotHealth, Instant)>,
+}
+
+/// Snapshot inputs for [`classify_health`].
+pub(crate) struct ClassifyHealthInput<'a> {
+    pub endpoint_ok: Option<bool>,
+    pub endpoint_detail: Option<&'a str>,
+    pub mavlink_up: bool,
+    pub frame_age: Option<Duration>,
+    pub heartbeat_age: Option<Duration>,
+    pub servo_age: Option<Duration>,
+    pub rpc_failures: u8,
+    pub servo_stalled: bool,
+    pub last_rpc_error: Option<&'a str>,
+    pub syncing: bool,
+    pub servo_detail: &'a str,
+}
+
+impl Default for Health {
+    fn default() -> Self {
+        Self {
+            state: AutopilotHealth::Unknown,
+            detail: None,
+            endpoint_ok: None,
+            endpoint_detail: None,
+            last_frame_at: None,
+            last_heartbeat_at: None,
+            consecutive_rpc_failures: 0,
+            last_rpc_error: None,
+            servo_stalled: false,
+            syncing: false,
+            rebooting: false,
+            lua_scripting_disabled: false,
+            lua_scripting_disabled_logged: false,
+            lua_script: LuaScriptStatus::Unknown,
+            frames_lagged: 0,
+            ever_online: false,
+            pending: None,
+        }
+    }
+}
+
+/// Current autopilot health and detail text for non-`Online` states.
+pub fn health() -> (AutopilotHealth, Option<String>) {
+    ensure_started();
+    let guard = health_state().lock().expect("health lock");
+    (guard.state, guard.detail.clone())
+}
+
+/// True when BlueOS may have lost our MAVLink endpoint and we should re-create it.
+pub fn needs_mavlink_endpoint_ensure() -> bool {
+    ensure_started();
+    let guard = health_state().lock().expect("health lock");
+    match guard.state {
+        AutopilotHealth::EndpointSetupFailed => true,
+        AutopilotHealth::MavlinkDown => guard.ever_online || guard.last_frame_at.is_some(),
+        _ => false,
+    }
+}
+
+/// True when `SCR_ENABLE` is known and not 1.
+pub fn lua_scripting_disabled() -> bool {
+    ensure_started();
+    health_state()
+        .lock()
+        .expect("health lock")
+        .lua_scripting_disabled
+}
+
+/// Whether the installed Lua script matches the current configuration.
+pub fn lua_script_status() -> LuaScriptStatus {
+    ensure_started();
+    health_state().lock().expect("health lock").lua_script
+}
+
+/// Re-read the installed Lua script and publish the result.
+///
+/// Call it right after the script file is written or removed: without it the change
+/// is only picked up by the next classifier tick, so the UI keeps showing the stale
+/// status until after the action it just ran has finished.
+// No ensure_started(): callers are already on the classifier/manager path, and the unit test in manager/script.rs must not spawn background tasks.
+pub(crate) async fn refresh_lua_script_status() {
+    let status = crate::manager::Manager::script_status().await;
+    if store_lua_script_status(status) {
+        notify_health();
+    }
+}
+
+/// Support-oriented counters for the autopilot path.
+pub fn diagnostics() -> Diagnostics {
+    ensure_started();
+    let guard = health_state().lock().expect("health lock");
+    let servo = actuators_watch::stream_health();
+
+    let mut diagnostics = Diagnostics {
+        mavlink_reconnects: mavlink::reconnect_count(),
+        mavlink_frames_lagged: guard.frames_lagged,
+        backend_version: backend_version_string(),
+        ..Default::default()
+    };
+
+    diagnostics.last_frame_age_ms = guard
+        .last_frame_at
+        .map(|at| at.elapsed().as_millis() as u64);
+    diagnostics.last_heartbeat_age_ms = guard
+        .last_heartbeat_at
+        .map(|at| at.elapsed().as_millis() as u64);
+    diagnostics.last_servo_age_ms = servo
+        .last_sample_at
+        .map(|at| at.elapsed().as_millis() as u64);
+
+    drop(guard);
+
+    if let Ok(component) = mavlink::component()
+        && let Ok(encoding) = component.inner.encoding.try_read()
+    {
+        diagnostics.param_encoding = Some(format!("{encoding:?}"));
+    }
+
+    diagnostics
+}
+
+/// Set the backend version string reported in health diagnostics (from the bin crate).
+pub fn set_backend_version(version: String) {
+    // OnceLock: a second set is a deliberate no-op.
+    let _ = BACKEND_VERSION.set(version);
+}
+
+fn backend_version_string() -> String {
+    BACKEND_VERSION
+        .get()
+        .cloned()
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
+/// Subscribe to autopilot health change notifications.
+pub fn subscribe_health() -> broadcast::Receiver<()> {
+    ensure_started();
+    health_sender().subscribe()
+}
+
+/// Report the outcome of a BlueOS MAVLink endpoint setup attempt.
+#[instrument(level = "debug", skip_all)]
+pub fn report_endpoint_setup(ok: bool, detail: Option<String>) {
+    ensure_started();
+    let mut guard = health_state().lock().expect("health lock");
+    guard.endpoint_ok = Some(ok);
+    guard.endpoint_detail = detail;
+}
+
+/// Record a successful MAVLink command RPC.
+#[instrument(level = "debug", skip_all)]
+pub fn rpc_ok() {
+    ensure_started();
+    let mut guard = health_state().lock().expect("health lock");
+    guard.consecutive_rpc_failures = 0;
+    drop(guard);
+    run_classifier();
+}
+
+/// Record a MAVLink command RPC that exhausted retries or failed after ACK.
+#[instrument(level = "debug", skip_all)]
+pub fn rpc_failed(reason: &str) {
+    ensure_started();
+    let mut guard = health_state().lock().expect("health lock");
+    guard.consecutive_rpc_failures = guard.consecutive_rpc_failures.saturating_add(1);
+    guard.last_rpc_error = Some(reason.to_string());
+    drop(guard);
+    run_classifier();
+}
+
+/// Mark parameter sync in progress.
+#[instrument(level = "debug", skip_all)]
+pub fn set_syncing(syncing: bool) {
+    ensure_started();
+    let mut guard = health_state().lock().expect("health lock");
+    guard.syncing = syncing;
+    drop(guard);
+    run_classifier();
+}
+
+/// Suppress transient degradation while the autopilot reboots.
+#[instrument(level = "debug", skip_all)]
+pub fn set_rebooting(rebooting: bool) {
+    ensure_started();
+    let mut guard = health_state().lock().expect("health lock");
+    guard.rebooting = rebooting;
+    if rebooting {
+        guard.pending = None;
+    } else {
+        drop(guard);
+        run_classifier();
+    }
+}
+
+fn health_state() -> &'static Mutex<Health> {
+    HEALTH.get_or_init(|| Mutex::new(Health::default()))
+}
+
+fn health_sender() -> &'static broadcast::Sender<()> {
+    HEALTH_TX.get_or_init(|| {
+        let (sender, _) = broadcast::channel(16);
+        sender
+    })
+}
+
+fn notify_health() {
+    if let Err(error) = health_sender().send(()) {
+        debug!("No autopilot health subscribers: {error}");
+    }
+}
+
+/// Caches `status`, returning whether it differed from the cached one.
+fn store_lua_script_status(status: LuaScriptStatus) -> bool {
+    let mut guard = health_state().lock().expect("health lock");
+    if guard.lua_script == status {
+        return false;
+    }
+
+    if !matches!(status, LuaScriptStatus::Ok | LuaScriptStatus::Unknown) {
+        warn!("Autopilot Lua script is {status:?}");
+    }
+    guard.lua_script = status;
+    true
+}
+
+fn ensure_started() {
+    if STARTED.load(Ordering::Acquire) {
+        return;
+    }
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    if STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+
+    tokio::spawn(frame_drain_task());
+    tokio::spawn(classifier_task());
+}
+
+#[instrument(level = "debug", skip_all)]
+async fn frame_drain_task() {
+    loop {
+        let Ok(component) = mavlink::component() else {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        };
+
+        let target_system = component.system_id();
+        let target_component = MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
+        let mut receiver = component.get_receiver().await;
+
+        loop {
+            match receiver.recv().await {
+                Ok(Message::Received((header, message))) => {
+                    stamp_frame();
+                    // Any HEARTBEAT from the autopilot component proves it is running.
+                    // Do not require ACTIVE/STANDBY: ArduSub/ArduPilot often report
+                    // CRITICAL/CALIBRATING/etc while still fully operational, and that
+                    // filter left health stuck on AutopilotOffline despite live SERVO.
+                    if header.system_id == target_system
+                        && header.component_id == target_component
+                        && matches!(message, MavMessage::HEARTBEAT(_))
+                    {
+                        stamp_heartbeat();
+                    }
+                }
+                Ok(Message::ToBeSent(_)) => {}
+                Err(broadcast::error::RecvError::Lagged(samples)) => {
+                    let mut guard = health_state().lock().expect("health lock");
+                    guard.last_frame_at = Some(Instant::now());
+                    guard.frames_lagged += samples;
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn stamp_frame() {
+    let mut guard = health_state().lock().expect("health lock");
+    guard.last_frame_at = Some(Instant::now());
+}
+
+fn stamp_heartbeat() {
+    let mut guard = health_state().lock().expect("health lock");
+    guard.last_heartbeat_at = Some(Instant::now());
+}
+
+fn classifier_notify() -> &'static Notify {
+    CLASSIFIER_NOTIFY.get_or_init(Notify::new)
+}
+
+async fn classifier_task() {
+    let notify = classifier_notify();
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {}
+            () = notify.notified() => {}
+        }
+        run_classifier_async().await;
+    }
+}
+
+fn run_classifier() {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        classifier_notify().notify_one();
+    }
+}
+
+#[instrument(level = "debug", skip_all)]
+async fn run_classifier_async() {
+    let lua_disabled = if let Ok(component) = mavlink::component() {
+        let params = component.inner.parameters.read().await;
+        scr_enable_disabled(&params)
+    } else {
+        false
+    };
+
+    let mut guard = health_state().lock().expect("health lock");
+
+    if guard.rebooting {
+        return;
+    }
+
+    let stream = actuators_watch::stream_health();
+    let now = Instant::now();
+    guard.servo_stalled = servo_stalled(&stream, now);
+
+    if lua_disabled && !guard.lua_scripting_disabled_logged {
+        warn!("Lua scripting disabled (SCR_ENABLE is not 1)");
+        guard.lua_scripting_disabled_logged = true;
+    } else if !lua_disabled {
+        guard.lua_scripting_disabled_logged = false;
+    }
+    guard.lua_scripting_disabled = lua_disabled;
+
+    apply_classifier(&mut guard, &stream);
+}
+
+fn scr_enable_disabled(params: &indexmap::IndexMap<String, crate::parameters::Parameter>) -> bool {
+    let Some(param) = params.get("SCR_ENABLE") else {
+        return false;
+    };
+
+    match param.value {
+        ParamType::REAL32(value) => value != 1.0,
+        ParamType::REAL64(value) => value != 1.0,
+        ParamType::UINT8(value) => value != 1,
+        ParamType::INT8(value) => value != 1,
+        ParamType::UINT16(value) => value != 1,
+        ParamType::INT16(value) => value != 1,
+        ParamType::UINT32(value) => value != 1,
+        ParamType::INT32(value) => value != 1,
+        ParamType::UINT64(value) => value != 1,
+        ParamType::INT64(value) => value != 1,
+    }
+}
+
+fn apply_classifier(guard: &mut Health, stream: &ServoStreamHealth) {
+    if guard.rebooting {
+        return;
+    }
+
+    let mavlink_up = mavlink::component().is_ok();
+    let candidate = classify_health(ClassifyHealthInput {
+        endpoint_ok: guard.endpoint_ok,
+        endpoint_detail: guard.endpoint_detail.as_deref(),
+        mavlink_up,
+        frame_age: guard.last_frame_at.map(|at| at.elapsed()),
+        heartbeat_age: guard.last_heartbeat_at.map(|at| at.elapsed()),
+        servo_age: stream.last_sample_at.map(|at| at.elapsed()),
+        rpc_failures: guard.consecutive_rpc_failures,
+        servo_stalled: guard.servo_stalled,
+        last_rpc_error: guard.last_rpc_error.as_deref(),
+        syncing: guard.syncing,
+        servo_detail: &stream_detail(stream),
+    });
+
+    if candidate.0 == guard.state {
+        guard.pending = None;
+        return;
+    }
+
+    if candidate.0 == AutopilotHealth::Online {
+        publish_transition(guard, candidate);
+        return;
+    }
+
+    if !needs_debounce(candidate.0) {
+        publish_transition(guard, candidate);
+        return;
+    }
+
+    let now = Instant::now();
+    match guard.pending {
+        Some((pending_state, first_seen)) if pending_state == candidate.0 => {
+            if now.duration_since(first_seen) >= DEGRADED_GRACE {
+                publish_transition(guard, candidate);
+            }
+        }
+        _ => {
+            guard.pending = Some((candidate.0, now));
+        }
+    }
+}
+
+fn needs_debounce(state: AutopilotHealth) -> bool {
+    matches!(
+        state,
+        AutopilotHealth::EndpointSetupFailed
+            | AutopilotHealth::MavlinkDown
+            | AutopilotHealth::AutopilotOffline
+            | AutopilotHealth::Unresponsive
+    )
+}
+
+fn publish_transition(guard: &mut Health, candidate: (AutopilotHealth, Option<String>)) {
+    let from = guard.state;
+    let to = candidate.0;
+    if from != to {
+        if to == AutopilotHealth::Online || from == AutopilotHealth::Online {
+            info!(?from, ?to, "Autopilot health recovered");
+        } else if matches!(to, AutopilotHealth::Syncing) {
+            info!(?from, ?to, "Autopilot health syncing");
+        } else {
+            let evidence = candidate.1.as_deref().unwrap_or("unknown");
+            warn!(?from, ?to, evidence, "Autopilot health degraded");
+        }
+    }
+    if candidate.0 == AutopilotHealth::Online {
+        guard.ever_online = true;
+    }
+    guard.state = candidate.0;
+    guard.detail = candidate.1;
+    guard.pending = None;
+    notify_health();
+}
+
+/// Derive autopilot health from a [`ClassifyHealthInput`] snapshot.
+pub(crate) fn classify_health(input: ClassifyHealthInput<'_>) -> (AutopilotHealth, Option<String>) {
+    if input.endpoint_ok.is_none() {
+        return (AutopilotHealth::Unknown, None);
+    }
+
+    if input.endpoint_ok == Some(false) {
+        return (
+            AutopilotHealth::EndpointSetupFailed,
+            input.endpoint_detail.map(str::to_string),
+        );
+    }
+
+    if input.syncing {
+        return (AutopilotHealth::Syncing, None);
+    }
+
+    if !input.mavlink_up || frame_stale(input.frame_age) {
+        let detail = input.frame_age.map_or_else(
+            || "MAVLink component unavailable".to_string(),
+            |age| format!("no MAVLink frame for {:.1}s", age.as_secs_f32()),
+        );
+        return (AutopilotHealth::MavlinkDown, Some(detail));
+    }
+
+    if input.frame_age.is_none() {
+        return (AutopilotHealth::Unknown, None);
+    }
+
+    // Autopilot is "running" if it heartbeats OR still emits SERVO_OUTPUT_RAW.
+    // Heartbeat-only was too strict: some links/status values never matched.
+    if input.frame_age.is_some()
+        && heartbeat_stale(input.heartbeat_age)
+        && !autopilot_servo_fresh(input.servo_age)
+    {
+        let detail = input.heartbeat_age.map_or_else(
+            || "no autopilot heartbeat received".to_string(),
+            |age| format!("no autopilot heartbeat for {:.1}s", age.as_secs_f32()),
+        );
+        return (AutopilotHealth::AutopilotOffline, Some(detail));
+    }
+
+    if input.rpc_failures >= RPC_FAILURES_TO_UNRESPONSIVE || input.servo_stalled {
+        let detail = if input.servo_stalled {
+            Some(input.servo_detail.to_string())
+        } else {
+            input.last_rpc_error.map(str::to_string)
+        };
+        return (AutopilotHealth::Unresponsive, detail);
+    }
+
+    (AutopilotHealth::Online, None)
+}
+
+fn frame_stale(frame_age: Option<Duration>) -> bool {
+    matches!(frame_age, Some(age) if age > FRAME_SILENCE)
+}
+
+fn heartbeat_stale(heartbeat_age: Option<Duration>) -> bool {
+    match heartbeat_age {
+        None => true,
+        Some(age) => age > HEARTBEAT_TIMEOUT,
+    }
+}
+
+fn autopilot_servo_fresh(servo_age: Option<Duration>) -> bool {
+    matches!(servo_age, Some(age) if age <= HEARTBEAT_TIMEOUT)
+}
+
+pub(crate) fn servo_stalled(stream: &ServoStreamHealth, now: Instant) -> bool {
+    if stream.interest == 0 {
+        return false;
+    }
+
+    let Some(request_at) = stream.last_request_at else {
+        return false;
+    };
+
+    if now.duration_since(request_at) < SERVO_SILENCE {
+        return false;
+    }
+
+    match stream.last_sample_at {
+        None => true,
+        Some(sample_at) => now.duration_since(sample_at) >= SERVO_SILENCE,
+    }
+}
+
+fn stream_detail(stream: &ServoStreamHealth) -> String {
+    let request_age = stream
+        .last_request_at
+        .map(|at| at.elapsed().as_secs_f32())
+        .unwrap_or(0.0);
+    let sample_age = stream.last_sample_at.map(|at| at.elapsed().as_secs_f32());
+    match sample_age {
+        Some(age) => format!(
+            "SERVO_OUTPUT_RAW stale for {age:.0}s with interest and a request {request_age:.0}s ago"
+        ),
+        None => format!(
+            "SERVO_OUTPUT_RAW not received with interest and a request {request_age:.0}s ago"
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Resets in-process autopilot health for unit tests. The process-lifetime
+    /// [`OnceCell`] is not cleared — tests share globals and must reset observable
+    /// state or use disjoint inputs (see S-T6).
+    fn health_reset() {
+        let mut guard = health_state().lock().expect("health lock");
+        *guard = Health::default();
+    }
+
+    fn classify(input: ClassifyHealthInput<'_>) -> AutopilotHealth {
+        classify_health(input).0
+    }
+
+    fn base_classify_input(servo_detail: &'static str) -> ClassifyHealthInput<'static> {
+        ClassifyHealthInput {
+            endpoint_ok: Some(true),
+            endpoint_detail: None,
+            mavlink_up: true,
+            frame_age: Some(Duration::from_secs(1)),
+            heartbeat_age: Some(Duration::from_secs(1)),
+            servo_age: None,
+            rpc_failures: 0,
+            servo_stalled: false,
+            last_rpc_error: None,
+            syncing: false,
+            servo_detail,
+        }
+    }
+
+    #[test]
+    fn classifier_is_outermost_first() {
+        let fresh = Some(Duration::from_secs(1));
+        let stale = Some(Duration::from_secs(10));
+        let servo_detail = "SERVO_OUTPUT_RAW stale";
+        let base = || base_classify_input(servo_detail);
+
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                endpoint_ok: None,
+                ..base()
+            }),
+            AutopilotHealth::Unknown
+        );
+        assert_eq!(
+            classify_health(ClassifyHealthInput {
+                endpoint_ok: Some(false),
+                endpoint_detail: Some("endpoint refused"),
+                ..base()
+            }),
+            (
+                AutopilotHealth::EndpointSetupFailed,
+                Some("endpoint refused".to_string())
+            )
+        );
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                frame_age: stale,
+                ..base()
+            }),
+            AutopilotHealth::MavlinkDown
+        );
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                frame_age: None,
+                ..base()
+            }),
+            AutopilotHealth::Unknown,
+            "never-seen frames are not MavlinkDown"
+        );
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                heartbeat_age: stale,
+                ..base()
+            }),
+            AutopilotHealth::AutopilotOffline
+        );
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                heartbeat_age: None,
+                servo_age: fresh,
+                ..base()
+            }),
+            AutopilotHealth::Online,
+            "fresh SERVO_OUTPUT_RAW proves the autopilot is running even without heartbeat"
+        );
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                rpc_failures: RPC_FAILURES_TO_UNRESPONSIVE,
+                last_rpc_error: Some("rpc timeout"),
+                ..base()
+            }),
+            AutopilotHealth::Unresponsive
+        );
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                servo_stalled: true,
+                ..base()
+            }),
+            AutopilotHealth::Unresponsive
+        );
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                syncing: true,
+                ..base()
+            }),
+            AutopilotHealth::Syncing
+        );
+        assert_eq!(classify(base()), AutopilotHealth::Online);
+    }
+
+    #[test]
+    fn syncing_beats_stale_frames() {
+        let stale = Some(Duration::from_secs(10));
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                endpoint_ok: Some(true),
+                endpoint_detail: None,
+                mavlink_up: true,
+                frame_age: stale,
+                heartbeat_age: stale,
+                servo_age: None,
+                rpc_failures: 0,
+                servo_stalled: false,
+                last_rpc_error: None,
+                syncing: true,
+                servo_detail: "SERVO_OUTPUT_RAW stale",
+            }),
+            AutopilotHealth::Syncing
+        );
+    }
+
+    #[test]
+    fn scr_enable_disabled_table() {
+        use crate::parameters::Parameter;
+
+        let mut params = indexmap::IndexMap::new();
+        assert!(!scr_enable_disabled(&params));
+
+        params.insert(
+            "SCR_ENABLE".to_string(),
+            Parameter {
+                name: "SCR_ENABLE".to_string(),
+                value: ParamType::UINT32(1),
+            },
+        );
+        assert!(!scr_enable_disabled(&params));
+
+        params.insert(
+            "SCR_ENABLE".to_string(),
+            Parameter {
+                name: "SCR_ENABLE".to_string(),
+                value: ParamType::INT32(0),
+            },
+        );
+        assert!(scr_enable_disabled(&params));
+    }
+
+    #[test]
+    fn servo_stall_needs_a_prior_request() {
+        let now = Instant::now();
+        let stream = ServoStreamHealth {
+            interest: 1,
+            last_request_at: None,
+            last_sample_at: None,
+        };
+        assert!(!servo_stalled(&stream, now));
+
+        let candidate = classify_health(ClassifyHealthInput {
+            endpoint_ok: Some(true),
+            endpoint_detail: None,
+            mavlink_up: true,
+            frame_age: Some(Duration::from_secs(1)),
+            heartbeat_age: Some(Duration::from_secs(1)),
+            servo_age: None,
+            rpc_failures: 0,
+            servo_stalled: servo_stalled(&stream, now),
+            last_rpc_error: None,
+            syncing: false,
+            servo_detail: "SERVO stale",
+        });
+        assert_eq!(candidate.0, AutopilotHealth::Online);
+    }
+
+    #[test]
+    fn rpc_ok_does_not_clear_servo_stall() {
+        let servo_detail = "SERVO_OUTPUT_RAW stale";
+        let fresh = Some(Duration::from_secs(1));
+
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                endpoint_ok: Some(true),
+                endpoint_detail: None,
+                mavlink_up: true,
+                frame_age: fresh,
+                heartbeat_age: fresh,
+                servo_age: None,
+                rpc_failures: RPC_FAILURES_TO_UNRESPONSIVE,
+                servo_stalled: true,
+                last_rpc_error: Some("rpc timeout"),
+                syncing: false,
+                servo_detail,
+            }),
+            AutopilotHealth::Unresponsive
+        );
+
+        assert_eq!(
+            classify(ClassifyHealthInput {
+                endpoint_ok: Some(true),
+                endpoint_detail: None,
+                mavlink_up: true,
+                frame_age: fresh,
+                heartbeat_age: fresh,
+                servo_age: None,
+                rpc_failures: 0,
+                servo_stalled: true,
+                last_rpc_error: Some("rpc timeout"),
+                syncing: false,
+                servo_detail,
+            }),
+            AutopilotHealth::Unresponsive
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reboot_suppresses_degradation() {
+        health_reset();
+        {
+            let mut guard = health_state().lock().expect("health lock");
+            guard.endpoint_ok = Some(true);
+            guard.state = AutopilotHealth::Online;
+            guard.rebooting = true;
+            guard.last_frame_at = Some(Instant::now());
+            guard.last_heartbeat_at = Some(Instant::now());
+        }
+
+        tokio::time::advance(Duration::from_secs(30)).await;
+
+        let mut guard = health_state().lock().expect("health lock");
+        guard.last_frame_at = None;
+        guard.last_heartbeat_at = None;
+        let stream = actuators_watch::stream_health();
+        apply_classifier(&mut guard, &stream);
+        assert_eq!(guard.state, AutopilotHealth::Online);
+    }
+}

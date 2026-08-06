@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -10,6 +10,8 @@ use anyhow::Result;
 use mavlink::{AsyncMavConnection, MavHeader, ardupilotmega::MavMessage};
 use tokio::sync::{Notify, RwLock, broadcast};
 use tracing::*;
+
+static RECONNECTS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 pub struct Connection {
@@ -134,6 +136,7 @@ impl Connection {
         }
 
         *self.inner.write().await = Self::connect(&self.address).await;
+        RECONNECTS.fetch_add(1, Ordering::Relaxed);
 
         if let Some((header, message)) = self.reconnect_heartbeat.read().await.as_ref() {
             let conn = self.inner.read().await;
@@ -156,4 +159,9 @@ impl Connection {
     pub fn get_receiver(&self) -> broadcast::Receiver<Message> {
         self.sender.subscribe()
     }
+}
+
+/// Successful MAVLink reconnects since process start.
+pub fn reconnect_count() -> u64 {
+    RECONNECTS.load(Ordering::Relaxed)
 }

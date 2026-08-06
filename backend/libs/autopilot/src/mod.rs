@@ -1,5 +1,6 @@
 mod actuators_watch;
 pub mod api;
+mod health;
 mod manager;
 mod mavlink;
 pub mod parameters;
@@ -9,12 +10,18 @@ use anyhow::{Context, Result};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use tracing::*;
+use uuid::Uuid;
 
 pub use actuators_watch::{
     add_interest as add_actuators_state_interest, cache_is_fresh as actuators_cache_is_fresh,
     cached_actuators_state, interest_count as actuators_interest_count,
     remove_interest as remove_actuators_state_interest, shutdown as shutdown_actuators_stream,
     subscribe as subscribe_actuators_state,
+};
+pub use health::{
+    diagnostics, health, lua_script_status, lua_scripting_disabled, needs_mavlink_endpoint_ensure,
+    report_endpoint_setup, rpc_failed, rpc_ok, set_backend_version, set_rebooting, set_syncing,
+    subscribe_health,
 };
 pub use manager::{clear_saved_settings, init};
 
@@ -48,6 +55,22 @@ impl Default for CameraActuators {
 /// True when `message` (e.g. `format!("{error:?}")`) carries [`ACTUATORS_NOT_CONFIGURED`].
 pub fn error_indicates_actuators_not_configured(message: &str) -> bool {
     message.contains(ACTUATORS_NOT_CONFIGURED)
+}
+
+/// UUIDs of every camera with persisted actuator settings, i.e. cameras this
+/// install expects to find. Empty when the manager is not up yet.
+pub async fn configured_cameras() -> Vec<Uuid> {
+    match MANAGER.get() {
+        Some(manager) => manager
+            .read()
+            .await
+            .settings
+            .actuators
+            .keys()
+            .copied()
+            .collect(),
+        None => Vec::new(),
+    }
 }
 
 /// Shared entry point for REST and WebSocket autopilot control requests.
