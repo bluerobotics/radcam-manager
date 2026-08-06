@@ -5,8 +5,8 @@ import { backendClient } from './backendClient'
 /**
  * Bind a handler to `camera/state` for the selected camera.
  *
- * Wire subscribe/unsubscribe is owned by HomeView so tabs do not fight over
- * refcounts. `selectedCameraUuid` is part of the API for callers that close over it.
+ * backendClient fans out to multiple handlers; HomeView owns UI while tabs
+ * sync params. Subscribe/unsubscribe wire is owned by HomeView (refcounts).
  */
 export function useCameraState(
   _selectedCameraUuid: Ref<string | null>,
