@@ -106,6 +106,17 @@ pub struct ExpectedCamera {
     pub last_hostname: Option<String>,
 }
 
+/// One autopilot parameter whose live value no longer matches persisted actuator settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+pub struct ParameterDrift {
+    /// MAVLink parameter name, e.g. `SERVO1_FUNCTION`.
+    pub name: String,
+    /// Value RadCam Manager last wrote from the saved configuration.
+    pub expected: f32,
+    /// Value currently reported by the autopilot.
+    pub actual: f32,
+}
+
 /// Support-oriented counters. Never a primary signal; rendered only inside the
 /// collapsed "Health diagnostics" panel and included in the copy-to-clipboard blob.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, TS)]
@@ -177,6 +188,10 @@ pub struct SystemHealth {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lua_script_detail: Option<String>,
+    /// Autopilot parameters that no longer match persisted actuator settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parameter_drifts: Option<Vec<ParameterDrift>>,
     /// Support counters.
     pub diagnostics: Diagnostics,
 }
@@ -472,6 +487,7 @@ mod tests {
         let json: serde_json::Value = serde_json::to_value(&health).unwrap();
         assert!(json.get("mcm_detail").is_none());
         assert!(json.get("autopilot_detail").is_none());
+        assert!(json.get("parameter_drifts").is_none());
         assert!(json["diagnostics"].get("settings_error").is_none());
 
         let ui = CameraUiState::default();
