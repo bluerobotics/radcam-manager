@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use mlua::Lua;
+use radcam_api::LuaScriptStatus;
 use tera::Tera;
 use tracing::*;
 use uuid::Uuid;
@@ -30,10 +31,13 @@ impl Manager {
                 .actuators
                 .get(camera_uuid)
                 .context(crate::ACTUATORS_NOT_CONFIGURED)?;
-            let contents = generate_lua_script(camera_actuators)?;
-            validate_lua(&contents)?;
-            (contents, manager.autopilot_scripts_file.clone())
+
+            (
+                generate_lua_script(camera_actuators)?,
+                manager.autopilot_scripts_file.clone(),
+            )
         };
+        validate_lua(&contents)?;
 
         let path_obj = std::path::Path::new(&path);
         if let Some(parent_dir) = path_obj.parent() {
@@ -57,8 +61,49 @@ impl Manager {
             })?;
 
         info!("Wrote new lua script to {path:?}");
+        crate::health::refresh_lua_script_status().await;
         // Settings save is deferred to update_config finalize / ExportLuaScript caller.
         Ok(true)
+    }
+
+    /// Whether the script installed on the autopilot is the one this install expects.
+    ///
+    /// Compares file contents rather than asking the autopilot, so it also catches a
+    /// script left behind by an older manager version: the template stamps the version.
+    ///
+    /// ponytail: one script file backs every configured camera, so with more than one
+    /// configured this passes as soon as any of them matches. Upgrade path is one file
+    /// per camera, which the autopilot scripts folder already supports.
+    #[instrument(level = "debug")]
+    pub async fn script_status() -> LuaScriptStatus {
+        let Some(manager) = crate::manager::MANAGER.get() else {
+            return LuaScriptStatus::Unknown;
+        };
+
+        let (path, expected) = {
+            let manager = manager.read().await;
+            let expected: Vec<String> = manager
+                .settings
+                .actuators
+                .values()
+                .filter_map(|actuators| generate_lua_script(actuators).ok())
+                .collect();
+            (manager.autopilot_scripts_file.clone(), expected)
+        };
+
+        if expected.is_empty() {
+            return LuaScriptStatus::Unknown;
+        }
+
+        match tokio::fs::read_to_string(&path).await {
+            Ok(installed) if expected.contains(&installed) => LuaScriptStatus::Ok,
+            Ok(_) => LuaScriptStatus::Outdated,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => LuaScriptStatus::Missing,
+            Err(error) => {
+                warn!(?error, ?path, "Failed reading autopilot lua script");
+                LuaScriptStatus::Unknown
+            }
+        }
     }
 
     #[instrument(level = "debug")]
@@ -75,6 +120,8 @@ impl Manager {
                     .with_context(|| format!("Failed removing lua script at {path:?}"));
             }
         }
+
+        crate::health::refresh_lua_script_status().await;
 
         Ok(())
     }
@@ -496,6 +543,46 @@ fn validate_lua(script: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The only test touching `MANAGER`; `get_or_init` would silently keep another
+    /// test's path, so nothing else in this crate may initialize it.
+    #[tokio::test]
+    async fn script_status_tracks_the_installed_script() {
+        let dir = std::env::temp_dir().join(format!(
+            "radcam-manager-script-status-{}",
+            std::process::id()
+        ));
+        let path = dir.join("radcam.lua");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        // Pre-existing file from an interrupted run is fine to ignore.
+        let _ = tokio::fs::remove_file(&path).await;
+
+        let camera_uuid = Uuid::from_u128(0x5c81_0000_0000_0001);
+        crate::manager::MANAGER.get_or_init(|| {
+            tokio::sync::RwLock::new(Manager {
+                autopilot_scripts_file: path.to_string_lossy().into_owned(),
+                settings: crate::manager::State {
+                    actuators: [(camera_uuid, CameraActuators::default())]
+                        .into_iter()
+                        .collect(),
+                },
+                script_health: ScriptHealthTracker::default(),
+            })
+        });
+
+        assert_eq!(Manager::script_status().await, LuaScriptStatus::Missing);
+
+        Manager::export_script(&camera_uuid, true).await.unwrap();
+        assert_eq!(Manager::script_status().await, LuaScriptStatus::Ok);
+
+        tokio::fs::write(&path, "-- script from an older manager\n")
+            .await
+            .unwrap();
+        assert_eq!(Manager::script_status().await, LuaScriptStatus::Outdated);
+
+        tokio::fs::remove_file(&path).await.unwrap();
+    }
+
     #[test]
     fn test_script_generation() {
         let contents = generate_lua_script(&CameraActuators::default()).unwrap();
