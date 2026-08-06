@@ -1,9 +1,12 @@
 use anyhow::{Context, Result, anyhow};
-use chrono::Utc;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
-use tokio::{fs, io, sync::RwLock};
+use tokio::{
+    fs,
+    io::{self, AsyncWriteExt},
+    sync::RwLock,
+};
 use tokio_stream::{StreamExt, wrappers::ReadDirStream};
 use tracing::*;
 use uuid::Uuid;
@@ -39,24 +42,27 @@ impl Settings {
     }
 
     pub async fn from_path(path: &Path) -> Result<Self> {
-        async fn read_inner(path: &Path) -> Result<Settings> {
-            let contents = fs::read_to_string(path)
+        // Reading a backup must still leave the manager writing to the live file, or every
+        // later save lands on the backup — which, with a single fixed backup name, would
+        // copy that file over itself.
+        async fn read_inner(source: &Path, destination: &Path) -> Result<Settings> {
+            let contents = fs::read_to_string(source)
                 .await
-                .with_context(|| format!("Failed to read settings file: {path:?}"))?;
+                .with_context(|| format!("Failed to read settings file: {source:?}"))?;
 
             let raw: RawSettingsData = serde_json::from_str(&contents)
-                .with_context(|| format!("Failed to parse JSON from settings: {path:?}"))?;
+                .with_context(|| format!("Failed to parse JSON from settings: {source:?}"))?;
 
             let inner = match raw {
                 RawSettingsData::V1(v1) => Box::new(v1),
                 RawSettingsData::V0(v0) => {
-                    warn!("Migrating settings V0 to V1 from {path:?}");
+                    warn!("Migrating settings V0 to V1 from {source:?}");
                     Box::new(SettingsDataV1::from(v0))
                 }
             };
 
             let settings = Settings {
-                path: path.to_owned(),
+                path: destination.to_owned(),
                 inner,
             };
 
@@ -66,7 +72,7 @@ impl Settings {
         }
 
         if path.exists() {
-            return read_inner(path).await;
+            return read_inner(path, path).await;
         }
 
         let dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -99,7 +105,7 @@ impl Settings {
             .max_by_key(|(mod_time, _)| *mod_time)
             .map(|(_, path)| path)
         {
-            return read_inner(&latest_backup).await;
+            return read_inner(&latest_backup, path).await;
         }
 
         Err(anyhow!("No settings file or backup found"))
@@ -123,8 +129,7 @@ impl Settings {
                 return Ok(());
             }
 
-            let now = Utc::now().timestamp();
-            let backup_path = path.with_file_name(format!("settings.json.{now}.bak"));
+            let backup_path = path.with_file_name("settings.json.bak");
 
             fs::copy(path, &backup_path)
                 .await
@@ -132,9 +137,22 @@ impl Settings {
             debug!("Created settings backup: {backup_path:?}");
         }
 
-        fs::write(path, &new_contents)
+        // Rename is atomic within a filesystem, so an unclean power-down can lose the new
+        // settings but can never leave a torn file where they used to be.
+        let temporary_path = path.with_file_name("settings.json.tmp");
+        let mut file = fs::File::create(&temporary_path)
             .await
-            .with_context(|| format!("Failed to write settings to {settings_file:?}"))?;
+            .with_context(|| format!("Failed to create {temporary_path:?}"))?;
+        file.write_all(new_contents.as_bytes())
+            .await
+            .with_context(|| format!("Failed to write settings to {temporary_path:?}"))?;
+        file.sync_all()
+            .await
+            .with_context(|| format!("Failed to flush settings to {temporary_path:?}"))?;
+
+        fs::rename(&temporary_path, path)
+            .await
+            .with_context(|| format!("Failed to replace settings at {settings_file:?}"))?;
 
         debug!("Wrote new settings to {settings_file:?}:\n{:?}", self.inner);
 
@@ -252,3 +270,36 @@ pub async fn clear() -> Result<()> {
 //         Ok(())
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn repeated_saves_leave_one_backup_and_no_temporary() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("settings.json");
+
+        let settings = Settings::try_new(path.clone(), IndexMap::default()).await?;
+        let expected = fs::read_to_string(&path).await?;
+
+        // An unchanged file is skipped, so dirty the live copy to force a real write.
+        for revision in 0..3 {
+            fs::write(&path, format!("clobbered {revision}")).await?;
+            settings.save().await?;
+
+            assert_eq!(fs::read_to_string(&path).await?, expected);
+        }
+
+        let mut leftovers: Vec<String> = std::fs::read_dir(dir.path())?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "settings.json")
+            .collect();
+        leftovers.sort();
+
+        assert_eq!(leftovers, vec!["settings.json.bak".to_string()]);
+
+        Ok(())
+    }
+}
