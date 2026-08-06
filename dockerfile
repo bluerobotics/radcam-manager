@@ -26,7 +26,7 @@ LABEL version="0.3.0"
 EXPOSE 8080/tcp
 
 # Add docker configuration
-LABEL permissions="{ \"ExposedPorts\": { \"8080/tcp\": {} }, \"HostConfig\": { \"Binds\": [ \"/var/logs/blueos/extensions/radcam-manager:/logs\", \"/usr/blueos/extensions/radcam-manager:/app\", \"/root/.config/blueos/ardupilot-manager/firmware/scripts:/scripts\" ], \"ExtraHosts\": [ \"blueos.internal:host-gateway\" ], \"PortBindings\": { \"8080/tcp\": [ { \"HostPort\": \"\" } ] } } }"
+LABEL permissions="{ \"ExposedPorts\": { \"8080/tcp\": {} }, \"HostConfig\": { \"Binds\": [ \"/var/logs/blueos/extensions/radcam-manager:/logs\", \"/usr/blueos/extensions/radcam-manager:/app\", \"/root/.config/blueos/ardupilot-manager/firmware/scripts:/scripts\" ], \"ExtraHosts\": [ \"blueos.internal:host-gateway\" ], \"PortBindings\": { \"8080/tcp\": [ { \"HostPort\": \"\" } ] }, \"RestartPolicy\": { \"Name\": \"unless-stopped\" } } }"
 LABEL authors="[ { \"name\": \"João Antônio Cardoso\", \"email\": \"joao.maker@gmail.com\" } ]"
 LABEL company="{ \"about\": \"RadCam's official management interface\", \"name\": \"Blue Robotics\", \"email\": \"support@bluerobotics.com\" }"
 LABEL type="device-integration"
