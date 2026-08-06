@@ -90,7 +90,7 @@ class BackendClient {
   private intentionalClose = false
   private reconnectAttempt = 0
   private lastMessageAt = 0
-  private connectionState: ConnectionState = 'disconnected'
+  private connectionState: ConnectionState = 'connecting'
   private connectionStateHandlers = new Set<(state: ConnectionState, previousState: ConnectionState) => void>()
   private transportErrorHandlers = new Set<(message: string) => void>()
   private listenersRegistered = false
