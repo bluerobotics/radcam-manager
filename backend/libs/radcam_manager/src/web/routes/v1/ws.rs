@@ -640,6 +640,7 @@ fn health_without_volatile_ages(mut health: SystemHealth) -> SystemHealth {
     health.diagnostics.last_frame_age_ms = None;
     health.diagnostics.last_heartbeat_age_ms = None;
     health.diagnostics.last_servo_age_ms = None;
+    health.diagnostics.mcm_consecutive_failures = 0;
     health
 }
 
@@ -801,5 +802,55 @@ async fn handle_request(request: WsRequest) -> WsResponse {
             }
         }
         _ => WsResponse::new(id, 404, Value::String("not found".to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use radcam_api::{Diagnostics, McmHealth, SystemHealth};
+
+    use super::health_without_volatile_ages;
+
+    fn sample_health(mcm: McmHealth, failures: u32) -> SystemHealth {
+        SystemHealth {
+            mcm,
+            diagnostics: Diagnostics {
+                mcm_consecutive_failures: failures,
+                last_frame_age_ms: Some(100),
+                last_heartbeat_age_ms: Some(200),
+                last_servo_age_ms: Some(300),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn health_comparable_ignores_volatile_diagnostics() {
+        let a = sample_health(McmHealth::Down, 5);
+        let b = sample_health(McmHealth::Down, 99);
+        let mut c = sample_health(McmHealth::Down, 5);
+        c.diagnostics.last_frame_age_ms = Some(999);
+        c.diagnostics.last_heartbeat_age_ms = Some(888);
+        c.diagnostics.last_servo_age_ms = Some(777);
+
+        assert_eq!(
+            health_without_volatile_ages(a.clone()),
+            health_without_volatile_ages(b)
+        );
+        assert_eq!(
+            health_without_volatile_ages(a),
+            health_without_volatile_ages(c)
+        );
+    }
+
+    #[test]
+    fn health_comparable_detects_mcm_state_change() {
+        let online = sample_health(McmHealth::Online, 0);
+        let down = sample_health(McmHealth::Down, 0);
+        assert_ne!(
+            health_without_volatile_ages(online),
+            health_without_volatile_ages(down)
+        );
     }
 }
