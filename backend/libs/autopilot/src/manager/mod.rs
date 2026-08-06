@@ -345,6 +345,7 @@ pub async fn init(
     }
 
     if mavlink::component().is_ok() {
+        crate::health::refresh_lua_script_status().await;
         return Ok(());
     }
 
@@ -353,6 +354,8 @@ pub async fn init(
     mavlink::init_component(mavlink)?;
 
     crate::actuators_watch::start();
+
+    crate::health::refresh_lua_script_status().await;
 
     Ok(())
 }
