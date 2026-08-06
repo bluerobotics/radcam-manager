@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use tracing::*;
 use uuid::Uuid;
 
 use crate::{
     api, generate_update_channel_param_function,
     manager::Manager,
-    parameters::{ChannelFunction, ParamType},
+    parameters::{ActuatorsParameters, ChannelFunction, ParamType},
 };
 
 impl Manager {
@@ -74,7 +75,7 @@ impl Manager {
                 let mut param = mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
                 param.value.set_value(
-                    ParamType::INT16(ChannelFunction::CameraZoom as i16),
+                    ParamType::INT16(Self::zoom_channel_function() as i16),
                     encoding,
                 )?;
                 let new_value = param.value;
@@ -127,8 +128,24 @@ impl Manager {
         Ok(())
     }
 
+    fn zoom_channel_function() -> ChannelFunction {
+        ChannelFunction::CameraZoom
+    }
+
+    fn expect_owned_zoom_servo_function(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let channel = parameters.zoom_channel as u8;
+        map.insert(
+            format!("SERVO{channel}_FUNCTION"),
+            ParamType::INT16(Self::zoom_channel_function() as i16),
+        );
+    }
+
     generate_update_channel_param_function!(
         update_zoom_channel_min,
+        expect_owned_zoom_channel_min,
         zoom_channel_min,
         "SERVO",
         "MIN",
@@ -138,6 +155,7 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_zoom_channel_max,
+        expect_owned_zoom_channel_max,
         zoom_channel_max,
         "SERVO",
         "MAX",
@@ -147,10 +165,21 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_zoom_channel_trim,
+        expect_owned_zoom_channel_trim,
         zoom_channel_trim,
         "SERVO",
         "TRIM",
         UINT16,
         zoom_channel
     );
+}
+
+pub(super) fn push_owned_expectations(
+    parameters: &ActuatorsParameters,
+    map: &mut IndexMap<String, ParamType>,
+) {
+    Manager::expect_owned_zoom_servo_function(parameters, map);
+    Manager::expect_owned_zoom_channel_min(parameters, map);
+    Manager::expect_owned_zoom_channel_trim(parameters, map);
+    Manager::expect_owned_zoom_channel_max(parameters, map);
 }

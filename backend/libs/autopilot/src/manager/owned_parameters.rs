@@ -1,0 +1,136 @@
+use std::{
+    collections::HashSet,
+    sync::{OnceLock, RwLock},
+};
+
+use indexmap::IndexMap;
+use uuid::Uuid;
+
+use crate::{
+    health::{self, ObserveSource},
+    parameters::{ActuatorsParameters, ParamType},
+};
+
+use super::{MANAGER, camera, focus, script, tilt, zoom};
+
+type PerCameraExpectations = IndexMap<Uuid, IndexMap<String, ParamType>>;
+type EligibilityKey = (Uuid, String);
+
+static EXPECTATIONS: OnceLock<RwLock<PerCameraExpectations>> = OnceLock::new();
+static ELIGIBLE: OnceLock<RwLock<HashSet<EligibilityKey>>> = OnceLock::new();
+
+fn expectations() -> &'static RwLock<PerCameraExpectations> {
+    EXPECTATIONS.get_or_init(|| RwLock::new(IndexMap::new()))
+}
+
+fn eligible() -> &'static RwLock<HashSet<EligibilityKey>> {
+    ELIGIBLE.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
+pub(crate) fn mark_eligible(camera_uuid: &Uuid, name: &str) {
+    eligible()
+        .write()
+        .expect("owned eligibility lock")
+        .insert((*camera_uuid, name.to_owned()));
+}
+
+pub(crate) fn is_eligible(camera_uuid: &Uuid, name: &str) -> bool {
+    eligible()
+        .read()
+        .expect("owned eligibility lock")
+        .contains(&(*camera_uuid, name.to_owned()))
+}
+
+pub(crate) async fn rebuild() {
+    let mut merged = IndexMap::new();
+    if let Some(manager) = MANAGER.get() {
+        let guard = manager.read().await;
+        for (camera_uuid, actuators) in &guard.settings.actuators {
+            let mut per_camera = IndexMap::new();
+            push_all_expectations(&actuators.parameters, &mut per_camera);
+            if !per_camera.is_empty() {
+                merged.insert(*camera_uuid, per_camera);
+            }
+        }
+    }
+    *expectations().write().expect("owned expectations lock") = merged;
+    prune_eligibility_to_expectations();
+}
+
+pub(crate) fn expectations_for_param(name: &str) -> Vec<(Uuid, ParamType)> {
+    expectations()
+        .read()
+        .expect("owned expectations lock")
+        .iter()
+        .filter_map(|(camera_uuid, per_camera)| {
+            per_camera
+                .get(name)
+                .map(|expected| (*camera_uuid, *expected))
+        })
+        .collect()
+}
+
+pub(crate) async fn establish_baseline_from_cache() {
+    observe_cached(ObserveSource::BulkSync).await;
+}
+
+pub(crate) async fn reevaluate_after_apply() {
+    observe_cached(ObserveSource::AfterApply).await;
+}
+
+async fn observe_cached(source: ObserveSource) {
+    let Ok(component) = crate::mavlink::component() else {
+        return;
+    };
+    let encoding = component.encoding().await;
+    let cache = component.inner.parameters.read().await;
+    let expectations = expectations()
+        .read()
+        .expect("owned expectations lock")
+        .clone();
+    let mut expected_keys = HashSet::new();
+    for (camera_uuid, per_camera) in &expectations {
+        for (name, expected) in per_camera {
+            expected_keys.insert((*camera_uuid, name.clone()));
+            if let Some(parameter) = cache.get(name) {
+                health::observe_owned_parameter_value(
+                    camera_uuid,
+                    name,
+                    &parameter.value,
+                    expected,
+                    encoding,
+                    source,
+                );
+            }
+        }
+    }
+    health::clear_stale_parameter_drifts(&expected_keys);
+}
+
+fn prune_eligibility_to_expectations() {
+    let expected: HashSet<EligibilityKey> = expectations()
+        .read()
+        .expect("owned expectations lock")
+        .iter()
+        .flat_map(|(camera_uuid, per_camera)| {
+            per_camera.keys().map(|name| (*camera_uuid, name.clone()))
+        })
+        .collect();
+    eligible()
+        .write()
+        .expect("owned eligibility lock")
+        .retain(|key| expected.contains(key));
+}
+
+fn push_all_expectations(parameters: &ActuatorsParameters, map: &mut IndexMap<String, ParamType>) {
+    camera::push_owned_expectations(parameters, map);
+    script::push_owned_expectations(parameters, map);
+    focus::push_owned_expectations(parameters, map);
+    zoom::push_owned_expectations(parameters, map);
+    tilt::push_owned_expectations(parameters, map);
+}
+
+#[cfg(test)]
+pub(crate) fn clear_eligibility_for_test() {
+    eligible().write().expect("owned eligibility lock").clear();
+}

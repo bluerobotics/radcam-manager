@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use mlua::Lua;
 use radcam_api::LuaScriptStatus;
@@ -9,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     CameraActuators, api, generate_update_channel_param_function,
     manager::{Manager, get_output_raw_from_channel},
-    parameters::{ChannelFunction, ParamType},
+    parameters::{ActuatorsParameters, ChannelFunction, ParamType},
 };
 
 const PARAM_TABLE_KEY_BASE: u8 = 73;
@@ -205,7 +206,7 @@ impl Manager {
                 let param_name = format!("SERVO{}_FUNCTION", *channel as u8);
 
                 // The script servo input is the values from the CameraFocus
-                let function = ChannelFunction::CameraFocus;
+                let function = Self::script_channel_function();
 
                 let mut param = mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
@@ -402,8 +403,46 @@ impl Manager {
         Ok(())
     }
 
+    fn script_channel_function() -> ChannelFunction {
+        ChannelFunction::CameraFocus
+    }
+
+    fn expect_owned_script_servo_function(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let channel = parameters.script_channel as u8;
+        map.insert(
+            format!("SERVO{channel}_FUNCTION"),
+            ParamType::INT16(Self::script_channel_function() as i16),
+        );
+    }
+
+    fn expect_owned_script_enable(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let channel = parameters.camera_id as u8;
+        map.insert(
+            format!("{PARAM_PREFIX}{channel}_ENABLE"),
+            ParamType::UINT8(parameters.enable_focus_and_zoom_correlation as u8),
+        );
+    }
+
+    fn expect_owned_script_gain(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let channel = parameters.camera_id as u8;
+        map.insert(
+            format!("{PARAM_PREFIX}{channel}_GAIN"),
+            ParamType::UINT8(parameters.focus_margin_gain as u8),
+        );
+    }
+
     generate_update_channel_param_function!(
         update_script_channel_min,
+        expect_owned_script_channel_min,
         script_channel_min,
         "SERVO",
         "MIN",
@@ -413,6 +452,7 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_script_channel_max,
+        expect_owned_script_channel_max,
         script_channel_max,
         "SERVO",
         "MAX",
@@ -422,6 +462,7 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_script_channel_trim,
+        expect_owned_script_channel_trim,
         script_channel_trim,
         "SERVO",
         "TRIM",
@@ -463,6 +504,18 @@ impl Manager {
         }
         false
     }
+}
+
+pub(super) fn push_owned_expectations(
+    parameters: &ActuatorsParameters,
+    map: &mut IndexMap<String, ParamType>,
+) {
+    Manager::expect_owned_script_servo_function(parameters, map);
+    Manager::expect_owned_script_enable(parameters, map);
+    Manager::expect_owned_script_gain(parameters, map);
+    Manager::expect_owned_script_channel_min(parameters, map);
+    Manager::expect_owned_script_channel_trim(parameters, map);
+    Manager::expect_owned_script_channel_max(parameters, map);
 }
 
 #[derive(Debug, Default)]
@@ -554,6 +607,7 @@ mod tests {
     /// test's path, so nothing else in this crate may initialize it.
     #[tokio::test]
     async fn script_status_tracks_the_installed_script() {
+        let _health_tests = crate::health::lock_health_tests().await;
         let dir = std::env::temp_dir().join(format!(
             "radcam-manager-script-status-{}",
             std::process::id()

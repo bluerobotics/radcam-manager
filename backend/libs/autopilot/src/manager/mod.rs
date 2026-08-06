@@ -2,6 +2,7 @@ mod calibration;
 mod camera;
 mod focus;
 mod macros;
+pub(crate) mod owned_parameters;
 mod script;
 mod tilt;
 mod zoom;
@@ -287,6 +288,8 @@ impl Manager {
         }
 
         Self::save_actuators_settings().await?;
+        owned_parameters::rebuild().await;
+        owned_parameters::reevaluate_after_apply().await;
         Ok(false)
     }
 
@@ -300,7 +303,10 @@ impl Manager {
             Self::update_script_enable(camera_uuid, parameters, true).await?;
             Self::update_script_gain(camera_uuid, parameters, true).await?;
         }
-        Self::save_actuators_settings().await
+        Self::save_actuators_settings().await?;
+        owned_parameters::rebuild().await;
+        owned_parameters::reevaluate_after_apply().await;
+        Ok(())
     }
 
     #[instrument(level = "debug")]
@@ -345,6 +351,8 @@ pub async fn init(
     }
 
     if mavlink::component().is_ok() {
+        owned_parameters::rebuild().await;
+        owned_parameters::establish_baseline_from_cache().await;
         crate::health::refresh_lua_script_status().await;
         return Ok(());
     }
@@ -388,6 +396,9 @@ pub async fn clear_saved_settings() -> Result<()> {
         guard.settings = settings;
     }
     drop(apply);
+
+    owned_parameters::rebuild().await;
+    owned_parameters::establish_baseline_from_cache().await;
 
     Ok(())
 }
