@@ -49,6 +49,15 @@ struct StitchHealthParams<'a> {
     state_events_lagged: u64,
 }
 
+/// Probe inputs for [`classify_table`].
+pub(crate) struct ClassifyEvidence {
+    pub in_mcm_list: bool,
+    pub expected: bool,
+    pub camera_answered: bool,
+    pub tcp_ok: bool,
+    pub probed: bool,
+}
+
 impl Entry {
     fn new(connectivity: CameraConnectivity) -> Self {
         Self {
@@ -68,24 +77,18 @@ impl Entry {
 /// failed while TCP still works). Absent-from-list + TCP-ok is normal while MCM
 /// rediscovers ONVIF devices after a restart — keep [`Unknown`] so the UI does
 /// not blame cables during that window.
-pub(crate) fn classify_table(
-    in_mcm_list: bool,
-    expected: bool,
-    camera_answered: bool,
-    tcp_ok: bool,
-    probed: bool,
-) -> CameraConnectivity {
-    if camera_answered {
+pub(crate) fn classify_table(evidence: ClassifyEvidence) -> CameraConnectivity {
+    if evidence.camera_answered {
         return CameraConnectivity::Online;
     }
-    if !probed {
-        if expected && !in_mcm_list {
+    if !evidence.probed {
+        if evidence.expected && !evidence.in_mcm_list {
             return CameraConnectivity::Missing;
         }
         return CameraConnectivity::Unknown;
     }
-    if tcp_ok {
-        if in_mcm_list {
+    if evidence.tcp_ok {
+        if evidence.in_mcm_list {
             return CameraConnectivity::Unresponsive;
         }
         // Host still answers TCP but MCM has not listed it yet (ONVIF rediscovery).
@@ -368,6 +371,22 @@ fn notify_health() {
     }
 }
 
+async fn sync_mcm_camera_errors() {
+    let discovered = mcm_client::cameras().await;
+    let configured = autopilot::configured_cameras().await;
+    let uuids: HashSet<Uuid> = discovered
+        .keys()
+        .chain(configured.iter())
+        .copied()
+        .collect();
+    for uuid in uuids {
+        let stream_error = mcm_client::stream_failure(&uuid).await;
+        camera_ui::set_stream_error(uuid, stream_error);
+        let onvif_auth_error = mcm_client::authentication_failure(&uuid).await;
+        camera_ui::set_onvif_auth_error(uuid, onvif_auth_error);
+    }
+}
+
 fn ensure_fan_in() {
     if FAN_IN_STARTED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -402,6 +421,7 @@ fn ensure_fan_in() {
                         warn!("MCM camera list broadcast closed; stopping connectivity fan-in");
                         break;
                     }
+                    sync_mcm_camera_errors().await;
                 }
             }
             notify_health();
@@ -517,39 +537,79 @@ mod tests {
 
     #[test]
     fn classifier_table() {
+        fn missing(tcp_ok: bool, probed: bool) -> ClassifyEvidence {
+            ClassifyEvidence {
+                in_mcm_list: false,
+                expected: true,
+                camera_answered: false,
+                tcp_ok,
+                probed,
+            }
+        }
+
         // Configured + absent + no probe yet → Missing (Forget path).
         assert_eq!(
-            classify_table(false, true, false, false, false),
+            classify_table(missing(false, false)),
             CameraConnectivity::Missing
         );
         // Configured + absent + TCP failed → Unreachable (unplugged cable).
         assert_eq!(
-            classify_table(false, true, false, false, true),
+            classify_table(missing(false, true)),
             CameraConnectivity::Unreachable
         );
         assert_eq!(
-            classify_table(true, false, true, false, true),
+            classify_table(ClassifyEvidence {
+                in_mcm_list: true,
+                camera_answered: true,
+                probed: true,
+                expected: false,
+                tcp_ok: false,
+            }),
             CameraConnectivity::Online
         );
         assert_eq!(
-            classify_table(true, false, false, true, true),
+            classify_table(ClassifyEvidence {
+                in_mcm_list: true,
+                tcp_ok: true,
+                probed: true,
+                expected: false,
+                camera_answered: false,
+            }),
             CameraConnectivity::Unresponsive
         );
         // Absent from MCM + TCP ok: normal ONVIF rediscovery — do not alarm.
         assert_eq!(
-            classify_table(false, true, false, true, true),
+            classify_table(missing(true, true)),
             CameraConnectivity::Unknown
         );
         assert_eq!(
-            classify_table(false, false, false, true, true),
+            classify_table(ClassifyEvidence {
+                tcp_ok: true,
+                probed: true,
+                in_mcm_list: false,
+                expected: false,
+                camera_answered: false,
+            }),
             CameraConnectivity::Unknown
         );
         assert_eq!(
-            classify_table(true, false, false, false, true),
+            classify_table(ClassifyEvidence {
+                in_mcm_list: true,
+                probed: true,
+                expected: false,
+                camera_answered: false,
+                tcp_ok: false,
+            }),
             CameraConnectivity::Unreachable
         );
         assert_eq!(
-            classify_table(true, false, false, false, false),
+            classify_table(ClassifyEvidence {
+                in_mcm_list: true,
+                expected: false,
+                camera_answered: false,
+                tcp_ok: false,
+                probed: false,
+            }),
             CameraConnectivity::Unknown
         );
     }
