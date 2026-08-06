@@ -211,6 +211,29 @@
     </div>
     <div class="health-banners-sticky">
       <v-alert
+        v-if="showStaleBundleBanner"
+        type="info"
+        variant="flat"
+        density="compact"
+        class="mx-6 mt-4 stale-bundle-banner"
+        theme="dark"
+      >
+        <div class="flex items-center justify-between gap-3 text-sm">
+          <span>
+            The backend was updated while this page was open. Reload to load the matching UI.
+          </span>
+          <v-btn
+            size="small"
+            variant="elevated"
+            theme="dark"
+            class="shrink-0 py-1 px-3 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
+            @click="reloadPage"
+          >
+            Reload
+          </v-btn>
+        </div>
+      </v-alert>
+      <v-alert
         v-if="showDegradedBanner"
         type="warning"
         variant="flat"
@@ -590,6 +613,7 @@ const busyMinimized = ref(false)
 const onePushAwb = ref<OnePushAwbStatus | null>(null)
 const errorDialogMessage = ref<string | null>(null)
 const warningToastMessage = ref<string | null>(null)
+const showStaleBundleBanner = ref(false)
 const isCockpitMode = useRouteQuery<string, boolean>('cockpit_mode', 'false', {
   transform: {
     get: (v: string) => v === 'true',
@@ -688,6 +712,10 @@ const dismissErrorDialog = () => {
     backendClient.dismissUi(selectedCameraUUID.value, 'error_dialog')
   }
   errorDialogMessage.value = null
+}
+
+const reloadPage = (): void => {
+  window.location.reload()
 }
 
 const applyCameraList = (data: unknown) => {
@@ -865,6 +893,9 @@ const unsubscribeTransportError = backendClient.onTransportError((message) => {
   // Local-only toast; do not call dismissUi (that would clear shared backend warnings).
   warningToastMessage.value = message
 })
+const unsubscribeBackendVersionChanged = backendClient.onBackendVersionChanged(() => {
+  showStaleBundleBanner.value = true
+})
 const unsubscribeConnectionState = backendClient.onConnectionState((state, previousState) => {
   if (state === 'disconnected' && previousState !== 'disconnected') {
     disconnectedSince.value = new Date()
@@ -997,6 +1028,7 @@ onUnmounted(() => {
   unsubscribeCameraState()
   unsubscribeConnectionStats()
   unsubscribeTransportError()
+  unsubscribeBackendVersionChanged()
   unsubscribeConnectionState()
 })
 
@@ -1061,6 +1093,13 @@ onUnmounted(() => {
   background-color: #5c4a12 !important;
   color: #ffe082 !important;
   border: 1px solid #c9a22788;
+  opacity: 1;
+}
+
+.stale-bundle-banner {
+  background-color: #1a3a52 !important;
+  color: #b3e5fc !important;
+  border: 1px solid #4fc3f788;
   opacity: 1;
 }
 
