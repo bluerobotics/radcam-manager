@@ -1,11 +1,11 @@
 //! Single entry point for camera and autopilot mutations, so every caller
 //! (REST and WebSocket alike) produces the same UI overlay and state updates.
 
-use autopilot::api::ActuatorsControl;
+use autopilot::api::{Action as AutopilotAction, ActuatorsControl};
 use radcam_commands::{Action as CameraAction, CameraControl};
 use serde_json::Value;
 
-use crate::web::{camera_state, camera_ui, one_push_awb};
+use crate::web::{camera_state, camera_ui, connectivity, one_push_awb};
 
 /// Wire / HTTP body when the requested camera UUID is not in the MCM list.
 pub(crate) const UNKNOWN_CAMERA: &str = "unknown camera";
@@ -37,7 +37,9 @@ impl ControlError {
 #[tracing::instrument(level = "debug", skip_all, fields(%camera_control.camera_uuid))]
 pub(crate) async fn camera_control(camera_control: CameraControl) -> Result<Value, ControlError> {
     let camera_uuid = camera_control.camera_uuid;
-    if mcm_client::get_camera(&camera_uuid).await.is_none() {
+    // Addressability, not discovery: a camera absent from the MCM list while ONVIF
+    // rediscovers still answers its HTTP API at the hostname we last saw it on.
+    if mcm_client::camera_address(&camera_uuid).await.is_none() {
         return Err(ControlError::unknown_camera());
     }
     let action = camera_control.action.clone();
@@ -74,7 +76,13 @@ pub(crate) async fn autopilot_control(
     actuators_control: ActuatorsControl,
 ) -> Result<Value, ControlError> {
     let camera_uuid = actuators_control.camera_uuid;
-    if mcm_client::get_camera(&camera_uuid).await.is_none() {
+    if mcm_client::camera_address(&camera_uuid).await.is_none()
+        && !connectivity::is_expected(camera_uuid).await
+        && !matches!(
+            actuators_control.action,
+            AutopilotAction::ForgetActuatorsConfig
+        )
+    {
         return Err(ControlError::unknown_camera());
     }
     let action = actuators_control.action.clone();
@@ -84,6 +92,10 @@ pub(crate) async fn autopilot_control(
         Ok(value) => {
             camera_ui::finish_autopilot_action(camera_uuid, &action);
             camera_state::emit_autopilot_control_update(camera_uuid, &action, &value);
+            if matches!(action, AutopilotAction::ForgetActuatorsConfig) {
+                mcm_client::forget_hostname(camera_uuid);
+                connectivity::forget_camera(camera_uuid);
+            }
             Ok(value)
         }
         Err(error) => {
