@@ -239,15 +239,17 @@ impl MavlinkComponent {
         }
 
         *inner.parameters.write().await = parameters;
-        crate::manager::owned_parameters::establish_baseline_from_cache().await;
+        let cache = inner.parameters.read().await;
+        crate::manager::owned_parameters::establish_baseline_from_cache(&cache);
     }
 
     #[instrument(level = "debug", skip(inner))]
     pub(crate) async fn params_sync_task(inner: Arc<ComponentInner>) {
         let mut receiver = inner.get_receiver().await;
-        let encoding = *inner.encoding.read().await;
 
         loop {
+            let encoding = *inner.encoding.read().await;
+
             let (_header, message) = match receiver.recv().await {
                 Ok(Message::Received(inner)) => inner,
                 Ok(Message::ToBeSent(_)) => continue,
@@ -270,21 +272,7 @@ impl MavlinkComponent {
                 }
             };
 
-            let under_apply = crate::manager::CONFIG_APPLY.try_lock().is_err();
-            if !under_apply {
-                for (camera_uuid, expected) in
-                    crate::manager::owned_parameters::expectations_for_param(&parameter.name)
-                {
-                    crate::health::observe_owned_parameter_value(
-                        &camera_uuid,
-                        &parameter.name,
-                        &parameter.value,
-                        &expected,
-                        encoding,
-                        crate::health::ObserveSource::LiveChange,
-                    );
-                }
-            }
+            observe_param_value_from_sync(&parameter, data.param_index);
 
             let mut cache = inner.parameters.write().await;
             cache
@@ -517,5 +505,23 @@ impl MavlinkComponent {
     #[instrument(level = "debug", skip(self))]
     pub async fn encoding(&self) -> ParamEncodingType {
         *self.inner.encoding.read().await
+    }
+}
+
+pub(crate) fn observe_param_value_from_sync(parameter: &Parameter, param_index: u16) {
+    let under_apply = crate::manager::CONFIG_APPLY.try_lock().is_err();
+    if under_apply || param_index != u16::MAX {
+        return;
+    }
+    for (camera_uuid, expected) in
+        crate::manager::owned_parameters::expectations_for_param(&parameter.name)
+    {
+        crate::health::observe_owned_parameter_value(
+            &camera_uuid,
+            &parameter.name,
+            &parameter.value,
+            &expected,
+            crate::health::ObserveSource::LiveChange,
+        );
     }
 }

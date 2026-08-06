@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     actuators_watch::{self, ServoStreamHealth},
-    mavlink::{self, Message, parameters::ParamEncodingType},
+    mavlink::{self, Message},
     parameters::{self, ParamType},
 };
 
@@ -180,7 +180,7 @@ pub(crate) fn clear_stale_parameter_drifts(expected: &HashSet<(Uuid, String)>) {
     let before = guard.param_drifts.len();
     guard
         .param_drifts
-        .retain(|key, _| expected.contains(&drift_key_parts(key)));
+        .retain(|key, _| drift_key_parts(key).is_some_and(|parts| expected.contains(&parts)));
     if guard.param_drifts.len() != before {
         drop(guard);
         notify_health();
@@ -202,16 +202,10 @@ pub(crate) fn observe_owned_parameter_value(
     name: &str,
     actual: &ParamType,
     expected: &ParamType,
-    encoding: ParamEncodingType,
     source: ObserveSource,
 ) {
     let drift_key = drift_key(camera_uuid, name);
-    if parameters::param_values_match(
-        expected,
-        actual,
-        encoding,
-        parameters::PARAM_DRIFT_TOLERANCE,
-    ) {
+    if parameters::param_values_match(expected, actual, parameters::PARAM_DRIFT_TOLERANCE) {
         crate::manager::owned_parameters::mark_eligible(camera_uuid, name);
         let mut guard = health_state().lock().expect("health lock");
         if guard.param_drifts.shift_remove(&drift_key).is_some() {
@@ -257,14 +251,9 @@ fn drift_key(camera_uuid: &Uuid, name: &str) -> String {
     format!("{camera_uuid}:{name}")
 }
 
-fn drift_key_parts(key: &str) -> (Uuid, String) {
-    let (camera_uuid, name) = key
-        .split_once(':')
-        .expect("parameter drift key is camera_uuid:name");
-    (
-        Uuid::parse_str(camera_uuid).expect("parameter drift key camera_uuid"),
-        name.to_owned(),
-    )
+fn drift_key_parts(key: &str) -> Option<(Uuid, String)> {
+    let (camera_uuid, name) = key.split_once(':')?;
+    Some((Uuid::parse_str(camera_uuid).ok()?, name.to_owned()))
 }
 
 /// Re-read the installed Lua script and publish the result.
@@ -828,6 +817,7 @@ mod tests {
         let mut guard = health_state().lock().expect("health lock");
         *guard = Health::default();
         crate::manager::owned_parameters::clear_eligibility_for_test();
+        crate::manager::owned_parameters::clear_expectations_for_test();
     }
 
     fn classify(input: ClassifyHealthInput<'_>) -> AutopilotHealth {
@@ -1102,7 +1092,6 @@ mod tests {
     async fn parameter_drift_eligibility_and_observe_sources() {
         let _health_tests = lock_health_tests().await;
         health_reset();
-        let encoding = ParamEncodingType::CCast;
         let expected = ParamType::UINT16(1500);
 
         let bulk_mismatch = Uuid::from_u128(10);
@@ -1111,7 +1100,6 @@ mod tests {
             "SERVO10_MIN",
             &ParamType::UINT16(1600),
             &expected,
-            encoding,
             ObserveSource::BulkSync,
         );
         assert!(parameter_drifts().is_empty());
@@ -1127,7 +1115,6 @@ mod tests {
             "SERVO10_MIN",
             &matched,
             &matched,
-            encoding,
             ObserveSource::BulkSync,
         );
         assert!(crate::manager::owned_parameters::is_eligible(
@@ -1141,7 +1128,6 @@ mod tests {
             "SERVO10_MIN",
             &ParamType::UINT16(1600),
             &expected,
-            encoding,
             ObserveSource::LiveChange,
         );
         assert!(parameter_drifts().is_empty());
@@ -1151,7 +1137,6 @@ mod tests {
             "SERVO10_MIN",
             &ParamType::UINT16(1600),
             &expected,
-            encoding,
             ObserveSource::LiveChange,
         );
         assert_eq!(parameter_drifts().len(), 1);
@@ -1165,7 +1150,6 @@ mod tests {
             "SERVO10_MIN",
             &ParamType::UINT16(1100),
             &reapplied,
-            encoding,
             ObserveSource::LiveChange,
         );
         assert_eq!(parameter_drifts().len(), 2);
@@ -1175,10 +1159,70 @@ mod tests {
             "SERVO10_MIN",
             &reapplied,
             &reapplied,
-            encoding,
             ObserveSource::AfterApply,
         );
         assert_eq!(parameter_drifts().len(), 1);
         assert_eq!(parameter_drifts()[0].actual, 1600.0);
+    }
+
+    #[tokio::test]
+    async fn parameter_drift_baseline_seeds_eligibility_and_live_sync_reports() {
+        use indexmap::IndexMap;
+
+        use crate::{
+            mavlink::parameters::observe_param_value_from_sync,
+            parameters::{ActuatorsParameters, Parameter},
+        };
+
+        let _health_tests = lock_health_tests().await;
+        health_reset();
+
+        let camera_uuid = Uuid::from_u128(0xd11f_0000_0000_0001);
+        let actuators = ActuatorsParameters::default();
+        let param_name = format!("SERVO{}_MIN", actuators.focus_channel as u8);
+        let expected_min = ParamType::UINT16(actuators.focus_channel_min);
+
+        crate::manager::owned_parameters::install_expectations_for_test(camera_uuid, &actuators);
+
+        let mut cache = IndexMap::new();
+        cache.insert(
+            param_name.clone(),
+            Parameter {
+                name: param_name.clone(),
+                value: expected_min,
+            },
+        );
+        crate::manager::owned_parameters::establish_baseline_from_cache(&cache);
+
+        assert!(crate::manager::owned_parameters::is_eligible(
+            &camera_uuid,
+            &param_name
+        ));
+        assert!(parameter_drifts().is_empty());
+
+        let mismatched = Parameter {
+            name: param_name.clone(),
+            value: ParamType::UINT16(actuators.focus_channel_min + 100),
+        };
+        observe_param_value_from_sync(&mismatched, u16::MAX);
+        let drifts = parameter_drifts();
+        assert_eq!(drifts.len(), 1);
+        assert_eq!(drifts[0].name, param_name);
+        assert_eq!(drifts[0].expected, actuators.focus_channel_min as f32);
+        assert_eq!(drifts[0].actual, (actuators.focus_channel_min + 100) as f32);
+
+        let matched = Parameter {
+            name: param_name.clone(),
+            value: expected_min,
+        };
+        observe_param_value_from_sync(&matched, u16::MAX);
+        assert!(parameter_drifts().is_empty());
+
+        let bulk_mismatch = Parameter {
+            name: param_name.clone(),
+            value: ParamType::UINT16(actuators.focus_channel_min + 200),
+        };
+        observe_param_value_from_sync(&bulk_mismatch, 0);
+        assert!(parameter_drifts().is_empty());
     }
 }

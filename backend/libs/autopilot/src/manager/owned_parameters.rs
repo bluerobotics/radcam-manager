@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     health::{self, ObserveSource},
-    parameters::{ActuatorsParameters, ParamType},
+    parameters::{ActuatorsParameters, ParamType, Parameter},
 };
 
 use super::{MANAGER, camera, focus, script, tilt, zoom};
@@ -70,20 +70,19 @@ pub(crate) fn expectations_for_param(name: &str) -> Vec<(Uuid, ParamType)> {
         .collect()
 }
 
-pub(crate) async fn establish_baseline_from_cache() {
-    observe_cached(ObserveSource::BulkSync).await;
+pub(crate) fn establish_baseline_from_cache(cache: &IndexMap<String, Parameter>) {
+    observe_cached(cache, ObserveSource::BulkSync);
 }
 
 pub(crate) async fn reevaluate_after_apply() {
-    observe_cached(ObserveSource::AfterApply).await;
-}
-
-async fn observe_cached(source: ObserveSource) {
     let Ok(component) = crate::mavlink::component() else {
         return;
     };
-    let encoding = component.encoding().await;
     let cache = component.inner.parameters.read().await;
+    observe_cached(&cache, ObserveSource::AfterApply);
+}
+
+fn observe_cached(cache: &IndexMap<String, Parameter>, source: ObserveSource) {
     let expectations = expectations()
         .read()
         .expect("owned expectations lock")
@@ -98,7 +97,6 @@ async fn observe_cached(source: ObserveSource) {
                     name,
                     &parameter.value,
                     expected,
-                    encoding,
                     source,
                 );
             }
@@ -133,4 +131,22 @@ fn push_all_expectations(parameters: &ActuatorsParameters, map: &mut IndexMap<St
 #[cfg(test)]
 pub(crate) fn clear_eligibility_for_test() {
     eligible().write().expect("owned eligibility lock").clear();
+}
+
+#[cfg(test)]
+pub(crate) fn install_expectations_for_test(camera_uuid: Uuid, parameters: &ActuatorsParameters) {
+    let mut per_camera = IndexMap::new();
+    push_all_expectations(parameters, &mut per_camera);
+    expectations()
+        .write()
+        .expect("owned expectations lock")
+        .insert(camera_uuid, per_camera);
+}
+
+#[cfg(test)]
+pub(crate) fn clear_expectations_for_test() {
+    expectations()
+        .write()
+        .expect("owned expectations lock")
+        .clear();
 }
