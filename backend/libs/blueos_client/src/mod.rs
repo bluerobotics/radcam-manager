@@ -38,6 +38,14 @@ struct Endpoint {
 }
 
 pub async fn create_mavlink_endpoint(mavlink_endpoint: &str) -> Result<()> {
+    ensure_mavlink_endpoint(mavlink_endpoint).await.map(|_| ())
+}
+
+/// Make sure BlueOS still has our MAVLink endpoint.
+///
+/// Returns `Ok(true)` when the endpoint was created or rewritten, `Ok(false)` when
+/// it was already present and correct.
+pub async fn ensure_mavlink_endpoint(mavlink_endpoint: &str) -> Result<bool> {
     let blueos_address = MANAGER.get().unwrap().read().await.blueos_address;
 
     let desired_endpoint = {
@@ -80,33 +88,34 @@ pub async fn create_mavlink_endpoint(mavlink_endpoint: &str) -> Result<()> {
         (current.name == desired_endpoint.name) && (current.owner == desired_endpoint.owner)
     }) {
         if desired_endpoint.eq(existing_endpoint) {
-            info!("MAVLink endpoint already present");
-
-            return Ok(());
+            debug!("MAVLink endpoint already present");
+            return Ok(false);
         }
 
         info!("MAVLink endpoint exists but needs to be reconfigured.");
 
-        return web_client::put(
+        web_client::put::<(), _, _>(
             &blueos_address,
             "ardupilot-manager/v1.0/endpoints/",
             vec![desired_endpoint],
             (),
         )
         .await
-        .context("Failed to create new MAVLink endpoint");
+        .context("Failed to create new MAVLink endpoint")?;
+        return Ok(true);
     }
 
     info!("MAVLink endpoint not present, creating it...");
 
-    web_client::post(
+    web_client::post::<(), _, _>(
         &blueos_address,
         "ardupilot-manager/v1.0/endpoints/",
         vec![desired_endpoint],
         (),
     )
     .await
-    .context("Failed to create new MAVLink endpoint")
+    .context("Failed to create new MAVLink endpoint")?;
+    Ok(true)
 }
 
 pub async fn reboot_autopilot() -> Result<()> {
