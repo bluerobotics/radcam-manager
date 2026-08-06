@@ -45,6 +45,7 @@ struct StitchHealthParams<'a> {
     lua_scripting_disabled: bool,
     lua_script: radcam_api::LuaScriptStatus,
     lua_script_detail: Option<String>,
+    parameter_drifts: Option<Vec<radcam_api::ParameterDrift>>,
     diagnostics: radcam_api::Diagnostics,
     state_events_lagged: u64,
 }
@@ -291,6 +292,7 @@ fn stitch_system_health(
         lua_scripting_disabled: params.lua_scripting_disabled,
         lua_script: params.lua_script,
         lua_script_detail: params.lua_script_detail,
+        parameter_drifts: params.parameter_drifts,
         diagnostics,
     }
 }
@@ -303,6 +305,17 @@ pub(crate) async fn system_health() -> SystemHealth {
     let configured = autopilot::configured_cameras().await;
     let (autopilot, autopilot_detail) = autopilot::health();
     let (lua_script, lua_script_detail) = autopilot::lua_script_status();
+    let parameter_drifts = {
+        let drifts: Vec<_> = autopilot::parameter_drifts()
+            .into_iter()
+            .map(|drift| radcam_api::ParameterDrift {
+                name: drift.name,
+                expected: drift.expected,
+                actual: drift.actual,
+            })
+            .collect();
+        (!drifts.is_empty()).then_some(drifts)
+    };
 
     let mut hostnames = HashMap::new();
     for uuid in &configured {
@@ -323,6 +336,7 @@ pub(crate) async fn system_health() -> SystemHealth {
             lua_scripting_disabled: autopilot::lua_scripting_disabled(),
             lua_script,
             lua_script_detail,
+            parameter_drifts,
             diagnostics: autopilot::diagnostics(),
             state_events_lagged: camera_state::state_events_lagged(),
         },
@@ -464,6 +478,11 @@ mod tests {
                 lua_scripting_disabled: false,
                 lua_script: radcam_api::LuaScriptStatus::Ok,
                 lua_script_detail: None,
+                parameter_drifts: Some(vec![radcam_api::ParameterDrift {
+                    name: "SERVO1_FUNCTION".into(),
+                    expected: 33.0,
+                    actual: 0.0,
+                }]),
                 diagnostics: Diagnostics::default(),
                 state_events_lagged: 0,
             },
@@ -483,6 +502,13 @@ mod tests {
             health.expected_missing[0].last_hostname.as_deref(),
             Some("10.0.0.2")
         );
+        assert_eq!(health.parameter_drifts.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            health.parameter_drifts.as_ref().unwrap()[0].name,
+            "SERVO1_FUNCTION"
+        );
+        assert_eq!(health.parameter_drifts.as_ref().unwrap()[0].expected, 33.0);
+        assert_eq!(health.parameter_drifts.as_ref().unwrap()[0].actual, 0.0);
 
         let degraded = stitch_system_health(
             StitchHealthParams {
@@ -496,6 +522,7 @@ mod tests {
                 lua_scripting_disabled: false,
                 lua_script: radcam_api::LuaScriptStatus::Ok,
                 lua_script_detail: None,
+                parameter_drifts: None,
                 diagnostics: Diagnostics::default(),
                 state_events_lagged: 0,
             },
