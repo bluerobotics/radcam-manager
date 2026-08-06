@@ -3106,6 +3106,7 @@ dependencies = [
  "axum",
  "base16ct",
  "chrono",
+ "flate2",
  "futures",
  "include_dir",
  "indexmap 2.10.0",
