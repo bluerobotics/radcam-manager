@@ -1,7 +1,10 @@
 use anyhow::{Context, Result, anyhow};
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 use tokio::{
     fs,
     io::{self, AsyncWriteExt},
@@ -14,6 +17,10 @@ use uuid::Uuid;
 use crate::{CameraActuatorsSettings, RawSettingsData, SettingsDataImpl, v1::SettingsDataV1};
 
 pub static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
+
+/// A read-only filesystem or a full SD card only surfaces as a failed request at the
+/// moment the user changes something, which is long after it starts mattering.
+static LAST_SAVE_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
 #[derive(Debug)]
 pub struct Manager {
@@ -122,6 +129,16 @@ impl Settings {
     }
 
     pub async fn save(&self) -> Result<()> {
+        let result = self.save_inner().await;
+
+        if let Ok(mut last) = LAST_SAVE_ERROR.lock() {
+            *last = result.as_ref().err().map(|error| format!("{error:#}"));
+        }
+
+        result
+    }
+
+    async fn save_inner(&self) -> Result<()> {
         let path = self.path.as_path();
         let settings_file = path.to_string_lossy();
 
@@ -210,6 +227,11 @@ pub async fn init(settings_file: String, reset: bool) -> Result<()> {
     MANAGER.get_or_init(|| RwLock::new(Manager { settings }));
 
     Ok(())
+}
+
+/// Text of the last failed settings write, cleared by the next successful one.
+pub fn last_save_error() -> Option<String> {
+    LAST_SAVE_ERROR.lock().ok()?.clone()
 }
 
 #[instrument(level = "debug")]
