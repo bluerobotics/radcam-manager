@@ -8,6 +8,13 @@ use crate::{
     mavlink::parameters::ParamEncodingType,
 };
 
+/// Tolerance for [`ParamType::REAL32`] / [`ParamType::REAL64`] actuator values only.
+/// Integer-valued parameters are compared exactly after normalising to a common numeric
+/// representation — Lua param-table values such as `RCAM1_ENABLE` arrive as `REAL32`
+/// while the expectation holds `UINT8`, so the comparison must coerce by value, not by
+/// encoded MAVLink wire form.
+pub(crate) const PARAM_DRIFT_TOLERANCE: f32 = 0.5;
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Parameter {
     pub name: String,
@@ -406,3 +413,126 @@ pub const FURTHEST_POINTS: &[api::FocusZoomPoint] = &[
         focus: 2159,
     },
 ];
+
+pub(crate) fn param_display_value(value: &ParamType) -> Option<f32> {
+    param_numeric_value(value).map(|value| value as f32)
+}
+
+fn param_numeric_value(value: &ParamType) -> Option<f64> {
+    match value {
+        ParamType::UINT8(v) => Some(f64::from(*v)),
+        ParamType::INT8(v) => Some(f64::from(*v)),
+        ParamType::UINT16(v) => Some(f64::from(*v)),
+        ParamType::INT16(v) => Some(f64::from(*v)),
+        ParamType::UINT32(v) => Some(f64::from(*v)),
+        ParamType::INT32(v) => Some(f64::from(*v)),
+        ParamType::UINT64(v) => Some(*v as f64),
+        ParamType::INT64(v) => Some(*v as f64),
+        ParamType::REAL32(v) => Some(f64::from(*v)),
+        ParamType::REAL64(v) => Some(*v),
+    }
+}
+
+fn param_is_integer_valued(value: &ParamType) -> bool {
+    !matches!(value, ParamType::REAL32(_) | ParamType::REAL64(_))
+}
+
+pub(crate) fn param_values_match(
+    expected: &ParamType,
+    actual: &ParamType,
+    _encoding: ParamEncodingType,
+    tolerance: f32,
+) -> bool {
+    let (Some(expected_n), Some(actual_n)) =
+        (param_numeric_value(expected), param_numeric_value(actual))
+    else {
+        return expected == actual;
+    };
+
+    if param_is_integer_valued(expected) || param_is_integer_valued(actual) {
+        return expected_n == actual_n;
+    }
+
+    (expected_n - actual_n).abs() <= f64::from(tolerance)
+}
+
+#[cfg(test)]
+mod drift_tests {
+    use super::*;
+
+    #[test]
+    fn param_drift_tolerance_flags_real_mismatch_not_type_mismatch() {
+        let encoding = ParamEncodingType::CCast;
+        let expected = ParamType::INT16(ChannelFunction::CameraFocus as i16);
+
+        assert!(param_values_match(
+            &expected,
+            &ParamType::INT16(ChannelFunction::CameraFocus as i16),
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+        assert!(param_values_match(
+            &expected,
+            &ParamType::REAL32(ChannelFunction::CameraFocus as i16 as f32),
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+        assert!(param_values_match(
+            &ParamType::UINT8(1),
+            &ParamType::REAL32(1.0),
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+
+        assert!(!param_values_match(
+            &expected,
+            &ParamType::INT16(ChannelFunction::CameraZoom as i16),
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+        assert!(!param_values_match(
+            &ParamType::UINT16(1500),
+            &ParamType::UINT16(1501),
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+    }
+
+    #[test]
+    fn param_drift_compares_bytewise_integers_exactly() {
+        let encoding = ParamEncodingType::ByteWise;
+
+        assert!(param_values_match(
+            &ParamType::UINT16(1500),
+            &ParamType::UINT16(1500),
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+        assert!(!param_values_match(
+            &ParamType::UINT16(1500),
+            &ParamType::UINT16(1501),
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+    }
+
+    #[test]
+    fn reapplied_configuration_values_match_expectations() {
+        let encoding = ParamEncodingType::CCast;
+        let expected = ParamType::UINT16(1200);
+        let actual = ParamType::UINT16(1200);
+
+        assert!(param_values_match(
+            &expected,
+            &actual,
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+        assert!(!param_values_match(
+            &ParamType::UINT16(1100),
+            &actual,
+            encoding,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+    }
+}
