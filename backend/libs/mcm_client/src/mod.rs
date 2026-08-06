@@ -274,16 +274,24 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
                     continue; // We only want the main stream
                 }
 
+                let Ok(mut available_source) = source.source.parse::<Url>() else {
+                    warn!(
+                        "Skipping video source with unparsable URL: {:?}",
+                        source.source
+                    );
+                    continue;
+                };
+
+                // Note: Here we are ignoring any authentication so we avoid duplicated streams.
+                // Stripping fails only on URLs that cannot carry credentials, which are already
+                // credential-free.
+                let _ = available_source.set_password(None);
+                let _ = available_source.set_username("");
+
                 if existing_radcam_streams.iter().any(|stream| {
-                    // Note: Here we are ignoring any authentication so we avoid duplicated streams
-
                     let mut existing_source = stream.source_endpoint.clone();
-                    existing_source.set_password(None).unwrap();
-                    existing_source.set_username("").unwrap();
-
-                    let mut available_source: Url = source.source.clone().parse().unwrap();
-                    available_source.set_password(None).unwrap();
-                    available_source.set_username("").unwrap();
+                    let _ = existing_source.set_password(None);
+                    let _ = existing_source.set_username("");
 
                     existing_source.eq(&available_source)
                 }) {
