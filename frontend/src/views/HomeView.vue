@@ -401,6 +401,8 @@ const {
 const healthDialog = ref<HealthDialogState>(initialHealthDialogState())
 const healthProblemsNowMs = ref(Date.now())
 const cameraConnectivity = ref<CameraConnectivity>('unknown')
+const cameraStreamError = ref<string | null>(null)
+const cameraOnvifAuthError = ref<string | null>(null)
 const connectionState = ref<ConnectionState>('connecting')
 let everConnected = false
 /** Connection state the dialog renders, held past reconnect so it cannot flash by. */
@@ -529,6 +531,8 @@ const healthInputBase = computed(() => ({
   cameraUuid: selectedCameraUUID.value,
   cameraLabel: selectedCameraLabel.value,
   cameraConnectivity: cameraConnectivity.value,
+  cameraStreamError: cameraStreamError.value,
+  cameraOnvifAuthError: cameraOnvifAuthError.value,
   cameraExpectedMissing: expectedMissing.value.some(
     (camera) => camera.uuid === selectedCameraUUID.value,
   ),
@@ -649,6 +653,8 @@ const applyCameraUi = (ui: CameraUiState) => {
   // A backend too old to send connectivity must not gray out every camera control:
   // treat an absent field as 'unknown', which keeps them usable.
   cameraConnectivity.value = ui.connectivity ?? 'unknown'
+  cameraStreamError.value = ui.stream_error ?? null
+  cameraOnvifAuthError.value = ui.onvif_auth_error ?? null
 }
 
 const uiByCamera = new Map<string, CameraUiState>()
@@ -676,6 +682,8 @@ watch(selectedCameraUUID, (uuid, previousUuid) => {
     errorDialogMessage.value = null
     warningToastMessage.value = null
     cameraConnectivity.value = 'unknown'
+    cameraStreamError.value = null
+    cameraOnvifAuthError.value = null
     return
   }
 
@@ -697,6 +705,8 @@ watch(selectedCameraUUID, (uuid, previousUuid) => {
     errorDialogMessage.value = null
     warningToastMessage.value = null
     cameraConnectivity.value = 'unknown'
+    cameraStreamError.value = null
+    cameraOnvifAuthError.value = null
   }
 })
 
@@ -906,6 +916,8 @@ const unsubscribeConnectionState = backendClient.onConnectionState((state, previ
     errorDialogMessage.value = null
     warningToastMessage.value = null
     cameraConnectivity.value = 'unknown'
+    cameraStreamError.value = null
+    cameraOnvifAuthError.value = null
     healthDialog.value = healthDialogStateOnDisconnect(healthDialog.value)
   }
   if (state === 'connected') {
