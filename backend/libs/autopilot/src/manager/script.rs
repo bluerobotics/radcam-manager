@@ -488,6 +488,12 @@ impl ScriptHealthTracker {
         let input_changed = input_raw.abs_diff(prev_input) > 10;
         let output_stuck = output_raw == prev_output;
 
+        if input_changed && !output_stuck {
+            // The script answered an input change, so whatever the autopilot reported
+            // earlier is no longer stopping it. Without this the failure latches forever.
+            crate::health::clear_lua_script_failure();
+        }
+
         if !input_changed || !output_stuck {
             self.stale_count = 0;
             return false;
