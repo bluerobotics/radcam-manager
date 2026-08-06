@@ -206,6 +206,16 @@ pub struct CameraUiState {
     pub one_push_awb: Option<OnePushAwbStatus>,
     /// Reachability of this camera from the RadCam Manager.
     pub connectivity: CameraConnectivity,
+    /// MCM video stream failure detail when the stream stayed broken through
+    /// self-heal backoff. `None` when the stream is healthy or not yet assessed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stream_error: Option<String>,
+    /// MCM ONVIF authentication failure detail when login with the expected
+    /// factory credentials fails. `None` when ONVIF login succeeds or is not yet assessed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub onvif_auth_error: Option<String>,
 }
 
 /// Phase of a backend-owned one-push white balance run.
