@@ -125,6 +125,9 @@ pub struct Diagnostics {
     pub state_events_lagged: u64,
     /// Consecutive failing MCM poll cycles; 0 when healthy.
     pub mcm_consecutive_failures: u32,
+    /// Lua reloads the manager triggered after the script stopped answering. A healthy
+    /// system reloads rarely; the count is a support signal, not a user-facing problem.
+    pub script_reloads: u32,
     /// Age of the newest MAVLink frame, milliseconds. `None` when never seen.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
