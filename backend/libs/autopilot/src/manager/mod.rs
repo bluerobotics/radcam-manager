@@ -350,9 +350,10 @@ pub async fn init(
         });
     }
 
-    if mavlink::component().is_ok() {
+    if let Ok(component) = mavlink::component() {
         owned_parameters::rebuild().await;
-        owned_parameters::establish_baseline_from_cache().await;
+        let cache = component.inner.parameters.read().await;
+        owned_parameters::establish_baseline_from_cache(&cache);
         crate::health::refresh_lua_script_status().await;
         return Ok(());
     }
@@ -398,7 +399,10 @@ pub async fn clear_saved_settings() -> Result<()> {
     drop(apply);
 
     owned_parameters::rebuild().await;
-    owned_parameters::establish_baseline_from_cache().await;
+    if let Ok(component) = mavlink::component() {
+        let cache = component.inner.parameters.read().await;
+        owned_parameters::establish_baseline_from_cache(&cache);
+    }
 
     Ok(())
 }
