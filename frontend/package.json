@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build --force",
-    "selfcheck": "npx --yes tsx src/utils/runSelfChecks.ts",
+    "selfcheck": "tsx src/utils/runSelfChecks.ts",
     "lint": "eslint . --fix"
   },
   "dependencies": {
@@ -37,6 +37,7 @@
     "npm-run-all2": "^7.0.2",
     "sass": "1.77.8",
     "sass-embedded": "^1.77.8",
+    "tsx": "4.19.2",
     "typescript": "~5.6.3",
     "unplugin-fonts": "^1.1.1",
     "unplugin-vue-components": "^0.27.2",
