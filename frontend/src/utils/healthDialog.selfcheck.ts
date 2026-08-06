@@ -32,6 +32,7 @@ export function runHealthDialogSelfCheck(): void {
         mavlink_frames_lagged: 0,
         state_events_lagged: 0,
         mcm_consecutive_failures: 3,
+        script_reloads: 0,
         backend_version: 'test',
       },
     },
@@ -152,6 +153,7 @@ export function runHealthDialogSelfCheck(): void {
         mavlink_frames_lagged: 0,
         state_events_lagged: 0,
         mcm_consecutive_failures: 0,
+          script_reloads: 0,
         backend_version: 'test',
       },
     },
@@ -179,6 +181,7 @@ export function runHealthDialogSelfCheck(): void {
         mavlink_frames_lagged: 0,
         state_events_lagged: 0,
         mcm_consecutive_failures: 0,
+          script_reloads: 0,
         backend_version: 'test',
       },
     },
@@ -205,6 +208,7 @@ export function runHealthDialogSelfCheck(): void {
         mavlink_frames_lagged: 0,
         state_events_lagged: 0,
         mcm_consecutive_failures: 0,
+          script_reloads: 0,
         backend_version: 'test',
       },
     },
@@ -233,6 +237,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
+          script_reloads: 0,
           backend_version: 'test',
         },
       },
@@ -249,7 +254,7 @@ export function runHealthDialogSelfCheck(): void {
 
   // A stale or absent autopilot script must offer the one-click fix, and only while the
   // autopilot can actually take it.
-  for (const lua_script of ['missing', 'outdated'] as const) {
+  for (const lua_script of ['missing', 'outdated', 'failing'] as const) {
     const scriptInput = baseInput({
       systemHealth: {
         mcm: 'online',
@@ -263,6 +268,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
+          script_reloads: 0,
           backend_version: 'test',
         },
       },
@@ -298,6 +304,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
+          script_reloads: 0,
           backend_version: 'test',
         },
       },

@@ -300,6 +300,15 @@ function luaScriptProblem(health: SystemHealth): HealthProblem | null {
         body: 'The script installed on the flight controller is not the one this version of RadCam Manager expects, so focus and zoom may misbehave. Update it — the autopilot may reboot.',
         showUpdateLuaScript: true,
       }
+    case 'failing':
+      return {
+        kind: 'lua_script',
+        severity: 'warning',
+        title: 'Autopilot script is failing',
+        body: 'The right script is installed, but the autopilot reports it is erroring, so focus and zoom will not follow the camera. Re-installing it often clears this — the autopilot may reboot.',
+        detail: health.lua_script_detail ?? null,
+        showUpdateLuaScript: true,
+      }
     default:
       return null
   }
