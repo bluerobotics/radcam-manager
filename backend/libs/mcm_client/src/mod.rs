@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddr},
     sync::Mutex,
     time::{Duration, Instant}, // std::time::Instant: sync health_state under Mutex
@@ -55,6 +55,7 @@ pub struct McmHealthSnapshot {
 #[derive(Debug)]
 struct Manager {
     cameras: Cameras,
+    auth_failures: HashMap<Uuid, String>,
     _authentication_task_handler: JoinHandle<()>,
     _start_radcams_task_handler: JoinHandle<()>,
 }
@@ -112,6 +113,7 @@ pub async fn init(mcm_address: SocketAddr, skip_hardware_check: bool) {
     MANAGER.get_or_init(|| {
         RwLock::new(Manager {
             cameras,
+            auth_failures: HashMap::new(),
             _authentication_task_handler,
             _start_radcams_task_handler,
         })
@@ -125,6 +127,7 @@ pub async fn shutdown() {
         lock._authentication_task_handler.abort();
         lock._start_radcams_task_handler.abort();
         lock.cameras.clear();
+        lock.auth_failures.clear();
     }
 }
 
@@ -190,8 +193,8 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
             };
 
             let known_cameras = cameras().await;
-            let radcam_uuids: std::collections::HashSet<Uuid> =
-                radcams.iter().map(|camera| camera.uuid).collect();
+            let radcam_uuids: HashSet<Uuid> = radcams.iter().map(|camera| camera.uuid).collect();
+            prune_auth_failures(&radcam_uuids).await;
             for uuid in known_cameras.keys() {
                 if !radcam_uuids.contains(uuid)
                     && let Err(error) = remove_camera(uuid).await
@@ -215,9 +218,12 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
                 debug!("New RadCam found: {camera:?}");
 
                 if let Err(error) = mcm.authenticate(camera).await {
+                    record_auth_failure(camera.uuid, error.to_string()).await;
                     debug!("Failed authenticating onvif camera {camera:?}: {error:?}");
                     continue;
                 }
+
+                clear_auth_failure(&camera.uuid).await;
 
                 if let Err(error) = add_camera(camera).await {
                     debug!("Failed adding camera {camera:?}: {error:?}");
@@ -305,6 +311,12 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
             }
         }
     }
+}
+
+/// Per-camera ONVIF authentication failure, when MCM discovery sees the camera but login fails.
+pub async fn authentication_failure(uuid: &Uuid) -> Option<String> {
+    let manager = MANAGER.get()?;
+    manager.read().await.auth_failures.get(uuid).cloned()
 }
 
 #[instrument(level = "debug")]
@@ -514,6 +526,31 @@ pub async fn remove_camera(uuid: &Uuid) -> Result<Camera> {
     notify_cameras();
 
     Ok(camera)
+}
+
+async fn record_auth_failure(uuid: Uuid, error: String) {
+    let Some(manager) = MANAGER.get() else {
+        return;
+    };
+    manager.write().await.auth_failures.insert(uuid, error);
+}
+
+async fn clear_auth_failure(uuid: &Uuid) {
+    let Some(manager) = MANAGER.get() else {
+        return;
+    };
+    manager.write().await.auth_failures.remove(uuid);
+}
+
+async fn prune_auth_failures(visible: &HashSet<Uuid>) {
+    let Some(manager) = MANAGER.get() else {
+        return;
+    };
+    manager
+        .write()
+        .await
+        .auth_failures
+        .retain(|uuid, _| visible.contains(uuid));
 }
 
 #[cfg(test)]
