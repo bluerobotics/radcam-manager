@@ -1,13 +1,17 @@
 <template>
   <div class="flex w-full justify-between items-center">
     <div v-if="label">
-      <label
+      <span
         class="text-start mr-6"
         :class="theme === 'dark' ? 'text-white' : 'text-black'"
-      >{{ label }}</label>
+      >{{ label }}</span>
     </div>
     <div
       name="switch-track"
+      role="switch"
+      :aria-label="label"
+      :aria-checked="modelValue === true"
+      :aria-disabled="disabled === true"
       class="relative rounded-[8px] elevation-1 cursor-pointer overflow-hidden"
       :class="[theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]', disabled ? 'opacity-50 cursor-not-allowed' : '']"
       :style="{ minWidth: width || '75px', height: height || '30px' }"

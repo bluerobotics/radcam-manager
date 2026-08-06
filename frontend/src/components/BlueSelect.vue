@@ -1,12 +1,12 @@
 <template>
   <div class="flex w-full justify-between items-center">
     <div v-if="label">
-      <label
+      <span
         class="text-start mr-6"
         :class="theme === 'dark' ? 'text-white' : 'text-black'"
       >
         {{ label }}
-      </label>
+      </span>
     </div>
     <div v-else />
     <slot name="insetElement" />
@@ -22,6 +22,7 @@
         <div class="flex flex-column align-end">
           <button
             v-bind="menuProps"
+            :aria-label="label"
             class="relative inline-flex items-center justify-between pl-4 rounded-[6px] elevation-1"
             :class="[
               theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]',

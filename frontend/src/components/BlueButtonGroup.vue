@@ -1,14 +1,16 @@
 <template>
   <div class="flex w-full justify-between items-center">
     <div v-if="label">
-      <label
+      <span
         class="text-start mr-6"
         :class="theme === 'dark' ? 'text-white' : 'text-black'"
-      >{{ label }}</label>
+      >{{ label }}</span>
     </div>
     <div v-else />
     <slot name="insetElement" />
     <div
+      role="group"
+      :aria-label="label"
       class="relative flex justify-end overflow-hidden rounded-[6px] elevation-1 z-[666]"
       :class="[theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]', disabled ? 'opacity-50 pointer-events-none' : '']"
       :style="{ height: height || '30px' }"
