@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -24,9 +24,11 @@ use uuid::Uuid;
 use autopilot::api::{Action as AutopilotAction, ActuatorsControl};
 
 use crate::web::camera_ui;
+use crate::web::connectivity;
 use crate::web::ws_connections::ConnectionId;
 
 const SLOW_WATCH_INTERVAL: Duration = Duration::from_secs(2);
+const CAMERA_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Cap concurrent slow HTTP fetches so a flood of subscriptions cannot fan out unbounded.
 const SLOW_FETCH_CONCURRENCY: usize = 4;
 /// Cap distinct cameras one WebSocket may subscribe to.
@@ -41,6 +43,7 @@ static REGISTRY: OnceCell<Mutex<Registry>> = OnceCell::new();
 static STATE_TX: OnceCell<broadcast::Sender<CameraStateEvent>> = OnceCell::new();
 static ACTUATORS_DEFAULT_CONFIG: tokio::sync::OnceCell<serde_json::Value> =
     tokio::sync::OnceCell::const_new();
+static STATE_EVENTS_LAGGED: AtomicU64 = AtomicU64::new(0);
 
 struct Registry {
     connections: HashMap<ConnectionId, HashSet<Uuid>>,
@@ -88,6 +91,16 @@ impl Drop for ActuatorsLagResyncGuard {
 #[instrument(level = "debug")]
 pub(crate) fn subscribe_state() -> broadcast::Receiver<CameraStateEvent> {
     state_sender().subscribe()
+}
+
+/// `camera/state` broadcast events dropped because a client lagged behind the broadcast.
+pub(crate) fn state_events_lagged() -> u64 {
+    STATE_EVENTS_LAGGED.load(Ordering::Relaxed)
+}
+
+/// Count `camera/state` events dropped by a lagging subscriber.
+pub(crate) fn record_state_events_lagged(samples: u64) {
+    STATE_EVENTS_LAGGED.fetch_add(samples, Ordering::Relaxed);
 }
 
 /// Emit a UI-only state update for `camera_uuid`.
@@ -332,6 +345,9 @@ pub(crate) fn emit_autopilot_control_update(
         AutopilotAction::SetActuatorsConfig(_) | AutopilotAction::ResetActuatorsConfig => {
             event.actuators_config = Some(result.clone());
             event.actuators_configured = Some(true);
+        }
+        AutopilotAction::ForgetActuatorsConfig => {
+            event.actuators_configured = Some(false);
         }
         _ => return,
     }
@@ -584,6 +600,7 @@ fn ensure_actuators_bridge() {
                     break;
                 }
                 Err(broadcast::error::RecvError::Lagged(samples)) => {
+                    record_state_events_lagged(samples);
                     debug!("Actuators bridge lagged by {samples} updates; re-pushing from manager");
                     if ACTUATORS_LAG_RESYNCING
                         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -641,42 +658,14 @@ fn ensure_slow_watcher_started() {
     tokio::spawn(slow_state_watcher());
 }
 
-/// Drop interest for cameras that disappeared from the MCM list.
-#[instrument(level = "debug", skip_all)]
-pub(crate) fn retain_known_cameras(known: &HashSet<Uuid>) {
-    let mut registry = registry().lock().unwrap();
-    let had_interest = !registry.camera_interest.is_empty();
-
-    for cameras in registry.connections.values_mut() {
-        cameras.retain(|camera_uuid| known.contains(camera_uuid));
-    }
-    registry
-        .connections
-        .retain(|_, cameras| !cameras.is_empty());
-
-    let mut new_interest: HashMap<Uuid, usize> = HashMap::new();
-    for cameras in registry.connections.values() {
-        for camera_uuid in cameras {
-            *new_interest.entry(*camera_uuid).or_insert(0) += 1;
-        }
-    }
-
-    let removed: Vec<Uuid> = registry
-        .camera_interest
-        .keys()
-        .filter(|camera_uuid| !new_interest.contains_key(camera_uuid))
-        .copied()
-        .collect();
-    registry.camera_interest = new_interest;
-    for camera_uuid in removed {
-        registry.last_states.remove(&camera_uuid);
-    }
-
-    if had_interest && registry.camera_interest.is_empty() {
-        autopilot::remove_actuators_state_interest();
-    }
-}
-
+/// Spawns a background watcher on the first call that reacts to MCM camera-list changes.
+///
+/// Probes configured cameras missing from the discovery list, publishes connectivity
+/// updates, and trims stale per-camera state when a camera is no longer discovered,
+/// subscribed, or expected.
+///
+/// Subscriptions, interest counts, and cached snapshots are kept until the last
+/// client unsubscribes via [`unsubscribe`] / [`unsubscribe_connection`].
 #[instrument(level = "debug", skip_all)]
 fn ensure_camera_list_watcher() {
     if CAMERA_LIST_WATCHER_STARTED
@@ -691,11 +680,51 @@ fn ensure_camera_list_watcher() {
         loop {
             match receiver.recv().await {
                 Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
-                    let known: HashSet<Uuid> =
-                        mcm_client::cameras().await.keys().copied().collect();
-                    crate::web::one_push_awb::retain_known_cameras(&known);
-                    retain_known_cameras(&known);
-                    camera_ui::retain_known_cameras(&known);
+                    let discovered = mcm_client::cameras().await;
+                    let known: HashSet<Uuid> = discovered.keys().copied().collect();
+                    for (camera_uuid, camera) in &discovered {
+                        connectivity::observe_camera(*camera_uuid, camera.hostname);
+                    }
+
+                    let expected: HashSet<Uuid> =
+                        autopilot::configured_cameras().await.into_iter().collect();
+                    let missing: Vec<Uuid> = expected.difference(&known).copied().collect();
+                    let updates = stream::iter(missing)
+                        .map(|camera_uuid| async move {
+                            let next = if let Some(hostname) =
+                                connectivity::last_hostname(camera_uuid).await
+                            {
+                                let tcp_ok = connectivity::tcp_probe(hostname, 80).await;
+                                connectivity::classify_table(false, true, false, tcp_ok, true)
+                            } else {
+                                radcam_api::CameraConnectivity::Missing
+                            };
+                            (camera_uuid, next)
+                        })
+                        .buffer_unordered(SLOW_FETCH_CONCURRENCY)
+                        .collect::<Vec<_>>()
+                        .await;
+                    for (camera_uuid, next) in updates {
+                        connectivity::publish(camera_uuid, next, "absent from MCM list");
+                    }
+
+                    let subscribed = {
+                        let registry = registry().lock().unwrap();
+                        registry
+                            .camera_interest
+                            .keys()
+                            .copied()
+                            .collect::<HashSet<_>>()
+                    };
+                    let keep = known
+                        .iter()
+                        .chain(subscribed.iter())
+                        .chain(expected.iter())
+                        .copied()
+                        .collect::<HashSet<_>>();
+                    crate::web::one_push_awb::retain_known_cameras(&keep);
+                    camera_ui::retain_known_cameras(&keep);
+                    connectivity::retain(&keep);
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     warn!("Camera list broadcast closed; stopping camera-list watcher");
@@ -843,9 +872,9 @@ async fn fetch_snapshot(camera_uuid: Uuid, previous: &CameraSnapshot) -> CameraS
     let (actuators_config, actuators_state, video_parameters, base_parameters, advanced_parameters) = tokio::join!(
         fetch_actuators_config(camera_uuid),
         fetch_actuators_state(camera_uuid),
-        fetch_video_parameters(camera_uuid),
-        fetch_base_parameters(camera_uuid),
-        fetch_advanced_parameters(camera_uuid),
+        camera_fetch_timeout(fetch_video_parameters(camera_uuid)),
+        camera_fetch_timeout(fetch_base_parameters(camera_uuid)),
+        camera_fetch_timeout(fetch_advanced_parameters(camera_uuid)),
     );
 
     CameraSnapshot {
@@ -873,12 +902,63 @@ async fn fetch_snapshot(camera_uuid: Uuid, previous: &CameraSnapshot) -> CameraS
 /// Preserves `previous.actuators_state` so a merge does not wipe the live SERVO cache.
 #[instrument(level = "debug", skip_all, fields(%camera_uuid))]
 async fn fetch_slow_snapshot(camera_uuid: Uuid, previous: &CameraSnapshot) -> CameraSnapshot {
-    let (actuators_config, video_parameters, base_parameters, advanced_parameters) = tokio::join!(
-        fetch_actuators_config(camera_uuid),
-        fetch_video_parameters(camera_uuid),
-        fetch_base_parameters(camera_uuid),
-        fetch_advanced_parameters(camera_uuid),
-    );
+    let camera = mcm_client::get_camera(&camera_uuid).await;
+    if let Some(camera) = &camera {
+        connectivity::observe_camera(camera_uuid, camera.hostname);
+    }
+
+    let in_mcm_list = camera.is_some();
+    let expected = connectivity::is_expected(camera_uuid).await;
+
+    // Absent from the MCM list is not a reason to stop talking to the camera: it keeps
+    // answering its HTTP API on the hostname we last saw it on while ONVIF rediscovers.
+    let hostname = connectivity::last_hostname(camera_uuid).await;
+    let probed = hostname.is_some();
+    let tcp_ok = match hostname {
+        Some(hostname) => connectivity::tcp_probe(hostname, 80).await,
+        None => false,
+    };
+
+    // Gate on the live probe, not the latched state: a camera can answer again long
+    // before connectivity walks it back out of Unreachable.
+    let skip_camera_http = !tcp_ok;
+
+    let (actuators_config, video_parameters, base_parameters, advanced_parameters) =
+        if skip_camera_http {
+            (
+                fetch_actuators_config(camera_uuid).await,
+                Err("skipped".into()),
+                Err("skipped".into()),
+                Err("skipped".into()),
+            )
+        } else {
+            tokio::join!(
+                fetch_actuators_config(camera_uuid),
+                camera_fetch_timeout(fetch_video_parameters(camera_uuid)),
+                camera_fetch_timeout(fetch_base_parameters(camera_uuid)),
+                camera_fetch_timeout(fetch_advanced_parameters(camera_uuid)),
+            )
+        };
+
+    let camera_answered =
+        video_parameters.is_ok() || base_parameters.is_ok() || advanced_parameters.is_ok();
+
+    let connectivity_reason;
+    let next = if skip_camera_http {
+        connectivity_reason = if probed {
+            "all camera fetches skipped; tcp :80 refused"
+        } else {
+            "all camera fetches skipped; no known hostname"
+        };
+        connectivity::classify_table(in_mcm_list, expected, false, tcp_ok, probed)
+    } else if camera_answered {
+        connectivity_reason = "camera HTTP answered";
+        connectivity::classify_table(in_mcm_list, expected, true, false, probed)
+    } else {
+        connectivity_reason = "all camera fetches failed; tcp :80 accepted";
+        connectivity::classify_table(in_mcm_list, expected, false, tcp_ok, probed)
+    };
+    connectivity::publish(camera_uuid, next, connectivity_reason);
 
     CameraSnapshot {
         actuators_configured: actuators_configured(&actuators_config, previous),
@@ -993,9 +1073,22 @@ async fn fetch_advanced_parameters(camera_uuid: Uuid) -> Result<serde_json::Valu
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
+async fn camera_fetch_timeout(
+    future: impl std::future::Future<Output = Result<serde_json::Value, String>>,
+) -> Result<serde_json::Value, String> {
+    match tokio::time::timeout(CAMERA_FETCH_TIMEOUT, future).await {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "camera fetch timed out after {}s",
+            CAMERA_FETCH_TIMEOUT.as_secs()
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use radcam_api::{OnePushAwbPhase, OnePushAwbStatus};
 
     #[tokio::test(flavor = "current_thread")]
     async fn reboot_overlay_stays_until_finish_camera_action() {
@@ -1036,6 +1129,49 @@ mod tests {
         let registry = registry().lock().unwrap();
         assert!(!registry.camera_interest.contains_key(&camera_uuid));
         assert!(!registry.last_states.contains_key(&camera_uuid));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn state_events_survive_camera_leaving_the_mcm_list() {
+        let connection_id: ConnectionId = 9001;
+        let camera_uuid = Uuid::from_u128(0xfeed_face_0000_0003_u128);
+
+        assert!(subscribe(connection_id, camera_uuid));
+        {
+            let mut registry = registry().lock().unwrap();
+            registry.last_states.insert(
+                camera_uuid,
+                CameraSnapshot {
+                    video_parameters: Some(serde_json::json!({ "fps": 30 })),
+                    ..Default::default()
+                },
+            );
+        }
+
+        camera_ui::set_one_push_awb(
+            camera_uuid,
+            Some(OnePushAwbStatus {
+                phase: OnePushAwbPhase::Running,
+            }),
+        );
+        assert!(camera_ui::get(camera_uuid).one_push_awb.is_some());
+
+        let registry = registry().lock().unwrap();
+        assert!(registry.camera_interest.contains_key(&camera_uuid));
+        assert!(registry.last_states.contains_key(&camera_uuid));
+        drop(registry);
+        assert!(camera_ui::get(camera_uuid).one_push_awb.is_some());
+
+        let mut receiver = subscribe_state();
+        camera_ui::set_one_push_awb(camera_uuid, None);
+        let event = receiver.try_recv().expect("emit_ui should broadcast");
+        assert_eq!(event.camera_uuid, camera_uuid);
+        assert_eq!(
+            event.ui.as_ref().and_then(|ui| ui.one_push_awb.as_ref()),
+            None
+        );
+
+        unsubscribe_connection(connection_id);
     }
 
     #[test]
