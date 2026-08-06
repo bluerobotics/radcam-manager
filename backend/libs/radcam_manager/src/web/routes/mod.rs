@@ -145,23 +145,34 @@ mod tests {
     }
 
     fn hashed_embedded_asset_path() -> Option<String> {
-        for file in HTML_DIST.files() {
-            let path = file.path().to_string_lossy();
-            if path == "index.html" {
-                continue;
+        fn walk(dir: &Dir) -> Option<String> {
+            for file in dir.files() {
+                let embedded = file.path().to_string_lossy();
+                let path = embedded.strip_suffix(".gz").unwrap_or(&embedded);
+                if path == "index.html" {
+                    continue;
+                }
+                if path.ends_with(".js") || path.ends_with(".css") {
+                    return Some(path.to_owned());
+                }
             }
-            if path.ends_with(".js") || path.ends_with(".css") {
-                return Some(path.into_owned());
+            for subdir in dir.dirs() {
+                if let Some(path) = walk(subdir) {
+                    return Some(path);
+                }
             }
+            None
         }
-        None
+
+        walk(&HTML_DIST)
     }
 
     #[tokio::test]
     async fn entry_document_cache_control() {
-        if !index_html_embedded() {
-            return;
-        }
+        assert!(
+            index_html_embedded(),
+            "embedded frontend is missing index.html; build the frontend first (`cd frontend && npm run build`)"
+        );
 
         let entry = router(1)
             .oneshot(
