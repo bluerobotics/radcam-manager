@@ -1,20 +1,45 @@
 <template>
   <div class="px-6 py-4">
+    <v-alert
+      v-if="isConfigured === false"
+      type="warning"
+      variant="tonal"
+      class="mb-4"
+      theme="dark"
+    >
+      <div class="text-sm font-medium">
+        Hardware setup required
+      </div>
+      <div class="text-sm mt-1 opacity-90">
+        Complete the Hardware setup section below to enable full camera controls.
+      </div>
+      <div class="mt-3">
+        <v-btn
+          class="py-1 px-3 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
+          size="small"
+          variant="elevated"
+          theme="dark"
+          @click="scrollToHardwareSetup"
+        >
+          Go to setup
+        </v-btn>
+      </div>
+    </v-alert>
     <ExpansiblePanel
       title="Image"
-      :expanded="isConfigured"
+      :expanded="panelsOpen.image"
       theme="dark"
     >
       <BlueButtonGroup
         label="Water environment White Balance"
-        :disabled="!isConfigured || props.disabled || wbBusy"
+        :disabled="isConfigured !== true || cameraBackedDisabled || wbBusy"
         :button-items="WhiteBalanceSceneButtonItems"
         theme="dark"
         type="switch"
       />
       <BlueButtonGroup
         label="White Balance Mode"
-        :disabled="!isConfigured || props.disabled || wbBusy"
+        :disabled="isConfigured !== true || cameraBackedDisabled || wbBusy"
         :button-items="whiteBalanceModeButtonItems"
         theme="dark"
         type="switch"
@@ -24,7 +49,7 @@
         class="d-flex flex-col align-end mt-6"
       >
         <v-btn
-          :disabled="props.disabled || wbBusy"
+          :disabled="cameraBackedDisabled || wbBusy"
           class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
           size="small"
           variant="elevated"
@@ -47,7 +72,7 @@
       >
         <BlueSlider
           v-model="baseParams.awb_red"
-          :disabled="!isConfigured || props.disabled || wbBusy"
+          :disabled="isConfigured !== true || cameraBackedDisabled || wbBusy"
           name="red"
           label="Red"
           :min="0"
@@ -60,7 +85,7 @@
         />
         <BlueSlider
           v-model="baseParams.awb_blue"
-          :disabled="!isConfigured || props.disabled || wbBusy"
+          :disabled="isConfigured !== true || cameraBackedDisabled || wbBusy"
           name="blue"
           label="Blue"
           :min="0"
@@ -76,13 +101,13 @@
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Actuators"
-      :expanded="isConfigured"
+      :expanded="panelsOpen.actuators"
       theme="dark"
     >
       <BlueSlider
         v-if="actuatorsState"
         v-model="actuatorsState.focus"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="actuatorControlsDisabled"
         name="focus"
         label="Focus"
         :min="0"
@@ -101,7 +126,7 @@
       <BlueSlider
         v-if="actuatorsState"
         v-model="actuatorsState.zoom"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="actuatorControlsDisabled"
         name="zoom"
         label="Zoom"
         :min="0"
@@ -121,7 +146,7 @@
       <BlueSlider
         v-if="actuatorsState && false"
         v-model="actuatorsState.tilt"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="actuatorControlsDisabled"
         name="tilt"
         label="Tilt"
         :min="0"
@@ -140,13 +165,13 @@
       <ExpansiblePanel
         class="d-flex flex-col align-end mt-4"
         title="more"
-        :expanded="isConfigured && !cockpitMode"
+        :expanded="panelsOpen.actuatorsMore"
         theme="dark"
       >
         <div>
           <BlueSwitch
             v-model="currentFocusAndZoomParams.enable_focus_and_zoom_correlation"
-            :disabled="!isConfigured || props.disabled"
+            :disabled="actuatorControlsDisabled"
             name="focus-zoom-correlation"
             label="Enable focus and zoom correlation"
             theme="dark"
@@ -154,7 +179,7 @@
           />
           <!-- <BlueSlider
             v-model="focusOffsetUI"
-            :disabled="!isConfigured || props.disabled"
+            :disabled="isConfigured !== true || cameraBackedDisabled"
             name="focus-offset"
             label="Focus compensation"
             :min="-10"
@@ -170,12 +195,12 @@
     </ExpansiblePanel>
     <ExpansiblePanel
       title="Video"
-      :expanded="isConfigured && !cockpitMode"
+      :expanded="panelsOpen.video"
       theme="dark"
     >
       <BlueSelect
         v-model="selectedVideoResolution"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="isConfigured !== true || cameraBackedDisabled"
         label="Resolution"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
@@ -183,7 +208,7 @@
       />
       <BlueSelect
         v-model="selectedVideoBitrate"
-        :disabled="!isConfigured || props.disabled"
+        :disabled="isConfigured !== true || cameraBackedDisabled"
         label="Bitrate"
         :items="bitrateOptions || [{ name: 'No bitrates available', value: null }]"
         theme="dark"
@@ -264,7 +289,7 @@
         class="flex justify-end mt-8 mb-[-20px]"
       >
         <v-btn
-          :disabled="!isConfigured || props.disabled"
+          :disabled="isConfigured !== true || cameraBackedDisabled"
           class="py-1 px-3 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
           :class="{ 'opacity-50 pointer-events-none': !hasUnsavedVideoChanges }"
           size="small"
@@ -277,9 +302,11 @@
       </div>
     </ExpansiblePanel>
     <ExpansiblePanel
+      ref="hardwareSetupPanel"
       title="Hardware setup"
-      :expanded="!isConfigured"
+      :expanded="panelsOpen.hardware"
       theme="dark"
+      @update:expanded="panelsOpen.hardware = $event"
     >
       <div>
         <p class="mb-3">
@@ -292,7 +319,7 @@
           <li><b>Tilt</b>: Connect the camera's Tilt cable to Navigator's <b>PWM Channel 16</b></li>
         </ul>
         <p class="mb-3">
-          Click <b>APPLY DEFAULT HARDWARE SETUP</b> to use the recommended configuration above, or click <b>ADVANCED SETUP</b> to customize your channel assignments and parameters.
+          Click <b>Apply default hardware setup</b> to use the recommended configuration above, or click <b>Advanced setup</b> to customize your channel assignments and parameters.
         </p>
       </div>
 
@@ -301,9 +328,15 @@
         v-if="!showAdvancedHardware"
         class="mb-4 p-3"
       >
+        <p
+          v-if="hardwareSetupDisabledReason"
+          class="text-sm opacity-80 mb-3 text-end"
+        >
+          {{ hardwareSetupDisabledReason }}
+        </p>
         <div class="d-flex flex-row ga-3 mt-5 justify-end">
           <v-btn
-            :disabled="props.disabled"
+            :disabled="hardwareSetupControlsDisabled"
             class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
@@ -316,12 +349,12 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="props.disabled"
+            :disabled="hardwareSetupControlsDisabled"
             :loading="props.loading"
             theme="dark"
             @click="resetToRecommendedDefaults"
           >
-            APPLY DEFAULT HARDWARE SETUP
+            Apply default hardware setup
           </v-btn>
         </div>
       </div>
@@ -336,7 +369,7 @@
         >
           <BlueSelect
             v-model="intendedFocusAndZoomParams.focus_channel"
-            :disabled="props.disabled"
+            :disabled="hardwareSetupControlsDisabled"
             label="PWM Output Channel"
             :items="availableServoChannelOptions"
             :error-messages="channelErrors.focus_channel ? [channelErrors.focus_channel] : []"
@@ -346,7 +379,7 @@
           <div class="d-flex flex-row ga-3 mt-5">
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.focus_channel_min"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Min (µs)"
               type="number"
               density="compact"
@@ -356,7 +389,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.focus_channel_trim"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Trim (µs)"
               type="number"
               density="compact"
@@ -366,7 +399,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.focus_channel_max"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Max (µs)"
               type="number"
               density="compact"
@@ -377,7 +410,7 @@
           </div>
           <v-text-field
             v-model.number="intendedFocusAndZoomParams.focus_margin_gain"
-            :disabled="props.disabled"
+            :disabled="hardwareSetupControlsDisabled"
             type="number"
             label="Focus Margin Gain"
             density="compact"
@@ -396,7 +429,7 @@
         >
           <BlueSelect
             v-model="intendedFocusAndZoomParams.zoom_channel"
-            :disabled="props.disabled"
+            :disabled="hardwareSetupControlsDisabled"
             label="PWM Output Channel"
             :items="availableServoChannelOptions"
             :error-messages="channelErrors.zoom_channel ? [channelErrors.zoom_channel] : []"
@@ -406,7 +439,7 @@
           <div class="d-flex flex-row ga-3 mt-5">
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.zoom_channel_min"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Min (µs)"
               type="number"
               density="compact"
@@ -416,7 +449,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.zoom_channel_trim"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Trim (µs)"
               type="number"
               density="compact"
@@ -426,7 +459,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.zoom_channel_max"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Max (µs)"
               type="number"
               density="compact"
@@ -445,7 +478,7 @@
         >
           <BlueSelect
             v-model="intendedFocusAndZoomParams.script_channel"
-            :disabled="props.disabled"
+            :disabled="hardwareSetupControlsDisabled"
             label="PWM Input Channel"
             :items="availableServoChannelOptions"
             :error-messages="channelErrors.script_channel ? [channelErrors.script_channel] : []"
@@ -455,7 +488,7 @@
           <div class="d-flex flex-row ga-3 mt-5">
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.script_channel_min"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Min (µs)"
               type="number"
               density="compact"
@@ -465,7 +498,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.script_channel_trim"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Trim (µs)"
               type="number"
               density="compact"
@@ -475,7 +508,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.script_channel_max"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Max (µs)"
               type="number"
               density="compact"
@@ -487,7 +520,7 @@
           <div class="d-flex flex-column ga-4 mt-4">
             <BlueSelect
               v-model="intendedFocusAndZoomParams.script_function"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Script Function"
               :items="scriptFunctionOptions"
               theme="dark"
@@ -505,7 +538,7 @@
             />
             <BlueSwitch
               v-model="intendedFocusAndZoomParams.enable_focus_and_zoom_correlation"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               name="focus-zoom-correlation"
               label="Focus/Zoom Correlation"
               theme="dark"
@@ -521,7 +554,7 @@
         >
           <BlueSelect
             v-model="intendedFocusAndZoomParams.tilt_channel"
-            :disabled="props.disabled"
+            :disabled="hardwareSetupControlsDisabled"
             label="PWM Output Channel"
             :items="availableServoChannelOptions"
             :error-messages="channelErrors.tilt_channel ? [channelErrors.tilt_channel] : []"
@@ -531,7 +564,7 @@
           <div class="d-flex flex-row ga-3 mt-5">
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.tilt_channel_min"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Min (µs)"
               type="number"
               density="compact"
@@ -541,7 +574,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.tilt_channel_trim"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Trim (µs)"
               type="number"
               density="compact"
@@ -551,7 +584,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.tilt_channel_max"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Max (µs)"
               type="number"
               density="compact"
@@ -563,7 +596,7 @@
           <div class="d-flex flex-row ga-3 pt-4">
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.tilt_mnt_pitch_min"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Pitch Min (°)"
               type="number"
               density="compact"
@@ -573,7 +606,7 @@
             />
             <v-text-field
               v-model.number="intendedFocusAndZoomParams.tilt_mnt_pitch_max"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Pitch Max (°)"
               type="number"
               density="compact"
@@ -585,14 +618,14 @@
           <div class="d-flex flex-column ga-4 mt-4">
             <BlueSwitch
               v-model="intendedFocusAndZoomParams.tilt_channel_reversed"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               name="tilt-channel-reversed"
               label="Reverse Direction"
               theme="dark"
             />
             <BlueSelect
               v-model="intendedFocusAndZoomParams.tilt_mnt_type"
-              :disabled="props.disabled"
+              :disabled="hardwareSetupControlsDisabled"
               label="Mount Type"
               :items="mountTypeOptions"
               theme="dark"
@@ -603,9 +636,16 @@
         </ExpansiblePanel>
 
         <!-- Action Buttons -->
-        <div class="d-flex flex-row ga-3 mt-5 justify-end">
+        <div class="d-flex flex-col align-end ga-3 mt-5">
+          <p
+            v-if="hardwareSetupDisabledReason"
+            class="text-sm opacity-80 mb-0"
+          >
+            {{ hardwareSetupDisabledReason }}
+          </p>
+          <div class="d-flex flex-row ga-3 justify-end">
           <v-btn
-            :disabled="props.disabled"
+            :disabled="hardwareSetupControlsDisabled"
             class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
@@ -618,21 +658,23 @@
             class="py-1 px-3 ml-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
             size="small"
             variant="elevated"
-            :disabled="hasChannelErrors || props.disabled"
+            :disabled="hasChannelErrors || hardwareSetupControlsDisabled"
             :loading="props.loading"
             theme="dark"
             @click="saveHardwareSetup"
           >
-            APPLY CUSTOM HARDWARE SETUP
+            Apply custom hardware setup
           </v-btn>
+          </div>
         </div>
       </div>
     </ExpansiblePanel>
   </div>
   
   <WelcomeDialog
-    :show="(!isConfigured) && showWelcomeDialog"
+    :show="showWelcomeOverlay"
     @close="showWelcomeDialog = false"
+    @go-to-setup="onWelcomeGoToSetup"
   />
 </template>
 
@@ -652,21 +694,29 @@ import {
   type ActuatorFlight,
 } from '@/utils/actuatorFlight'
 import { createPendingFields } from '@/utils/pendingFields'
+import { rebootCamera } from '@/utils/rebootCamera'
 import { useCameraState } from '@/utils/useCameraState'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
 import type { CameraStateEvent, OnePushAwbStatus } from '@/bindings/radcam_api'
 import WelcomeDialog from './WelcomeDialog.vue'
+import { useSystemHealth } from '@/utils/useSystemHealth'
 
 
 const props = defineProps<{
   selectedCameraUuid: string | null
   disabled: boolean
+  cameraControlsDisabled: boolean
   loading: boolean
   cockpitMode: boolean
   onePushAwb?: OnePushAwbStatus | null
+  backendConnected: boolean
+  welcomeOverlayUnblocked: boolean
 }>()
 
+const { autopilotState, autopilotOnline } = useSystemHealth()
+
 const wbBusy = computed(() => props.onePushAwb != null)
+const cameraBackedDisabled = computed(() => props.cameraControlsDisabled)
 const onePushLabel = computed(() => {
   if (props.onePushAwb != null) return 'Processing...'
   return 'One-Push White Balance'
@@ -825,8 +875,67 @@ const actuatorsRequestGeneration = ref(0)
 const pendingBase = createPendingFields<keyof BaseParameterSetting, unknown>()
 const correlationLatch = ref<{ token: number; value: boolean | null } | null>(null)
 let nextCorrelationToken = 1
-const isConfigured = ref<boolean>(false)
+const isConfigured = ref<boolean | null>(null)
+/** Sticky expand state — set once when configuration is first known, never flapped by connectivity. */
+const panelsOpen = ref({
+  image: true,
+  actuators: true,
+  actuatorsMore: true,
+  video: true,
+  hardware: false,
+})
+
+/**
+ * Setup-first while unconfigured, day-to-day panels once configured.
+ *
+ * Cockpit runs in a short iframe, so the video panel stays collapsed there.
+ */
+const applyPanelLayout = (configured: boolean): void => {
+  panelsOpen.value = {
+    image: configured,
+    actuators: configured,
+    actuatorsMore: configured && !props.cockpitMode,
+    video: configured && !props.cockpitMode,
+    hardware: !configured,
+  }
+}
+
+watch(isConfigured, (value, previous) => {
+  if (previous !== null || value === null) return
+  applyPanelLayout(value === true)
+})
+
+const actuatorControlsDisabled = computed(
+  () => isConfigured.value !== true || props.disabled || !autopilotOnline.value,
+)
+const hardwareSetupControlsDisabled = computed(
+  () => props.disabled || !autopilotOnline.value,
+)
+const hardwareSetupDisabledReason = computed(() => {
+  if (!hardwareSetupControlsDisabled.value) return null
+  if (!props.backendConnected) return 'Connect to the backend to apply hardware setup.'
+  if (!autopilotOnline.value) return 'Autopilot must be online to apply hardware setup.'
+  return null
+})
 const showWelcomeDialog = ref<boolean>(true)
+const showWelcomeOverlay = computed(
+  () =>
+    props.welcomeOverlayUnblocked
+    && isConfigured.value === false
+    && showWelcomeDialog.value
+    && autopilotState.value !== 'syncing',
+)
+const hardwareSetupPanel = ref<InstanceType<typeof ExpansiblePanel> | null>(null)
+
+const scrollToHardwareSetup = (): void => {
+  panelsOpen.value = { ...panelsOpen.value, hardware: true }
+  hardwareSetupPanel.value?.$el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const onWelcomeGoToSetup = (): void => {
+  scrollToHardwareSetup()
+  showWelcomeDialog.value = false
+}
 const showAdvancedHardware = ref(false)
 const intendedFocusAndZoomParams = ref<ActuatorsParametersConfig>({
   camera_id: null,
@@ -884,13 +993,16 @@ const hasUnsavedVideoChanges = ref<boolean>(false)
 
 watch(
   () => props.selectedCameraUuid,
-  () => {
+  (uuid, previousUuid) => {
+    // Same camera identity — keep panel/config state across list flaps.
+    if (uuid === previousUuid) return
+
     hasUserEditedVideo.value = false
     hasUnsavedVideoChanges.value = false
     actuatorsRequestGeneration.value += 1
     pendingBase.clear()
     correlationLatch.value = null
-    isConfigured.value = false
+    isConfigured.value = null
     showAdvancedHardware.value = false
     const emptyParams: ActuatorsParametersConfig = {
       camera_id: null,
@@ -1593,13 +1705,7 @@ const doRestart = (cameraUuid?: string) => {
     return
   }
 
-  const payload = {
-    camera_uuid: uuid,
-    action: "restart",
-  }
-
-  backendClient
-    .request('POST', '/camera/control', payload)
+  rebootCamera(uuid)
     .then((data) => {
       console.log("Got an answer from the restarting request", data)
     })
@@ -1715,6 +1821,8 @@ const saveHardwareSetup = async (): Promise<void> => {
         applyConfigParameters(newParams)
         intendedFocusAndZoomParams.value = { ...newParams }
       }
+      showAdvancedHardware.value = false
+      applyPanelLayout(true)
     })
     .catch((error) => {
       const message = 'Error saving hardware setup'
@@ -1748,6 +1856,8 @@ const resetToRecommendedDefaults = async (): Promise<void> => {
         applyConfigParameters(newParams)
         intendedFocusAndZoomParams.value = { ...newParams }
       }
+      showAdvancedHardware.value = false
+      applyPanelLayout(true)
     })
     .catch((error) => {
       const message = 'Failed to apply default hardware setup'
@@ -1755,7 +1865,14 @@ const resetToRecommendedDefaults = async (): Promise<void> => {
     })
 }
 
-defineExpose({ updateLuaScript, applyRecommendedCameraSettings, rebootCamera: doRestart })
+defineExpose({
+  showWelcomeDialog,
+  isConfigured,
+  updateLuaScript,
+  applyRecommendedCameraSettings,
+  rebootCamera: doRestart,
+  scrollToHardwareSetup,
+})
 
 watch(
   () => selectedVideoResolution.value,
