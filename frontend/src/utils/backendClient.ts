@@ -33,6 +33,8 @@ export type { ConnectionStats }
 const REQUEST_TIMEOUT_MS = 180_000
 const REQUEST_MAX_ATTEMPTS = 3
 const RECONNECT_BASE_MS = 1_000
+/** Give up on a WebSocket stuck in CONNECTING and let backoff schedule the next try. */
+const HANDSHAKE_TIMEOUT_MS = 10_000
 const RECONNECT_MAX_MS = 30_000
 const STALE_CONNECTION_MS = 90_000
 
@@ -214,7 +216,17 @@ class BackendClient {
       const ws = new WebSocket(this.wsUrl())
       this.ws = ws
 
+      // A handshake started while the backend was down can stay in CONNECTING
+      // forever. Reconnect is driven by onclose, so force one: without this the
+      // client waits on a dead socket and the UI stays disabled until reload.
+      const handshakeTimeout = setTimeout(() => {
+        if (this.ws === ws && ws.readyState === WebSocket.CONNECTING) {
+          ws.close()
+        }
+      }, HANDSHAKE_TIMEOUT_MS)
+
       ws.onopen = () => {
+        clearTimeout(handshakeTimeout)
         settled = true
         this.connectPromise = null
         this.lastMessageAt = Date.now()
@@ -236,6 +248,7 @@ class BackendClient {
       }
 
       ws.onclose = () => {
+        clearTimeout(handshakeTimeout)
         if (this.ws !== ws) return
         this.ws = null
         this.connectPromise = null
