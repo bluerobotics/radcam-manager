@@ -109,6 +109,7 @@
 
 <script setup lang="ts">
 import { backendClient } from '@/utils/backendClient'
+import { rebootCamera } from '@/utils/rebootCamera'
 import { useCameraState } from '@/utils/useCameraState'
 import { computed, ref, toRef, watch } from "vue"
 import { enumToOptions } from "@/utils/enumUtils"
@@ -364,13 +365,7 @@ const doRestart = (cameraUuid?: string) => {
     processingUpdate.value = true
   }
 
-  const payload = {
-    camera_uuid: uuid,
-    action: "restart",
-  }
-
-  backendClient
-    .request('POST', '/camera/control', payload)
+  rebootCamera(uuid)
     .then((data) => {
       if (
         props.selectedCameraUuid !== uuid ||
