@@ -441,9 +441,16 @@ async fn classifier_task() {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    // The script file is also written by hand, by MAVFTP and by a reflashed SD card, and
+    // none of those tell us. Re-reading it is the only way to notice, but it renders the
+    // expected script to compare against, so it is deliberately far slower than the tick.
+    let mut script_interval = tokio::time::interval(Duration::from_secs(10));
+    script_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
             _ = interval.tick() => {}
+            _ = script_interval.tick() => refresh_lua_script_status().await,
             () = notify.notified() => {}
         }
         run_classifier_async().await;
