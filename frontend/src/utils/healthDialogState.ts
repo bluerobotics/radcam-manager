@@ -38,7 +38,7 @@ export type HealthDialogState = {
   mode: HealthDialogMode
   /** Dialog stays open after recovery until the user clicks Close. */
   awaitingClose: boolean
-  mcmAttemptsPeak: number
+  mcmOutageMsPeak: number
   /** True once this episode hit a degraded (banner/modal-worthy) problem. */
   episodeDegraded: boolean
   /** Problem kinds seen during this degraded episode (for recovery copy). */
@@ -59,7 +59,7 @@ export function initialHealthDialogState(): HealthDialogState {
   return {
     mode: 'hidden',
     awaitingClose: false,
-    mcmAttemptsPeak: 0,
+    mcmOutageMsPeak: 0,
     episodeDegraded: false,
     episodeKinds: [],
     problemFirstSeen: {},
@@ -78,7 +78,14 @@ export function reduceHealthDialogOnProblems(
       return { ...state, mode, awaitingClose: false, episodeDegraded: true, forgetSuccess: false }
     }
     if (state.awaitingClose) {
-      return { ...state, awaitingClose: false, episodeDegraded: true, forgetSuccess: false }
+      return {
+        ...state,
+        awaitingClose: false,
+        episodeDegraded: true,
+        forgetSuccess: false,
+        episodeKinds: [],
+        mcmOutageMsPeak: 0,
+      }
     }
     if (!state.episodeDegraded) {
       return { ...state, episodeDegraded: true }
@@ -147,15 +154,10 @@ export function degradedBannerCopy(problems: HealthProblem[]): { title: string; 
 export function recoveryWhileMinimizedToast(state: HealthDialogState): string {
   return recoveryMessage(
     state.episodeKinds,
-    state.mcmAttemptsPeak,
+    state.mcmOutageMsPeak,
     state.forgetSuccess,
     false,
   )
-}
-
-export function noteMcmAttempts(state: HealthDialogState, consecutiveFailures: number): HealthDialogState {
-  if (consecutiveFailures <= state.mcmAttemptsPeak) return state
-  return { ...state, mcmAttemptsPeak: consecutiveFailures }
 }
 
 export function noteActiveProblems(
@@ -163,9 +165,10 @@ export function noteActiveProblems(
   problems: HealthProblem[],
   nowMs: number,
 ): HealthDialogState {
-  const firstSeen = { ...state.problemFirstSeen }
+  const firstSeen: Partial<Record<HealthProblemKind, number>> = {}
   const kinds = [...state.episodeKinds]
   let changed = false
+  let mcmOutageMsPeak = state.mcmOutageMsPeak
 
   for (const problem of problems) {
     if (problem.severity === 'error' || problem.severity === 'warning') {
@@ -174,14 +177,30 @@ export function noteActiveProblems(
         changed = true
       }
     }
-    if (firstSeen[problem.kind] == null) {
+    const prev = state.problemFirstSeen[problem.kind]
+    if (prev != null) {
+      firstSeen[problem.kind] = prev
+    } else {
       firstSeen[problem.kind] = nowMs
       changed = true
     }
   }
 
+  const mcmSince = firstSeen.mcm
+  if (mcmSince != null) {
+    const elapsed = nowMs - mcmSince
+    if (elapsed > mcmOutageMsPeak) {
+      mcmOutageMsPeak = elapsed
+      changed = true
+    }
+  }
+
+  if (Object.keys(firstSeen).length !== Object.keys(state.problemFirstSeen).length) {
+    changed = true
+  }
+
   if (!changed) return state
-  return { ...state, episodeKinds: kinds, problemFirstSeen: firstSeen }
+  return { ...state, episodeKinds: kinds, problemFirstSeen: firstSeen, mcmOutageMsPeak }
 }
 
 export function noteForgetSuccess(state: HealthDialogState): HealthDialogState {
@@ -221,7 +240,7 @@ export function healthDialogView(state: HealthDialogState, degraded: boolean): H
     ? recoveryTitle(state.episodeKinds, state.forgetSuccess)
     : null
   const recoveryMessageText = awaitingRecovery
-    ? recoveryMessage(state.episodeKinds, state.mcmAttemptsPeak, state.forgetSuccess)
+    ? recoveryMessage(state.episodeKinds, state.mcmOutageMsPeak, state.forgetSuccess)
     : null
   return {
     showDialog,

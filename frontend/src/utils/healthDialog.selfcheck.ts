@@ -4,13 +4,14 @@ import {
   healthDialogView,
   initialHealthDialogState,
   minimizeHealthDialog,
-  noteMcmAttempts,
+  noteActiveProblems,
   recoveryWhileMinimizedToast,
   reduceHealthDialogOnProblems,
   reopenHealthDialog,
 } from './healthDialogState'
 import {
   collectHealthProblems,
+  formatProblemSince,
   recoveryMessage,
   recoveryTitle,
   type HealthProblemsInput,
@@ -39,11 +40,11 @@ export function runHealthDialogSelfCheck(): void {
     cameraUuid: null,
     cameraLabel: '',
     cameraConnectivity: 'unknown',
-    mcmAttemptsPeak: 0,
     ...overrides,
   })
 
   const down = evaluate(baseInput())
+  const mcmDownProblems = evaluateHealthFlags(baseInput()).problems
   if (!down.active || !down.degraded) {
     throw new Error('healthDialog: MCM down must be active+degraded')
   }
@@ -54,13 +55,15 @@ export function runHealthDialogSelfCheck(): void {
   state = reduceHealthDialogOnProblems(initialHealthDialogState(), down.degraded)
   if (state.mode !== 'open') throw new Error('healthDialog: must auto-open on degraded problems')
 
+  state = noteActiveProblems(state, mcmDownProblems, 5000)
+  state = noteActiveProblems(state, mcmDownProblems, 10_000)
+
   // Idempotent while already open — must keep the same reference.
   const openAgain = reduceHealthDialogOnProblems(state, down.degraded)
   if (openAgain !== state) {
     throw new Error('healthDialog: reduce while open must be idempotent')
   }
 
-  state = noteMcmAttempts(state, 5)
   state = minimizeHealthDialog(state)
   let view = healthDialogView(state, true)
   if (view.showDialog || !view.showDegradedBanner) {
@@ -74,7 +77,6 @@ export function runHealthDialogSelfCheck(): void {
   }
 
   // Recovery while open → sticky until Close.
-  state = noteMcmAttempts(state, 5)
   state = reduceHealthDialogOnProblems(state, false)
   view = healthDialogView(state, false)
   if (!view.showDialog || !view.awaitingClose) {
@@ -84,10 +86,10 @@ export function runHealthDialogSelfCheck(): void {
     throw new Error(`healthDialog: bad recovery title: ${recoveryTitle(['mcm'], false)}`)
   }
   if (
-    recoveryMessage(['mcm'], 5, false)
+    recoveryMessage(['mcm'], 5000, false)
     !== 'BlueOS video service is back (after about 5 sec). Click Close to continue.'
   ) {
-    throw new Error(`healthDialog: bad recovery line: ${recoveryMessage(['mcm'], 5, false)}`)
+    throw new Error(`healthDialog: bad recovery line: ${recoveryMessage(['mcm'], 5000, false)}`)
   }
   if (recoveryMessage([], 0, false) !== 'All clear. Click Close to continue.') {
     throw new Error(`healthDialog: bad empty recovery line: ${recoveryMessage([], 0, false)}`)
@@ -96,7 +98,7 @@ export function runHealthDialogSelfCheck(): void {
     recoveryWhileMinimizedToast({
       ...initialHealthDialogState(),
       episodeKinds: ['mcm'],
-      mcmAttemptsPeak: 5,
+      mcmOutageMsPeak: 5000,
     })
     !== 'BlueOS video service is back (after about 5 sec).'
   ) {
@@ -104,7 +106,7 @@ export function runHealthDialogSelfCheck(): void {
   }
 
   state = closeHealthDialog()
-  if (state.mode !== 'hidden' || state.mcmAttemptsPeak !== 0) {
+  if (state.mode !== 'hidden' || state.mcmOutageMsPeak !== 0) {
     throw new Error('healthDialog: close must reset')
   }
 
@@ -553,6 +555,75 @@ export function runHealthDialogSelfCheck(): void {
   )
   if (onvifAuthWhileUnreachable.some((problem) => problem.title === 'Camera ONVIF password does not match')) {
     throw new Error('healthDialog: ONVIF auth must stay hidden while camera is unreachable')
+  }
+
+  const mcmSince = 1_000_000
+  const mcmNow = mcmSince + 45_000
+  const mcmProgress = collectHealthProblems(
+    baseInput({ problemFirstSeen: { mcm: mcmSince }, nowMs: mcmNow }),
+  )[0]?.progress
+  if (mcmProgress !== 'Retrying every 1 sec (about 45 sec so far)…') {
+    throw new Error(`healthDialog: MCM progress must use first-seen clock: ${mcmProgress}`)
+  }
+
+  const autopilotError = {
+    kind: 'autopilot' as const,
+    severity: 'error' as const,
+    title: 'MAVLink connection unavailable',
+    body: 'test',
+  }
+  let firstSeenState = noteActiveProblems(initialHealthDialogState(), [autopilotError], 1_000_000)
+  firstSeenState = noteActiveProblems(firstSeenState, [], 1_060_000)
+  firstSeenState = noteActiveProblems(firstSeenState, [autopilotError], 1_120_000)
+  if (firstSeenState.problemFirstSeen.autopilot !== 1_120_000) {
+    throw new Error(
+      `healthDialog: reappeared problem must get fresh first-seen: ${firstSeenState.problemFirstSeen.autopilot}`,
+    )
+  }
+
+  const sinceTenSec = formatProblemSince(1_000_000, 1_010_000)
+  if (!sinceTenSec.includes('(10 sec)')) {
+    throw new Error(`healthDialog: formatProblemSince must show seconds below 1 min: ${sinceTenSec}`)
+  }
+
+  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
+  state = noteActiveProblems(state, mcmDownProblems, 5000)
+  state = noteActiveProblems(state, mcmDownProblems, 60_000)
+  state = reduceHealthDialogOnProblems(state, false)
+  state = reduceHealthDialogOnProblems(state, true)
+  if (state.episodeKinds.length !== 0 || state.mcmOutageMsPeak !== 0) {
+    throw new Error('healthDialog: new problem during recovery must reset episode tracking')
+  }
+
+  const unresponsive = collectHealthProblems(
+    baseInput({
+      systemHealth: {
+        mcm: 'online',
+        cameras_discovered: 1,
+        expected_missing: [],
+        autopilot: 'online',
+        lua_scripting_disabled: false,
+        lua_script: 'ok',
+        diagnostics: {
+          mavlink_reconnects: 0,
+          mavlink_frames_lagged: 0,
+          state_events_lagged: 0,
+          mcm_consecutive_failures: 0,
+          script_reloads: 0,
+          backend_version: 'test',
+        },
+      },
+      cameraUuid: 'cam',
+      cameraLabel: 'RadCam',
+      cameraConnectivity: 'unresponsive',
+    }),
+  )
+  if (unresponsive[0]?.showReboot) {
+    throw new Error('healthDialog: unresponsive camera must not offer reboot')
+  }
+
+  if (!driftProblem?.body.includes('Autopilot-driven camera controls')) {
+    throw new Error(`healthDialog: parameter drift copy must be generic: ${driftProblem?.body}`)
   }
 
   console.log('healthDialog self-check ok')
