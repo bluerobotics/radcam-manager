@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     sync::{
         Mutex,
         atomic::{AtomicBool, Ordering},
@@ -7,15 +8,17 @@ use std::{
 };
 
 use ::mavlink::ardupilotmega::{MavComponent, MavMessage, MavSeverity, STATUSTEXT_DATA};
+use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
 use radcam_api::{AutopilotHealth, Diagnostics, LuaScriptStatus};
 use tokio::sync::{Notify, broadcast};
 use tracing::*;
+use uuid::Uuid;
 
 use crate::{
     actuators_watch::{self, ServoStreamHealth},
-    mavlink::{self, Message},
-    parameters::ParamType,
+    mavlink::{self, Message, parameters::ParamEncodingType},
+    parameters::{self, ParamType},
 };
 
 const FRAME_SILENCE: Duration = Duration::from_secs(5);
@@ -47,6 +50,7 @@ struct Health {
     lua_scripting_disabled_logged: bool,
     lua_script: LuaScriptStatus,
     lua_script_failure: Option<String>,
+    param_drifts: IndexMap<String, ParameterDrift>,
     script_reloads: u32,
     frames_lagged: u64,
     ever_online: bool,
@@ -68,6 +72,13 @@ pub(crate) struct ClassifyHealthInput<'a> {
     pub servo_detail: &'a str,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterDrift {
+    pub name: String,
+    pub expected: f32,
+    pub actual: f32,
+}
+
 impl Default for Health {
     fn default() -> Self {
         Self {
@@ -86,6 +97,7 @@ impl Default for Health {
             lua_scripting_disabled_logged: false,
             lua_script: LuaScriptStatus::Unknown,
             lua_script_failure: None,
+            param_drifts: IndexMap::new(),
             script_reloads: 0,
             frames_lagged: 0,
             ever_online: false,
@@ -135,6 +147,13 @@ pub fn lua_script_status() -> (LuaScriptStatus, Option<String>) {
     }
 }
 
+/// Autopilot parameters that no longer match persisted actuator settings.
+pub fn parameter_drifts() -> Vec<ParameterDrift> {
+    ensure_started();
+    let guard = health_state().lock().expect("health lock");
+    guard.param_drifts.values().cloned().collect()
+}
+
 /// Count a Lua reload triggered by the script no longer answering.
 ///
 /// A reload that works is a working system, so this stays a support counter rather
@@ -153,6 +172,99 @@ pub(crate) fn clear_lua_script_failure() {
         drop(guard);
         notify_health();
     }
+}
+
+/// Forget reported parameter drift after a fresh apply or when values match again.
+pub(crate) fn clear_stale_parameter_drifts(expected: &HashSet<(Uuid, String)>) {
+    let mut guard = health_state().lock().expect("health lock");
+    let before = guard.param_drifts.len();
+    guard
+        .param_drifts
+        .retain(|key, _| expected.contains(&drift_key_parts(key)));
+    if guard.param_drifts.len() != before {
+        drop(guard);
+        notify_health();
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ObserveSource {
+    /// Full parameter download at connect or after reboot: establish eligibility only.
+    BulkSync,
+    /// `PARAM_VALUE` broadcast after bulk sync: report drift when eligible.
+    LiveChange,
+    /// Post-apply re-evaluation: clear stale drifts, never report new ones.
+    AfterApply,
+}
+
+pub(crate) fn observe_owned_parameter_value(
+    camera_uuid: &Uuid,
+    name: &str,
+    actual: &ParamType,
+    expected: &ParamType,
+    encoding: ParamEncodingType,
+    source: ObserveSource,
+) {
+    let drift_key = drift_key(camera_uuid, name);
+    if parameters::param_values_match(
+        expected,
+        actual,
+        encoding,
+        parameters::PARAM_DRIFT_TOLERANCE,
+    ) {
+        crate::manager::owned_parameters::mark_eligible(camera_uuid, name);
+        let mut guard = health_state().lock().expect("health lock");
+        if guard.param_drifts.shift_remove(&drift_key).is_some() {
+            drop(guard);
+            notify_health();
+        }
+        return;
+    }
+
+    let report = matches!(source, ObserveSource::LiveChange)
+        && crate::manager::owned_parameters::is_eligible(camera_uuid, name);
+    if !report {
+        return;
+    }
+
+    let Some(expected_f) = parameters::param_display_value(expected) else {
+        return;
+    };
+    let Some(actual_f) = parameters::param_display_value(actual) else {
+        return;
+    };
+
+    let drift = ParameterDrift {
+        name: name.to_owned(),
+        expected: expected_f,
+        actual: actual_f,
+    };
+
+    let mut guard = health_state().lock().expect("health lock");
+    if guard.param_drifts.get(&drift_key) == Some(&drift) {
+        return;
+    }
+
+    warn!(
+        "Autopilot parameter drift for camera {camera_uuid}: {name} expected {expected_f} but is {actual_f}"
+    );
+    guard.param_drifts.insert(drift_key, drift);
+    drop(guard);
+    notify_health();
+}
+
+fn drift_key(camera_uuid: &Uuid, name: &str) -> String {
+    format!("{camera_uuid}:{name}")
+}
+
+fn drift_key_parts(key: &str) -> (Uuid, String) {
+    let (camera_uuid, name) = key
+        .split_once(':')
+        .expect("parameter drift key is camera_uuid:name");
+    (
+        Uuid::parse_str(camera_uuid).expect("parameter drift key camera_uuid"),
+        name.to_owned(),
+    )
 }
 
 /// Re-read the installed Lua script and publish the result.
@@ -697,15 +809,25 @@ fn stream_detail(stream: &ServoStreamHealth) -> String {
 }
 
 #[cfg(test)]
+static HEALTH_TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(test)]
+pub(crate) async fn lock_health_tests() -> tokio::sync::MutexGuard<'static, ()> {
+    HEALTH_TEST_GUARD.lock().await
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     /// Resets in-process autopilot health for unit tests. The process-lifetime
     /// [`OnceCell`] is not cleared — tests share globals and must reset observable
-    /// state or use disjoint inputs (see S-T6).
+    /// state or use disjoint inputs (see S-T6). Call only while holding
+    /// [`lock_health_tests`].
     fn health_reset() {
         let mut guard = health_state().lock().expect("health lock");
         *guard = Health::default();
+        crate::manager::owned_parameters::clear_eligibility_for_test();
     }
 
     fn classify(input: ClassifyHealthInput<'_>) -> AutopilotHealth {
@@ -955,6 +1077,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn reboot_suppresses_degradation() {
+        let _health_tests = lock_health_tests().await;
         health_reset();
         {
             let mut guard = health_state().lock().expect("health lock");
@@ -973,5 +1096,89 @@ mod tests {
         let stream = actuators_watch::stream_health();
         apply_classifier(&mut guard, &stream);
         assert_eq!(guard.state, AutopilotHealth::Online);
+    }
+
+    #[tokio::test]
+    async fn parameter_drift_eligibility_and_observe_sources() {
+        let _health_tests = lock_health_tests().await;
+        health_reset();
+        let encoding = ParamEncodingType::CCast;
+        let expected = ParamType::UINT16(1500);
+
+        let bulk_mismatch = Uuid::from_u128(10);
+        observe_owned_parameter_value(
+            &bulk_mismatch,
+            "SERVO10_MIN",
+            &ParamType::UINT16(1600),
+            &expected,
+            encoding,
+            ObserveSource::BulkSync,
+        );
+        assert!(parameter_drifts().is_empty());
+        assert!(!crate::manager::owned_parameters::is_eligible(
+            &bulk_mismatch,
+            "SERVO10_MIN"
+        ));
+
+        let bulk_match = Uuid::from_u128(11);
+        let matched = ParamType::UINT16(1500);
+        observe_owned_parameter_value(
+            &bulk_match,
+            "SERVO10_MIN",
+            &matched,
+            &matched,
+            encoding,
+            ObserveSource::BulkSync,
+        );
+        assert!(crate::manager::owned_parameters::is_eligible(
+            &bulk_match,
+            "SERVO10_MIN"
+        ));
+
+        let live = Uuid::from_u128(12);
+        observe_owned_parameter_value(
+            &live,
+            "SERVO10_MIN",
+            &ParamType::UINT16(1600),
+            &expected,
+            encoding,
+            ObserveSource::LiveChange,
+        );
+        assert!(parameter_drifts().is_empty());
+        crate::manager::owned_parameters::mark_eligible(&live, "SERVO10_MIN");
+        observe_owned_parameter_value(
+            &live,
+            "SERVO10_MIN",
+            &ParamType::UINT16(1600),
+            &expected,
+            encoding,
+            ObserveSource::LiveChange,
+        );
+        assert_eq!(parameter_drifts().len(), 1);
+        assert_eq!(parameter_drifts()[0].actual, 1600.0);
+
+        let apply = Uuid::from_u128(13);
+        let reapplied = ParamType::UINT16(1200);
+        crate::manager::owned_parameters::mark_eligible(&apply, "SERVO10_MIN");
+        observe_owned_parameter_value(
+            &apply,
+            "SERVO10_MIN",
+            &ParamType::UINT16(1100),
+            &reapplied,
+            encoding,
+            ObserveSource::LiveChange,
+        );
+        assert_eq!(parameter_drifts().len(), 2);
+
+        observe_owned_parameter_value(
+            &apply,
+            "SERVO10_MIN",
+            &reapplied,
+            &reapplied,
+            encoding,
+            ObserveSource::AfterApply,
+        );
+        assert_eq!(parameter_drifts().len(), 1);
+        assert_eq!(parameter_drifts()[0].actual, 1600.0);
     }
 }
