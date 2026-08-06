@@ -406,12 +406,22 @@ fn note_statustext(status: &STATUSTEXT_DATA) {
     notify_health();
 }
 
-/// Whether a `STATUSTEXT` is the autopilot complaining about scripting.
+/// Whether a `STATUSTEXT` is the autopilot reporting that scripting is broken.
 ///
-/// ArduPilot prefixes scripting output with `Lua:` or `Scripting:`. Anchoring to both
-/// the prefix and a warning-or-worse severity keeps routine chatter out of health —
-/// including the informational `Scripting: restarted` that our own reloads cause.
+/// Severity is no guide for ArduPilot's `Scripting:` messages: it announces both
+/// `restarted` and `stopped` at CRITICAL on every ordinary restart — including the ones
+/// we ask for — and `saved checksums` at ERROR. A severity gate alone therefore parks
+/// health in a permanent false alarm, so those messages are matched by exact text and
+/// only where they cannot be part of a healthy restart.
+///
+/// The `Lua:` prefix needs no such care: everything above DEBUG under it is a genuine
+/// script error, which is the case the user actually hits after a firmware upgrade.
 fn is_scripting_failure(severity: MavSeverity, text: &str) -> bool {
+    const SCRIPTING_FAILURES: [&str; 2] = [
+        "Scripting: Unable to allocate memory",
+        "Scripting: failed to start",
+    ];
+
     matches!(
         severity,
         MavSeverity::MAV_SEVERITY_EMERGENCY
@@ -419,7 +429,7 @@ fn is_scripting_failure(severity: MavSeverity, text: &str) -> bool {
             | MavSeverity::MAV_SEVERITY_CRITICAL
             | MavSeverity::MAV_SEVERITY_ERROR
             | MavSeverity::MAV_SEVERITY_WARNING
-    ) && (text.starts_with("Lua:") || text.starts_with("Scripting:"))
+    ) && (text.starts_with("Lua: ") || SCRIPTING_FAILURES.contains(&text))
 }
 
 fn classifier_notify() -> &'static Notify {
@@ -816,21 +826,31 @@ mod tests {
     #[test]
     fn only_scripting_statustext_is_a_script_failure() {
         assert!(is_scripting_failure(
-            MavSeverity::MAV_SEVERITY_ERROR,
+            MavSeverity::MAV_SEVERITY_CRITICAL,
             "Lua: /scripts/radcam.lua:42: attempt to call a nil value"
         ));
         assert!(is_scripting_failure(
-            MavSeverity::MAV_SEVERITY_WARNING,
-            "Scripting: out of memory"
+            MavSeverity::MAV_SEVERITY_CRITICAL,
+            "Scripting: Unable to allocate memory"
         ));
         assert!(!is_scripting_failure(
             MavSeverity::MAV_SEVERITY_ERROR,
             "EKF3 IMU0 is using GPS"
         ));
-        // Our own reloads announce themselves; alarming on those would latch forever.
         assert!(!is_scripting_failure(
-            MavSeverity::MAV_SEVERITY_INFO,
+            MavSeverity::MAV_SEVERITY_DEBUG,
+            "Lua: Running radcam.lua"
+        ));
+
+        // An ordinary restart, ours included, reports both of these at CRITICAL. The
+        // vehicle raised a false alarm on the first one.
+        assert!(!is_scripting_failure(
+            MavSeverity::MAV_SEVERITY_CRITICAL,
             "Scripting: restarted"
+        ));
+        assert!(!is_scripting_failure(
+            MavSeverity::MAV_SEVERITY_CRITICAL,
+            "Scripting: stopped"
         ));
     }
 

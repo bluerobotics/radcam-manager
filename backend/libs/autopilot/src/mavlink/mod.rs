@@ -191,6 +191,10 @@ impl MavlinkComponent {
         let target_system = self.inner.system_id;
         let target_component = mavlink::ardupilotmega::MavComponent::MAV_COMP_ID_AUTOPILOT1 as u8;
 
+        // The fresh run reports its own errors within seconds, so keeping the previous
+        // complaint would only leave the user's fix looking like it did nothing.
+        crate::health::clear_lua_script_failure();
+
         const SCRIPTING_CMD_STOP_AND_RESTART: u8 = 3;
         self.send_command(COMMAND_LONG_DATA {
             target_system,
