@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant}, // std::time::Instant: sync health_state under Mutex
 };
 
-use ::mavlink::ardupilotmega::{MavComponent, MavMessage};
+use ::mavlink::ardupilotmega::{MavComponent, MavMessage, MavSeverity, STATUSTEXT_DATA};
 use once_cell::sync::OnceCell;
 use radcam_api::{AutopilotHealth, Diagnostics, LuaScriptStatus};
 use tokio::sync::{Notify, broadcast};
@@ -46,6 +46,7 @@ struct Health {
     lua_scripting_disabled: bool,
     lua_scripting_disabled_logged: bool,
     lua_script: LuaScriptStatus,
+    lua_script_failure: Option<String>,
     frames_lagged: u64,
     ever_online: bool,
     pending: Option<(AutopilotHealth, Instant)>,
@@ -83,6 +84,7 @@ impl Default for Health {
             lua_scripting_disabled: false,
             lua_scripting_disabled_logged: false,
             lua_script: LuaScriptStatus::Unknown,
+            lua_script_failure: None,
             frames_lagged: 0,
             ever_online: false,
             pending: None,
@@ -117,10 +119,29 @@ pub fn lua_scripting_disabled() -> bool {
         .lua_scripting_disabled
 }
 
-/// Whether the installed Lua script matches the current configuration.
-pub fn lua_script_status() -> LuaScriptStatus {
+/// Whether the installed Lua script matches the current configuration, and what the
+/// autopilot said if it is erroring.
+pub fn lua_script_status() -> (LuaScriptStatus, Option<String>) {
     ensure_started();
-    health_state().lock().expect("health lock").lua_script
+    let guard = health_state().lock().expect("health lock");
+
+    // A reported failure only adds information while the expected script is the one
+    // installed: Missing and Outdated already tell the user what to do about it.
+    match (guard.lua_script, &guard.lua_script_failure) {
+        (LuaScriptStatus::Ok, Some(failure)) => (LuaScriptStatus::Failing, Some(failure.clone())),
+        (status, _) => (status, None),
+    }
+}
+
+/// Forget a reported scripting failure, after evidence that the script runs again.
+// No ensure_started(): called from the servo sample path, and the unit test in
+// manager/script.rs must not spawn background tasks.
+pub(crate) fn clear_lua_script_failure() {
+    let mut guard = health_state().lock().expect("health lock");
+    if guard.lua_script_failure.take().is_some() {
+        drop(guard);
+        notify_health();
+    }
 }
 
 /// Re-read the installed Lua script and publish the result.
@@ -306,15 +327,18 @@ async fn frame_drain_task() {
             match receiver.recv().await {
                 Ok(Message::Received((header, message))) => {
                     stamp_frame();
-                    // Any HEARTBEAT from the autopilot component proves it is running.
-                    // Do not require ACTIVE/STANDBY: ArduSub/ArduPilot often report
-                    // CRITICAL/CALIBRATING/etc while still fully operational, and that
-                    // filter left health stuck on AutopilotOffline despite live SERVO.
-                    if header.system_id == target_system
-                        && header.component_id == target_component
-                        && matches!(message, MavMessage::HEARTBEAT(_))
+                    if header.system_id != target_system || header.component_id != target_component
                     {
-                        stamp_heartbeat();
+                        continue;
+                    }
+                    match message {
+                        // Any HEARTBEAT from the autopilot component proves it is running.
+                        // Do not require ACTIVE/STANDBY: ArduSub/ArduPilot often report
+                        // CRITICAL/CALIBRATING/etc while still fully operational, and that
+                        // filter left health stuck on AutopilotOffline despite live SERVO.
+                        MavMessage::HEARTBEAT(_) => stamp_heartbeat(),
+                        MavMessage::STATUSTEXT(status) => note_statustext(&status),
+                        _ => {}
                     }
                 }
                 Ok(Message::ToBeSent(_)) => {}
@@ -340,6 +364,50 @@ fn stamp_frame() {
 fn stamp_heartbeat() {
     let mut guard = health_state().lock().expect("health lock");
     guard.last_heartbeat_at = Some(Instant::now());
+}
+
+fn note_statustext(status: &STATUSTEXT_DATA) {
+    // ponytail: text longer than 50 characters arrives as several chunks and only the
+    // first is kept. It carries the Lua file and line, which is what the user acts on.
+    // Upgrade path is reassembling by `id` until a null character.
+    if status.chunk_seq != 0 {
+        return;
+    }
+
+    let Ok(text) = status.text.to_str() else {
+        return;
+    };
+
+    if !is_scripting_failure(status.severity, text) {
+        return;
+    }
+
+    let mut guard = health_state().lock().expect("health lock");
+    if guard.lua_script_failure.as_deref() == Some(text) {
+        return;
+    }
+
+    warn!("Autopilot reported a scripting failure: {text}");
+    guard.lua_script_failure = Some(text.to_owned());
+    drop(guard);
+
+    notify_health();
+}
+
+/// Whether a `STATUSTEXT` is the autopilot complaining about scripting.
+///
+/// ArduPilot prefixes scripting output with `Lua:` or `Scripting:`. Anchoring to both
+/// the prefix and a warning-or-worse severity keeps routine chatter out of health —
+/// including the informational `Scripting: restarted` that our own reloads cause.
+fn is_scripting_failure(severity: MavSeverity, text: &str) -> bool {
+    matches!(
+        severity,
+        MavSeverity::MAV_SEVERITY_EMERGENCY
+            | MavSeverity::MAV_SEVERITY_ALERT
+            | MavSeverity::MAV_SEVERITY_CRITICAL
+            | MavSeverity::MAV_SEVERITY_ERROR
+            | MavSeverity::MAV_SEVERITY_WARNING
+    ) && (text.starts_with("Lua:") || text.starts_with("Scripting:"))
 }
 
 fn classifier_notify() -> &'static Notify {
@@ -731,6 +799,27 @@ mod tests {
             }),
             AutopilotHealth::Syncing
         );
+    }
+
+    #[test]
+    fn only_scripting_statustext_is_a_script_failure() {
+        assert!(is_scripting_failure(
+            MavSeverity::MAV_SEVERITY_ERROR,
+            "Lua: /scripts/radcam.lua:42: attempt to call a nil value"
+        ));
+        assert!(is_scripting_failure(
+            MavSeverity::MAV_SEVERITY_WARNING,
+            "Scripting: out of memory"
+        ));
+        assert!(!is_scripting_failure(
+            MavSeverity::MAV_SEVERITY_ERROR,
+            "EKF3 IMU0 is using GPS"
+        ));
+        // Our own reloads announce themselves; alarming on those would latch forever.
+        assert!(!is_scripting_failure(
+            MavSeverity::MAV_SEVERITY_INFO,
+            "Scripting: restarted"
+        ));
     }
 
     #[test]
