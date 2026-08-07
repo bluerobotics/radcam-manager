@@ -41,7 +41,7 @@
         {{ problemsSummaryLine }}
       </p>
       <p
-        v-else
+        v-else-if="anyProblemSelfRecovers"
         class="text-sm text-white text-center mb-4 opacity-90"
         aria-live="polite"
       >
@@ -309,7 +309,7 @@ import { backendClient, type ConnectionState } from '@/utils/backendClient'
 import { useCopyDiagnostics } from '@/utils/useCopyDiagnostics'
 import { formatRequestError } from '@/utils/formatRequestError'
 import type { HealthProblem } from '@/utils/systemHealthProblems'
-import { problemsSummary } from '@/utils/systemHealthProblems'
+import { SELF_RECOVERING_KINDS, problemsSummary } from '@/utils/systemHealthProblems'
 
 const SEVERITY_STYLES: Record<
   HealthProblem['severity'],
@@ -507,6 +507,9 @@ const viewProblems = computed(() => {
   return leaveSnapshot.value?.problems ?? props.problems
 })
 const problemsSummaryLine = computed(() => problemsSummary(viewProblems.value))
+const anyProblemSelfRecovers = computed(() =>
+  viewProblems.value.some((problem) => SELF_RECOVERING_KINDS.includes(problem.kind)),
+)
 const dialogTitle = computed(() => {
   if (viewStatusCopy.value) return viewStatusCopy.value.title
   if (viewAwaitingClose.value) return viewRecoveryTitle.value
