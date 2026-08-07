@@ -842,15 +842,9 @@ mod tests {
             health_without_volatile_ages(a),
             health_without_volatile_ages(c)
         );
-    }
-
-    #[test]
-    fn health_comparable_detects_mcm_state_change() {
-        let online = sample_health(McmHealth::Online, 0);
-        let down = sample_health(McmHealth::Down, 0);
         assert_ne!(
-            health_without_volatile_ages(online),
-            health_without_volatile_ages(down)
+            health_without_volatile_ages(sample_health(McmHealth::Online, 0)),
+            health_without_volatile_ages(sample_health(McmHealth::Down, 0))
         );
     }
 }

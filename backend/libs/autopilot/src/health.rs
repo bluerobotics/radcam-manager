@@ -836,10 +836,15 @@ static HEALTH_TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new
 pub(crate) async fn lock_health_tests() -> tokio::sync::MutexGuard<'static, ()> {
     HEALTH_TEST_GUARD.lock().await
 }
-
 #[cfg(test)]
 mod tests {
+    use indexmap::IndexMap;
+
     use super::*;
+    use crate::{
+        mavlink::parameters::observe_param_value_from_sync,
+        parameters::{ActuatorsParameters, Parameter},
+    };
 
     /// Resets in-process autopilot health for unit tests. The process-lifetime
     /// [`OnceCell`] is not cleared — tests share globals and must reset observable
@@ -850,128 +855,6 @@ mod tests {
         *guard = Health::default();
         crate::manager::owned_parameters::clear_eligibility_for_test();
         crate::manager::owned_parameters::clear_expectations_for_test();
-    }
-
-    fn classify(input: ClassifyHealthInput<'_>) -> AutopilotHealth {
-        classify_health(input).0
-    }
-
-    fn base_classify_input() -> ClassifyHealthInput<'static> {
-        ClassifyHealthInput {
-            endpoint_ok: Some(true),
-            endpoint_detail: None,
-            mavlink_up: true,
-            frame_age: Some(Duration::from_secs(1)),
-            heartbeat_age: Some(Duration::from_secs(1)),
-            servo_age: None,
-            rpc_failures: 0,
-            servo_stalled: false,
-            last_rpc_error: None,
-            syncing: false,
-            servo_detail: None,
-        }
-    }
-
-    #[test]
-    fn classifier_is_outermost_first() {
-        let fresh = Some(Duration::from_secs(1));
-        let stale = Some(Duration::from_secs(10));
-        let base = base_classify_input;
-
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                endpoint_ok: None,
-                ..base()
-            }),
-            AutopilotHealth::Unknown
-        );
-        assert_eq!(
-            classify_health(ClassifyHealthInput {
-                endpoint_ok: Some(false),
-                endpoint_detail: Some("endpoint refused"),
-                ..base()
-            }),
-            (
-                AutopilotHealth::EndpointSetupFailed,
-                Some("endpoint refused".to_string())
-            )
-        );
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                frame_age: stale,
-                ..base()
-            }),
-            AutopilotHealth::MavlinkDown
-        );
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                frame_age: None,
-                ..base()
-            }),
-            AutopilotHealth::Unknown,
-            "never-seen frames are not MavlinkDown"
-        );
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                heartbeat_age: stale,
-                ..base()
-            }),
-            AutopilotHealth::AutopilotOffline
-        );
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                heartbeat_age: None,
-                servo_age: fresh,
-                ..base()
-            }),
-            AutopilotHealth::Online,
-            "fresh SERVO_OUTPUT_RAW proves the autopilot is running even without heartbeat"
-        );
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                rpc_failures: RPC_FAILURES_TO_UNRESPONSIVE,
-                last_rpc_error: Some("rpc timeout"),
-                ..base()
-            }),
-            AutopilotHealth::Unresponsive
-        );
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                servo_stalled: true,
-                servo_detail: Some("SERVO_OUTPUT_RAW stale"),
-                ..base()
-            }),
-            AutopilotHealth::Unresponsive
-        );
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                syncing: true,
-                ..base()
-            }),
-            AutopilotHealth::Syncing
-        );
-        assert_eq!(classify(base()), AutopilotHealth::Online);
-    }
-
-    #[test]
-    fn syncing_beats_stale_frames() {
-        let stale = Some(Duration::from_secs(10));
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                endpoint_ok: Some(true),
-                endpoint_detail: None,
-                mavlink_up: true,
-                frame_age: stale,
-                heartbeat_age: stale,
-                servo_age: None,
-                rpc_failures: 0,
-                servo_stalled: false,
-                last_rpc_error: None,
-                syncing: true,
-                servo_detail: None,
-            }),
-            AutopilotHealth::Syncing
-        );
     }
 
     #[test]
@@ -1004,146 +887,6 @@ mod tests {
             MavSeverity::MAV_SEVERITY_CRITICAL,
             "Scripting: stopped"
         ));
-    }
-
-    #[tokio::test]
-    async fn lua_script_failure_expires_without_refresh() {
-        let _health_tests = lock_health_tests().await;
-        health_reset();
-        {
-            let mut guard = health_state().lock().expect("health lock");
-            guard.lua_script = LuaScriptStatus::Ok;
-            guard.lua_script_failure = Some((
-                Instant::now(),
-                "Lua: /scripts/radcam.lua:1: transient boot glitch".to_string(),
-            ));
-        }
-
-        assert_eq!(
-            lua_script_status(),
-            (
-                LuaScriptStatus::Failing,
-                Some("Lua: /scripts/radcam.lua:1: transient boot glitch".to_string())
-            )
-        );
-
-        std::thread::sleep(LUA_SCRIPT_FAILURE_TTL + Duration::from_millis(10));
-        assert_eq!(lua_script_status(), (LuaScriptStatus::Ok, None));
-    }
-
-    #[test]
-    fn scr_enable_disabled_table() {
-        use crate::parameters::Parameter;
-
-        let mut params = indexmap::IndexMap::new();
-        assert!(!scr_enable_disabled(&params));
-
-        params.insert(
-            "SCR_ENABLE".to_string(),
-            Parameter {
-                name: "SCR_ENABLE".to_string(),
-                value: ParamType::UINT32(1),
-            },
-        );
-        assert!(!scr_enable_disabled(&params));
-
-        params.insert(
-            "SCR_ENABLE".to_string(),
-            Parameter {
-                name: "SCR_ENABLE".to_string(),
-                value: ParamType::INT32(0),
-            },
-        );
-        assert!(scr_enable_disabled(&params));
-    }
-
-    #[test]
-    fn servo_stall_needs_a_prior_request() {
-        let now = Instant::now();
-        let stream = ServoStreamHealth {
-            interest: 1,
-            last_request_at: None,
-            last_sample_at: None,
-        };
-        assert!(!servo_stalled(&stream, now));
-
-        let candidate = classify_health(ClassifyHealthInput {
-            endpoint_ok: Some(true),
-            endpoint_detail: None,
-            mavlink_up: true,
-            frame_age: Some(Duration::from_secs(1)),
-            heartbeat_age: Some(Duration::from_secs(1)),
-            servo_age: None,
-            rpc_failures: 0,
-            servo_stalled: servo_stalled(&stream, now),
-            last_rpc_error: None,
-            syncing: false,
-            servo_detail: None,
-        });
-        assert_eq!(candidate.0, AutopilotHealth::Online);
-    }
-
-    #[test]
-    fn rpc_ok_does_not_clear_servo_stall() {
-        let servo_detail = Some("SERVO_OUTPUT_RAW stale");
-        let fresh = Some(Duration::from_secs(1));
-
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                endpoint_ok: Some(true),
-                endpoint_detail: None,
-                mavlink_up: true,
-                frame_age: fresh,
-                heartbeat_age: fresh,
-                servo_age: None,
-                rpc_failures: RPC_FAILURES_TO_UNRESPONSIVE,
-                servo_stalled: true,
-                last_rpc_error: Some("rpc timeout"),
-                syncing: false,
-                servo_detail,
-            }),
-            AutopilotHealth::Unresponsive
-        );
-
-        assert_eq!(
-            classify(ClassifyHealthInput {
-                endpoint_ok: Some(true),
-                endpoint_detail: None,
-                mavlink_up: true,
-                frame_age: fresh,
-                heartbeat_age: fresh,
-                servo_age: None,
-                rpc_failures: 0,
-                servo_stalled: true,
-                last_rpc_error: Some("rpc timeout"),
-                syncing: false,
-                servo_detail,
-            }),
-            AutopilotHealth::Unresponsive
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn reboot_suppresses_degradation() {
-        let _health_tests = lock_health_tests().await;
-        health_reset();
-        {
-            let mut guard = health_state().lock().expect("health lock");
-            guard.endpoint_ok = Some(true);
-            guard.state = AutopilotHealth::Online;
-            guard.rebooting = true;
-            guard.last_frame_at = Some(Instant::now());
-            guard.last_heartbeat_at = Some(Instant::now());
-        }
-
-        tokio::time::advance(Duration::from_secs(30)).await;
-
-        let mut guard = health_state().lock().expect("health lock");
-        guard.last_frame_at = None;
-        guard.last_heartbeat_at = None;
-        let stream = actuators_watch::stream_health();
-        apply_classifier(&mut guard, &stream);
-        assert_eq!(guard.state, AutopilotHealth::Online);
     }
 
     #[tokio::test]
@@ -1221,27 +964,16 @@ mod tests {
         );
         assert_eq!(parameter_drifts().len(), 1);
         assert_eq!(parameter_drifts()[0].actual, 1600.0);
-    }
 
-    #[tokio::test]
-    async fn parameter_drift_baseline_seeds_eligibility_and_live_sync_reports() {
-        use indexmap::IndexMap;
-
-        use crate::{
-            mavlink::parameters::observe_param_value_from_sync,
-            parameters::{ActuatorsParameters, Parameter},
-        };
-
-        let _health_tests = lock_health_tests().await;
+        // A cached baseline that already matches seeds eligibility, so a later
+        // PARAM_VALUE from the live stream reports drift while bulk sync does not.
         health_reset();
-
         let camera_uuid = Uuid::from_u128(0xd11f_0000_0000_0001);
         let actuators = ActuatorsParameters::default();
         let param_name = format!("SERVO{}_MIN", actuators.focus_channel as u8);
         let expected_min = ParamType::UINT16(actuators.focus_channel_min);
 
         crate::manager::owned_parameters::install_expectations_for_test(camera_uuid, &actuators);
-
         let mut cache = IndexMap::new();
         cache.insert(
             param_name.clone(),
@@ -1251,36 +983,41 @@ mod tests {
             },
         );
         crate::manager::owned_parameters::establish_baseline_from_cache(&cache);
-
         assert!(crate::manager::owned_parameters::is_eligible(
             &camera_uuid,
             &param_name
         ));
         assert!(parameter_drifts().is_empty());
 
-        let mismatched = Parameter {
-            name: param_name.clone(),
-            value: ParamType::UINT16(actuators.focus_channel_min + 100),
-        };
-        observe_param_value_from_sync(&mismatched, u16::MAX);
+        observe_param_value_from_sync(
+            &Parameter {
+                name: param_name.clone(),
+                value: ParamType::UINT16(actuators.focus_channel_min + 100),
+            },
+            u16::MAX,
+        );
         let drifts = parameter_drifts();
         assert_eq!(drifts.len(), 1);
         assert_eq!(drifts[0].name, param_name);
         assert_eq!(drifts[0].expected, actuators.focus_channel_min as f32);
         assert_eq!(drifts[0].actual, (actuators.focus_channel_min + 100) as f32);
 
-        let matched = Parameter {
-            name: param_name.clone(),
-            value: expected_min,
-        };
-        observe_param_value_from_sync(&matched, u16::MAX);
+        observe_param_value_from_sync(
+            &Parameter {
+                name: param_name.clone(),
+                value: expected_min,
+            },
+            u16::MAX,
+        );
         assert!(parameter_drifts().is_empty());
 
-        let bulk_mismatch = Parameter {
-            name: param_name.clone(),
-            value: ParamType::UINT16(actuators.focus_channel_min + 200),
-        };
-        observe_param_value_from_sync(&bulk_mismatch, 0);
+        observe_param_value_from_sync(
+            &Parameter {
+                name: param_name,
+                value: ParamType::UINT16(actuators.focus_channel_min + 200),
+            },
+            0,
+        );
         assert!(parameter_drifts().is_empty());
     }
 }

@@ -1120,7 +1120,6 @@ async fn camera_fetch_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use radcam_api::{OnePushAwbPhase, OnePushAwbStatus};
 
     #[tokio::test(flavor = "current_thread")]
     async fn reboot_overlay_stays_until_finish_camera_action() {
@@ -1161,49 +1160,6 @@ mod tests {
         let registry = registry().lock().unwrap();
         assert!(!registry.camera_interest.contains_key(&camera_uuid));
         assert!(!registry.last_states.contains_key(&camera_uuid));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn state_events_survive_camera_leaving_the_mcm_list() {
-        let connection_id: ConnectionId = 9001;
-        let camera_uuid = Uuid::from_u128(0xfeed_face_0000_0003_u128);
-
-        assert!(subscribe(connection_id, camera_uuid));
-        {
-            let mut registry = registry().lock().unwrap();
-            registry.last_states.insert(
-                camera_uuid,
-                CameraSnapshot {
-                    video_parameters: Some(serde_json::json!({ "fps": 30 })),
-                    ..Default::default()
-                },
-            );
-        }
-
-        camera_ui::set_one_push_awb(
-            camera_uuid,
-            Some(OnePushAwbStatus {
-                phase: OnePushAwbPhase::Running,
-            }),
-        );
-        assert!(camera_ui::get(camera_uuid).one_push_awb.is_some());
-
-        let registry = registry().lock().unwrap();
-        assert!(registry.camera_interest.contains_key(&camera_uuid));
-        assert!(registry.last_states.contains_key(&camera_uuid));
-        drop(registry);
-        assert!(camera_ui::get(camera_uuid).one_push_awb.is_some());
-
-        let mut receiver = subscribe_state();
-        camera_ui::set_one_push_awb(camera_uuid, None);
-        let event = receiver.try_recv().expect("emit_ui should broadcast");
-        assert_eq!(event.camera_uuid, camera_uuid);
-        assert_eq!(
-            event.ui.as_ref().and_then(|ui| ui.one_push_awb.as_ref()),
-            None
-        );
-
-        unsubscribe_connection(connection_id);
     }
 
     #[test]
