@@ -363,7 +363,7 @@ impl Manager {
         let mut param = mavlink.get_param(&param_name, false).await?;
         param
             .value
-            .set_value(ParamType::UINT8(new_value as u8), encoding)?;
+            .set_value(ParamType::REAL32(new_value), encoding)?;
 
         match mavlink.set_param(param).await {
             Ok(_) => {
@@ -436,7 +436,7 @@ impl Manager {
         let channel = parameters.camera_id as u8;
         map.insert(
             format!("{PARAM_PREFIX}{channel}_GAIN"),
-            ParamType::UINT8(parameters.focus_margin_gain as u8),
+            ParamType::REAL32(parameters.focus_margin_gain),
         );
     }
 
@@ -654,5 +654,21 @@ mod tests {
         assert!(contents.contains("find_servo_function(K_FOCUS, \"CameraFocus\""));
         assert!(contents.contains("find_servo_function(K_ZOOM, \"CameraZoom\""));
         assert!(contents.contains("servo function not found"));
+    }
+
+    #[test]
+    fn focus_margin_gain_expectation_preserves_fractional_gain() {
+        let parameters = ActuatorsParameters {
+            focus_margin_gain: 1.5,
+            ..ActuatorsParameters::default()
+        };
+
+        let mut expectations = IndexMap::new();
+        push_owned_expectations(&parameters, &mut expectations);
+
+        assert_eq!(
+            expectations.get("RCAM1_GAIN"),
+            Some(&ParamType::REAL32(1.5)),
+        );
     }
 }
