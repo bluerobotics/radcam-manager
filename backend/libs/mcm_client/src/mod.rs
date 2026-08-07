@@ -27,6 +27,7 @@ pub(crate) mod mcm_client;
 pub mod mcm_types;
 
 const MCM_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const MCM_MUTATION_TIMEOUT: Duration = Duration::from_secs(60);
 const MCM_FAILURES_TO_DOWN: u32 = 3;
 // MCM self-heals with backoff capped at 60s; each recreate costs an MCM settings write.
 const STREAM_FAILURES_TO_RECREATE: u32 = 60;
@@ -163,51 +164,23 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        let mcm = match tokio::time::timeout(
-            MCM_PROBE_TIMEOUT,
-            MCMClient::try_new(mcm_address, skip_hardware_check),
-        )
+        let Some(mcm) = probe_mcm_link(*mcm_address, "/info", || {
+            MCMClient::try_new(mcm_address, skip_hardware_check)
+        })
         .await
-        {
-            Ok(Ok(mcm)) => mcm,
-            Ok(Err(error)) => {
-                debug!("Failed to create MCM client: {error:?}");
-                report_failure(mcm_failure_detail(&error, mcm_address), *mcm_address);
-                continue;
-            }
-            Err(_) => {
-                report_failure(
-                    "MCM did not answer /info within 5s".to_string(),
-                    *mcm_address,
-                );
-                continue;
-            }
+        else {
+            continue;
         };
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-            let radcams = match tokio::time::timeout(MCM_PROBE_TIMEOUT, mcm.get_radcams()).await {
-                Ok(Ok(radcams)) => {
-                    report_success(mcm.address);
-                    radcams
-                }
-                Ok(Err(error)) => {
-                    debug!("Failed to get radcams: {error:?}");
-                    report_failure(mcm_failure_detail(&error, &mcm.address), mcm.address);
-                    break;
-                }
-                Err(_) => {
-                    report_failure(
-                        format!(
-                            "MCM did not answer device list within 5s at {}",
-                            mcm.address
-                        ),
-                        mcm.address,
-                    );
-                    break;
-                }
+            let Some(radcams) =
+                probe_mcm_link(mcm.address, "device list", || mcm.get_radcams()).await
+            else {
+                break;
             };
+            report_success(mcm.address);
 
             let known_cameras = cameras().await;
             let radcam_uuids: HashSet<Uuid> = radcams.iter().map(|camera| camera.uuid).collect();
@@ -234,10 +207,18 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
 
                 debug!("New RadCam found: {camera:?}");
 
-                if let Err(error) = mcm.authenticate(camera).await {
-                    record_auth_failure(camera.uuid, error.to_string()).await;
-                    debug!("Failed authenticating onvif camera {camera:?}: {error:?}");
-                    continue;
+                match probe_mcm_link_unanswered(mcm.address, "onvif/authentication", || {
+                    mcm.authenticate(camera)
+                })
+                .await
+                {
+                    None => break,
+                    Some(Err(error)) => {
+                        record_auth_failure(camera.uuid, error.to_string()).await;
+                        debug!("Failed authenticating onvif camera {camera:?}: {error:?}");
+                        continue;
+                    }
+                    Some(Ok(())) => {}
                 }
 
                 clear_auth_failure(&camera.uuid).await;
@@ -260,38 +241,25 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        let mcm =
-            match tokio::time::timeout(MCM_PROBE_TIMEOUT, MCMClient::try_new(mcm_address, false))
-                .await
-            {
-                Ok(Ok(mcm)) => mcm,
-                Ok(Err(error)) => {
-                    debug!("Failed to create MCM client: {error:?}");
-                    continue;
-                }
-                Err(_) => {
-                    debug!("MCM try_new timed out in start_radcams_streams");
-                    continue;
-                }
-            };
+        let Some(mcm) = probe_mcm_link(*mcm_address, "/info", || {
+            MCMClient::try_new(mcm_address, false)
+        })
+        .await
+        else {
+            continue;
+        };
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-            let existing_radcam_streams = match mcm.get_radcam_streams().await {
-                Ok(streams) => streams,
-                Err(error) => {
-                    debug!("Failed to get radcam streams: {error:?}");
-                    continue;
-                }
+            let Some(existing_radcam_streams) = fetch_radcam_streams(&mcm).await else {
+                continue;
             };
 
-            let available_radcam_sources = match mcm.get_radcam_video_sources().await {
-                Ok(sources) => sources,
-                Err(error) => {
-                    debug!("Failed to get radcam video sources: {error:?}");
-                    continue;
-                }
+            let Some(available_radcam_sources) =
+                probe_mcm_link(mcm.address, "v4l", || mcm.get_radcam_video_sources()).await
+            else {
+                continue;
             };
 
             let mut observed_sources = HashSet::new();
@@ -338,18 +306,22 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
                                 stream.error.as_deref(),
                             )
                             .await;
-                            match mcm.delete_stream(&stream.name).await {
-                                Err(error) => {
-                                    warn!(
-                                        "Failed deleting failed stream {:?}: {error:?}",
-                                        stream.name
-                                    );
-                                }
-                                Ok(_) => {
-                                    *count = 0;
-                                    if let Err(error) = mcm.create_stream(source).await {
-                                        warn!("Failed recreating stream: {error:?}");
-                                    }
+                            if let Err(error) =
+                                await_mcm_mutation(mcm.address, "delete_stream", || {
+                                    mcm.delete_stream(&stream.name)
+                                })
+                                .await
+                            {
+                                warn!("Failed deleting failed stream {:?}: {error:?}", stream.name);
+                            } else {
+                                *count = 0;
+                                if let Err(error) =
+                                    await_mcm_mutation(mcm.address, "streams", || {
+                                        mcm.create_stream(source)
+                                    })
+                                    .await
+                                {
+                                    warn!("Failed recreating stream: {error:?}");
                                 }
                             }
                         }
@@ -363,7 +335,9 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
 
                 stream_failure_counts.remove(&available_source);
 
-                if let Err(error) = mcm.create_stream(source).await {
+                if let Err(error) =
+                    await_mcm_mutation(mcm.address, "streams", || mcm.create_stream(source)).await
+                {
                     warn!("Failed creating stream: {error:?}");
                     continue;
                 }
@@ -733,6 +707,70 @@ async fn camera_uuid_for_stream_source(source: &Url) -> Option<Uuid> {
         .map(|(uuid, _)| *uuid)
 }
 
+async fn fetch_radcam_streams(mcm: &MCMClient) -> Option<Vec<Stream>> {
+    probe_mcm_link(mcm.address, "streams", || mcm.get_radcam_streams()).await
+}
+
+// Link health: a timeout means MCM did not answer; an error response means it did.
+// `probe_mcm_link` counts both as a failed poll; `probe_mcm_link_unanswered` counts only silence.
+async fn probe_mcm_link<T, F, Fut>(address: SocketAddr, endpoint: &str, op: F) -> Option<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    match tokio::time::timeout(MCM_PROBE_TIMEOUT, op()).await {
+        Ok(Ok(value)) => Some(value),
+        Ok(Err(error)) => {
+            debug!("MCM link probe {endpoint} failed: {error:?}");
+            report_failure(mcm_failure_detail(&error, &address), address);
+            None
+        }
+        Err(_) => {
+            report_failure(unanswered_detail(endpoint, address), address);
+            None
+        }
+    }
+}
+
+async fn probe_mcm_link_unanswered<T, F, Fut>(
+    address: SocketAddr,
+    endpoint: &str,
+    op: F,
+) -> Option<Result<T>>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    match tokio::time::timeout(MCM_PROBE_TIMEOUT, op()).await {
+        Ok(result) => Some(result),
+        Err(_) => {
+            report_failure(unanswered_detail(endpoint, address), address);
+            None
+        }
+    }
+}
+
+fn unanswered_detail(endpoint: &str, address: SocketAddr) -> String {
+    format!(
+        "MCM did not answer {endpoint} within {}s at {address}",
+        MCM_PROBE_TIMEOUT.as_secs()
+    )
+}
+
+async fn await_mcm_mutation<T, F, Fut>(address: SocketAddr, endpoint: &str, op: F) -> Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    match tokio::time::timeout(MCM_MUTATION_TIMEOUT, op()).await {
+        Ok(result) => result,
+        Err(_) => Err(anyhow::anyhow!(
+            "MCM did not complete {endpoint} within {}s at {address}",
+            MCM_MUTATION_TIMEOUT.as_secs()
+        )),
+    }
+}
+
 #[cfg(test)]
 // Resets in-process MCM health counters for unit tests. The process-lifetime
 // OnceCell is not cleared — tests share globals and must reset observable
@@ -781,6 +819,80 @@ fn health_needs_three_failures() {
         health().detail,
         Some("MCM did not answer /info within 5s".to_string())
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn hung_streams_poll_reports_and_reaches_down_within_three_cycles() {
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    health_reset();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    report_success(address);
+
+    tokio::spawn(async move {
+        let info_body =
+            r#"{"name":"mcm","version":"0.2.4","sha":"test","build_date":"","authors":""}"#;
+        let info_response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{info_body}",
+            info_body.len()
+        );
+
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let mut buf = [0u8; 1024];
+            let Ok(n) = stream.read(&mut buf).await else {
+                continue;
+            };
+            let request = String::from_utf8_lossy(&buf[..n]);
+            if request.contains("GET /info") {
+                let _ = stream.write_all(info_response.as_bytes()).await;
+            }
+        }
+    });
+
+    let mcm = MCMClient::try_new(&address, false).await.unwrap();
+
+    for failures in 1..=2 {
+        let probe = fetch_radcam_streams(&mcm);
+        tokio::pin!(probe);
+        tokio::time::advance(MCM_PROBE_TIMEOUT).await;
+        assert!(probe.await.is_none(), "cycle {failures}");
+        assert_eq!(health().consecutive_failures, failures);
+        assert_eq!(health().state, McmHealth::Online);
+    }
+
+    let probe = fetch_radcam_streams(&mcm);
+    tokio::pin!(probe);
+    tokio::time::advance(MCM_PROBE_TIMEOUT).await;
+    assert!(probe.await.is_none());
+    assert_eq!(health().state, McmHealth::Down);
+    assert_eq!(health().consecutive_failures, 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_mcm_mutation_timeout_does_not_degrade_link() {
+    health_reset();
+    let address: SocketAddr = "127.0.0.1:6021".parse().unwrap();
+    report_success(address);
+
+    async fn hang() -> Result<()> {
+        std::future::pending().await
+    }
+
+    for cycle in 1..=3 {
+        let call = await_mcm_mutation(address, "streams", hang);
+        tokio::pin!(call);
+        tokio::time::advance(MCM_MUTATION_TIMEOUT).await;
+        assert!(call.await.is_err(), "cycle {cycle}");
+        assert_eq!(health().state, McmHealth::Online);
+        assert_eq!(health().consecutive_failures, 0);
+    }
 }
 
 #[tokio::test]
