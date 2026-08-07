@@ -5,12 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
-use tokio::{
-    fs,
-    io::{self, AsyncWriteExt},
-    sync::RwLock,
-};
-use tokio_stream::{StreamExt, wrappers::ReadDirStream};
+use tokio::{fs, io::AsyncWriteExt, sync::RwLock};
 use tracing::*;
 use uuid::Uuid;
 
@@ -83,46 +78,19 @@ impl Settings {
                 Ok(settings) => return Ok(settings),
                 Err(error) => {
                     warn!("Failed reading settings from {path:?}: {error:?}");
-                    // Removing it keeps the backup intact: the save that follows a recovery
-                    // would otherwise copy this unreadable file over the good copy.
-                    if let Err(error) = fs::remove_file(path).await {
-                        warn!("Failed removing unreadable settings {path:?}: {error:?}");
+                    let corrupt_path = corrupt_path_for(path);
+                    if let Err(error) = fs::rename(path, &corrupt_path).await {
+                        warn!(
+                            "Failed renaming unreadable settings {path:?} to {corrupt_path:?}: {error:?}"
+                        );
                     }
                 }
             }
         }
 
-        let dir = path.parent().unwrap_or_else(|| Path::new("."));
-        let read_dir = fs::read_dir(dir).await?;
-        let mut entries = ReadDirStream::new(read_dir);
-
-        let mut backups = vec![];
-        while let Some(entry) = entries.next().await {
-            if let Ok(entry) = entry {
-                let file_name = entry.file_name();
-                if file_name.to_string_lossy().starts_with("settings.json.")
-                    && entry
-                        .path()
-                        .extension()
-                        .map(|e| e == "bak")
-                        .unwrap_or(false)
-                {
-                    backups.push(entry);
-                }
-            }
-        }
-
-        if let Some(latest_backup) =
-            futures::future::try_join_all(backups.iter().map(|e| async move {
-                let meta = e.metadata().await.ok();
-                Ok::<_, io::Error>((meta.and_then(|m| m.modified().ok()), e.path()))
-            }))
-            .await?
-            .into_iter()
-            .max_by_key(|(mod_time, _)| *mod_time)
-            .map(|(_, path)| path)
-        {
-            return read_inner(&latest_backup, path).await;
+        let backup_path = backup_path_for(path);
+        if backup_path.exists() {
+            return read_inner(&backup_path, path).await;
         }
 
         Err(anyhow!("No settings file or backup found"))
@@ -156,7 +124,7 @@ impl Settings {
                 return Ok(());
             }
 
-            let backup_path = path.with_file_name("settings.json.bak");
+            let backup_path = backup_path_for(path);
 
             fs::copy(path, &backup_path)
                 .await
@@ -166,7 +134,7 @@ impl Settings {
 
         // Rename is atomic within a filesystem, so an unclean power-down can lose the new
         // settings but can never leave a torn file where they used to be.
-        let temporary_path = path.with_file_name("settings.json.tmp");
+        let temporary_path = temp_path_for(path);
         let mut file = fs::File::create(&temporary_path)
             .await
             .with_context(|| format!("Failed to create {temporary_path:?}"))?;
@@ -206,6 +174,12 @@ pub async fn init(settings_file: String, reset: bool) -> Result<()> {
     let settings = match (reset, Settings::from_path(settings_path).await) {
         (false, Ok(settings)) => settings,
         (false, Err(error)) => {
+            if backup_path_for(settings_path).exists() {
+                return Err(error).context(
+                    "Settings file is unreadable and backup could not be recovered; refusing to overwrite backup with empty settings",
+                );
+            }
+
             warn!("Failed reading settings file: {error:?}. Using empty settings.");
 
             Settings::try_new(settings_path.to_path_buf(), IndexMap::default()).await?
@@ -241,6 +215,26 @@ pub async fn clear() -> Result<()> {
 
     guard.settings.get_actuators_mut().clear();
     guard.settings.save().await
+}
+
+fn sibling_path(path: &Path, suffix: &str) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_else(|| "settings.json".into());
+    path.with_file_name(format!("{name}{suffix}"))
+}
+
+fn backup_path_for(path: &Path) -> PathBuf {
+    sibling_path(path, ".bak")
+}
+
+fn temp_path_for(path: &Path) -> PathBuf {
+    sibling_path(path, ".tmp")
+}
+
+fn corrupt_path_for(path: &Path) -> PathBuf {
+    sibling_path(path, ".corrupt")
 }
 
 // #[cfg(test)]
@@ -344,12 +338,97 @@ mod tests {
         let expected = fs::read_to_string(&path).await?;
 
         // The state a power cut mid-write used to leave: good backup, torn live file.
-        fs::copy(&path, path.with_file_name("settings.json.bak")).await?;
-        fs::write(&path, "{\"v1\": {\"actuators\"").await?;
+        fs::copy(&path, backup_path_for(&path)).await?;
+        let torn = "{\"v1\": {\"actuators\"";
+        fs::write(&path, torn).await?;
 
         Settings::from_path(&path).await?;
 
         assert_eq!(fs::read_to_string(&path).await?, expected);
+        assert_eq!(fs::read_to_string(corrupt_path_for(&path)).await?, torn);
+        assert!(backup_path_for(&path).exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unreadable_live_and_backup_leave_both_files_on_disk() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("settings.json");
+
+        Settings::try_new(path.clone(), IndexMap::default()).await?;
+        fs::copy(&path, backup_path_for(&path)).await?;
+
+        let torn_live = "{\"v1\": {\"actuators\"";
+        let torn_backup = "{\"v1\": {\"actuators\": {";
+        fs::write(&path, torn_live).await?;
+        fs::write(backup_path_for(&path), torn_backup).await?;
+
+        assert!(Settings::from_path(&path).await.is_err());
+        assert_eq!(
+            fs::read_to_string(corrupt_path_for(&path)).await?,
+            torn_live
+        );
+        assert_eq!(
+            fs::read_to_string(backup_path_for(&path)).await?,
+            torn_backup
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn custom_settings_filename_ignores_unrelated_directory_backups() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("prod.json");
+        let unrelated_backup = dir.path().join("settings.json.bak");
+
+        Settings::try_new(path.clone(), IndexMap::default()).await?;
+        let expected = fs::read_to_string(&path).await?;
+
+        fs::copy(&path, backup_path_for(&path)).await?;
+        fs::write(&unrelated_backup, "{\"version\":\"V1\",\"actuators\":{}}").await?;
+        fs::write(&path, "not json").await?;
+
+        Settings::from_path(&path).await?;
+
+        assert_eq!(fs::read_to_string(&path).await?, expected);
+        assert_eq!(
+            fs::read_to_string(corrupt_path_for(&path)).await?,
+            "not json"
+        );
+        assert_eq!(
+            fs::read_to_string(&unrelated_backup).await?,
+            "{\"version\":\"V1\",\"actuators\":{}}"
+        );
+        assert!(backup_path_for(&path).exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn custom_settings_filename_uses_matching_backup_and_temp() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("prod.json");
+
+        let settings = Settings::try_new(path.clone(), IndexMap::default()).await?;
+        let expected = fs::read_to_string(&path).await?;
+
+        fs::write(&path, "clobbered").await?;
+        settings.save().await?;
+
+        assert_eq!(fs::read_to_string(&path).await?, expected);
+
+        let mut leftovers: Vec<String> = std::fs::read_dir(dir.path())?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "prod.json")
+            .collect();
+        leftovers.sort();
+
+        assert_eq!(leftovers, vec!["prod.json.bak".to_string()]);
+        assert!(!dir.path().join("settings.json.bak").exists());
+        assert!(!dir.path().join("settings.json.tmp").exists());
 
         Ok(())
     }
