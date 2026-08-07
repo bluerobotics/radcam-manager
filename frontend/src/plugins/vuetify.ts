@@ -5,6 +5,7 @@
  */
 
 // Styles
+import '@/styles/roboto.css'
 import '@mdi/font/css/materialdesignicons.css'
 import 'vuetify/styles'
 

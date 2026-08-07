@@ -55,18 +55,20 @@ const emit = defineEmits<{
 
 const isOpen = ref(props.expanded ?? true)
 
+watch(
+  () => props.expanded,
+  (expanded) => {
+    if (expanded !== undefined && expanded !== isOpen.value) {
+      isOpen.value = expanded
+    }
+  },
+)
+
 const togglePanel = (): void => {
   isOpen.value = !isOpen.value
   emit('update:expanded', isOpen.value)
 }
 
-watch(
-  () => props.expanded,
-  (val) => {
-    if (val !== undefined) isOpen.value = val
-  },
-  { immediate: true }
-)
 </script>
 <style scoped>
 .expand-enter-active,

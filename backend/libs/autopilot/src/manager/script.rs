@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use mlua::Lua;
+use radcam_api::LuaScriptStatus;
 use tera::Tera;
 use tracing::*;
 use uuid::Uuid;
@@ -8,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     CameraActuators, api, generate_update_channel_param_function,
     manager::{Manager, get_output_raw_from_channel},
-    parameters::{ChannelFunction, ParamType},
+    parameters::{ActuatorsParameters, ChannelFunction, ParamType},
 };
 
 const PARAM_TABLE_KEY_BASE: u8 = 73;
@@ -30,10 +32,13 @@ impl Manager {
                 .actuators
                 .get(camera_uuid)
                 .context(crate::ACTUATORS_NOT_CONFIGURED)?;
-            let contents = generate_lua_script(camera_actuators)?;
-            validate_lua(&contents)?;
-            (contents, manager.autopilot_scripts_file.clone())
+
+            (
+                generate_lua_script(camera_actuators)?,
+                manager.autopilot_scripts_file.clone(),
+            )
         };
+        validate_lua(&contents)?;
 
         let path_obj = std::path::Path::new(&path);
         if let Some(parent_dir) = path_obj.parent() {
@@ -57,8 +62,49 @@ impl Manager {
             })?;
 
         info!("Wrote new lua script to {path:?}");
+        crate::health::refresh_lua_script_status().await;
         // Settings save is deferred to update_config finalize / ExportLuaScript caller.
         Ok(true)
+    }
+
+    /// Whether the script installed on the autopilot is the one this install expects.
+    ///
+    /// Compares file contents rather than asking the autopilot, so it also catches a
+    /// script left behind by an older manager version: the template stamps the version.
+    ///
+    /// ponytail: one script file backs every configured camera, so with more than one
+    /// configured this passes as soon as any of them matches. Upgrade path is one file
+    /// per camera, which the autopilot scripts folder already supports.
+    #[instrument(level = "debug")]
+    pub async fn script_status() -> LuaScriptStatus {
+        let Some(manager) = crate::manager::MANAGER.get() else {
+            return LuaScriptStatus::Unknown;
+        };
+
+        let (path, expected) = {
+            let manager = manager.read().await;
+            let expected: Vec<String> = manager
+                .settings
+                .actuators
+                .values()
+                .filter_map(|actuators| generate_lua_script(actuators).ok())
+                .collect();
+            (manager.autopilot_scripts_file.clone(), expected)
+        };
+
+        if expected.is_empty() {
+            return LuaScriptStatus::Unknown;
+        }
+
+        match tokio::fs::read_to_string(&path).await {
+            Ok(installed) if expected.contains(&installed) => LuaScriptStatus::Ok,
+            Ok(_) => LuaScriptStatus::Outdated,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => LuaScriptStatus::Missing,
+            Err(error) => {
+                warn!(?error, ?path, "Failed reading autopilot lua script");
+                LuaScriptStatus::Unknown
+            }
+        }
     }
 
     #[instrument(level = "debug")]
@@ -75,6 +121,8 @@ impl Manager {
                     .with_context(|| format!("Failed removing lua script at {path:?}"));
             }
         }
+
+        crate::health::refresh_lua_script_status().await;
 
         Ok(())
     }
@@ -158,7 +206,7 @@ impl Manager {
                 let param_name = format!("SERVO{}_FUNCTION", *channel as u8);
 
                 // The script servo input is the values from the CameraFocus
-                let function = ChannelFunction::CameraFocus;
+                let function = Self::script_channel_function();
 
                 let mut param = mavlink.get_param(&param_name, false).await?;
                 let old_value = param.value;
@@ -315,7 +363,7 @@ impl Manager {
         let mut param = mavlink.get_param(&param_name, false).await?;
         param
             .value
-            .set_value(ParamType::UINT8(new_value as u8), encoding)?;
+            .set_value(ParamType::REAL32(new_value), encoding)?;
 
         match mavlink.set_param(param).await {
             Ok(_) => {
@@ -355,8 +403,46 @@ impl Manager {
         Ok(())
     }
 
+    fn script_channel_function() -> ChannelFunction {
+        ChannelFunction::CameraFocus
+    }
+
+    fn expect_owned_script_servo_function(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let channel = parameters.script_channel as u8;
+        map.insert(
+            format!("SERVO{channel}_FUNCTION"),
+            ParamType::INT16(Self::script_channel_function() as i16),
+        );
+    }
+
+    fn expect_owned_script_enable(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let channel = parameters.camera_id as u8;
+        map.insert(
+            format!("{PARAM_PREFIX}{channel}_ENABLE"),
+            ParamType::UINT8(parameters.enable_focus_and_zoom_correlation as u8),
+        );
+    }
+
+    fn expect_owned_script_gain(
+        parameters: &ActuatorsParameters,
+        map: &mut IndexMap<String, ParamType>,
+    ) {
+        let channel = parameters.camera_id as u8;
+        map.insert(
+            format!("{PARAM_PREFIX}{channel}_GAIN"),
+            ParamType::REAL32(parameters.focus_margin_gain),
+        );
+    }
+
     generate_update_channel_param_function!(
         update_script_channel_min,
+        expect_owned_script_channel_min,
         script_channel_min,
         "SERVO",
         "MIN",
@@ -366,6 +452,7 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_script_channel_max,
+        expect_owned_script_channel_max,
         script_channel_max,
         "SERVO",
         "MAX",
@@ -375,6 +462,7 @@ impl Manager {
 
     generate_update_channel_param_function!(
         update_script_channel_trim,
+        expect_owned_script_channel_trim,
         script_channel_trim,
         "SERVO",
         "TRIM",
@@ -418,6 +506,18 @@ impl Manager {
     }
 }
 
+pub(super) fn push_owned_expectations(
+    parameters: &ActuatorsParameters,
+    map: &mut IndexMap<String, ParamType>,
+) {
+    Manager::expect_owned_script_servo_function(parameters, map);
+    Manager::expect_owned_script_enable(parameters, map);
+    Manager::expect_owned_script_gain(parameters, map);
+    Manager::expect_owned_script_channel_min(parameters, map);
+    Manager::expect_owned_script_channel_trim(parameters, map);
+    Manager::expect_owned_script_channel_max(parameters, map);
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct ScriptHealthTracker {
     last_input_raw: Option<u16>,
@@ -440,6 +540,12 @@ impl ScriptHealthTracker {
 
         let input_changed = input_raw.abs_diff(prev_input) > 10;
         let output_stuck = output_raw == prev_output;
+
+        if input_changed && !output_stuck {
+            // The script answered an input change, so whatever the autopilot reported
+            // earlier is no longer stopping it. Without this the failure latches forever.
+            crate::health::clear_lua_script_failure();
+        }
 
         if !input_changed || !output_stuck {
             self.stale_count = 0;
@@ -496,6 +602,7 @@ fn validate_lua(script: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_script_generation() {
         let contents = generate_lua_script(&CameraActuators::default()).unwrap();

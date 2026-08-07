@@ -7,13 +7,18 @@ use tracing::*;
 use crate::mcm_types::{
     ApiVideoSource, AuthenticateOnvifDeviceRequest, CaptureConfiguration, Format, Info,
     OnvifDevice, OnvifDeviceInformation, PostStream, RemoveStream, StreamInformation, StreamStatus,
-    UnauthenticateOnvifDeviceRequest, VideoCaptureConfiguration, VideoEncodeType, VideoSourceOnvif,
-    VideoSourceOnvifType, VideoSourceType,
+    VideoCaptureConfiguration, VideoEncodeType, VideoSourceOnvif, VideoSourceOnvifType,
+    VideoSourceType,
 };
 
 use super::{Camera, Credentials, Stream};
 
 const KNOWN_RADCAM_HARDWARE: &[&str] = &["HW0100302", "HW20200610"];
+
+/// MCM ships as its own BlueOS extension on its own release cadence, so this must not
+/// be a caret range: `"0.2.4"` means `>=0.2.4, <0.3.0`, which locks every camera out
+/// the day MCM releases 0.3.0.
+const SUPPORTED_MCM_VERSIONS: &str = ">=0.2.4";
 
 pub struct MCMClient {
     pub address: SocketAddr,
@@ -27,7 +32,7 @@ impl MCMClient {
         let _info = Self::get_info(address).await?;
 
         let version = semver::Version::parse(&_info.version)?;
-        let supported = semver::VersionReq::parse("0.2.4")?;
+        let supported = semver::VersionReq::parse(SUPPORTED_MCM_VERSIONS)?;
 
         if !supported.matches(&version) {
             return Err(anyhow!(
@@ -124,9 +129,11 @@ impl MCMClient {
                 let stream_endpoints = device.video_and_stream.stream_information.endpoints;
 
                 Some(Stream {
-                    name: name.to_owned(),
+                    name: device.video_and_stream.name.clone(),
                     source_endpoint,
                     stream_endpoints,
+                    state: device.state,
+                    error: device.error.clone(),
                 })
             })
             .collect::<Vec<Stream>>();
@@ -155,17 +162,21 @@ impl MCMClient {
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub(crate) async fn unauthenticate(&self, camera: &Camera) -> Result<()> {
-        let data = UnauthenticateOnvifDeviceRequest {
-            device_uuid: camera.uuid,
-        };
-
-        web_client::delete(&self.address, "onvif/authentication", (), data).await
+    async fn get_streams(&self) -> Result<Vec<StreamStatus>> {
+        web_client::get(&self.address, "streams", (), ()).await
     }
 
     #[instrument(level = "debug", skip(self))]
-    async fn get_streams(&self) -> Result<Vec<StreamStatus>> {
-        web_client::get(&self.address, "streams", (), ()).await
+    pub async fn delete_stream(&self, name: &str) -> Result<Vec<StreamStatus>> {
+        web_client::delete(
+            &self.address,
+            "delete_stream",
+            (),
+            RemoveStream {
+                name: name.to_owned(),
+            },
+        )
+        .await
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -213,18 +224,6 @@ impl MCMClient {
 
         web_client::post(&self.address, "streams", data, ()).await
     }
-
-    #[instrument(level = "debug", skip(self))]
-    async fn delete_stream(&self) -> Result<Vec<Camera>> {
-        let data = RemoveStream { name: todo!() };
-
-        let devices = web_client::delete(&self.address, "delete_stream", (), data).await?;
-
-        Ok(radcams_from_onvif_devices(
-            devices,
-            self.skip_hardware_check,
-        ))
-    }
 }
 
 fn radcams_from_onvif_devices(devices: Vec<OnvifDevice>, skip_hardware_check: bool) -> Vec<Camera> {
@@ -256,4 +255,19 @@ fn radcams_from_onvif_devices(devices: Vec<OnvifDevice>, skip_hardware_check: bo
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_versions_are_not_capped_at_the_next_minor() {
+        let supported = semver::VersionReq::parse(SUPPORTED_MCM_VERSIONS).unwrap();
+
+        assert!(!supported.matches(&semver::Version::parse("0.2.3").unwrap()));
+        assert!(supported.matches(&semver::Version::parse("0.2.4").unwrap()));
+        assert!(supported.matches(&semver::Version::parse("0.3.0").unwrap()));
+        assert!(supported.matches(&semver::Version::parse("1.0.0").unwrap()));
+    }
 }

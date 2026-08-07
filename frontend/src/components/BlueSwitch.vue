@@ -1,17 +1,23 @@
 <template>
   <div class="flex w-full justify-between items-center">
     <div v-if="label">
-      <label
+      <span
         class="text-start mr-6"
         :class="theme === 'dark' ? 'text-white' : 'text-black'"
-      >{{ label }}</label>
+      >{{ label }}</span>
     </div>
     <div
       name="switch-track"
+      role="switch"
+      :aria-label="label"
+      :aria-checked="modelValue === true"
+      :aria-disabled="disabled === true"
+      :tabindex="disabled ? -1 : 0"
       class="relative rounded-[8px] elevation-1 cursor-pointer overflow-hidden"
       :class="[theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]', disabled ? 'opacity-50 cursor-not-allowed' : '']"
       :style="{ minWidth: width || '75px', height: height || '30px' }"
       @click="toggleSwitch"
+      @keydown="onSwitchKeydown"
     >
       <p
         class="absolute left-[8px] top-1/2 -translate-y-1/2 text-[11px] pointer-events-none"
@@ -75,6 +81,14 @@ const toggleSwitch = (): void => {
   if (props.disabled) return
   modelValue.value = !modelValue.value
   emit('update:modelValue', modelValue.value)
+}
+
+const onSwitchKeydown = (event: KeyboardEvent): void => {
+  if (props.disabled) return
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    toggleSwitch()
+  }
 }
 
 watch(

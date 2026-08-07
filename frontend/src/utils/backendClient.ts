@@ -29,12 +29,43 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
 
 export type { ConnectionStats }
 
+export type BackendVersionObservation = {
+  initial: string | null
+  changed: boolean
+}
+
+export function observeBackendVersion(
+  state: BackendVersionObservation,
+  backendVersion: string | undefined,
+): void {
+  if (!backendVersion || state.changed) return
+  if (state.initial === null) {
+    state.initial = backendVersion
+    return
+  }
+  if (backendVersion !== state.initial) {
+    state.changed = true
+  }
+}
+
 // Above reboot wait budget (150s) and matching camera_ui::REBOOT_GRACE (180s).
 const REQUEST_TIMEOUT_MS = 180_000
 const REQUEST_MAX_ATTEMPTS = 3
 const RECONNECT_BASE_MS = 1_000
+/** Give up on a WebSocket stuck in CONNECTING and let backoff schedule the next try. */
+const HANDSHAKE_TIMEOUT_MS = 10_000
 const RECONNECT_MAX_MS = 30_000
-const STALE_CONNECTION_MS = 90_000
+/** Backend pushes connection/stats every 5s; four misses means the peer is frozen or gone. */
+export const STALE_CONNECTION_MS = 20_000
+
+/** True when no WebSocket data frame has arrived within the stale window. */
+export function isWsConnectionStale(
+  lastMessageAtMs: number,
+  nowMs: number,
+  staleMs: number = STALE_CONNECTION_MS,
+): boolean {
+  return nowMs - lastMessageAtMs >= staleMs
+}
 
 function makeRequestError(status: number, body: unknown): BackendRequestError {
   const error = new Error(`Request failed with status ${status}`) as BackendRequestError
@@ -90,7 +121,7 @@ class BackendClient {
   private intentionalClose = false
   private reconnectAttempt = 0
   private lastMessageAt = 0
-  private connectionState: ConnectionState = 'disconnected'
+  private connectionState: ConnectionState = 'connecting'
   private connectionStateHandlers = new Set<(state: ConnectionState, previousState: ConnectionState) => void>()
   private transportErrorHandlers = new Set<(message: string) => void>()
   private listenersRegistered = false
@@ -104,6 +135,11 @@ class BackendClient {
   private subscribeNeedsRetry = false
   /** Hard-stop list retries after camera_cap until the user re-selects. */
   private subscribeBlocked = false
+  private backendVersionObservation: BackendVersionObservation = {
+    initial: null,
+    changed: false,
+  }
+  private backendVersionChangeHandlers = new Set<() => void>()
 
   private wsUrl(): string {
     const url = new URL('v1/ws', window.location.href)
@@ -144,6 +180,29 @@ class BackendClient {
     this.transportErrorHandlers.add(handler)
     return () => {
       this.transportErrorHandlers.delete(handler)
+    }
+  }
+
+  onBackendVersionChanged(handler: () => void): () => void {
+    this.backendVersionChangeHandlers.add(handler)
+    if (this.backendVersionObservation.changed) {
+      handler()
+    }
+    return () => {
+      this.backendVersionChangeHandlers.delete(handler)
+    }
+  }
+
+  private noteBackendVersion(diagnostics: { backend_version?: string } | null | undefined): void {
+    const before = this.backendVersionObservation.changed
+    observeBackendVersion(
+      this.backendVersionObservation,
+      diagnostics?.backend_version,
+    )
+    if (!before && this.backendVersionObservation.changed) {
+      for (const changeHandler of this.backendVersionChangeHandlers) {
+        changeHandler()
+      }
     }
   }
 
@@ -214,7 +273,17 @@ class BackendClient {
       const ws = new WebSocket(this.wsUrl())
       this.ws = ws
 
+      // A handshake started while the backend was down can stay in CONNECTING
+      // forever. Reconnect is driven by onclose, so force one: without this the
+      // client waits on a dead socket and the UI stays disabled until reload.
+      const handshakeTimeout = setTimeout(() => {
+        if (this.ws === ws && ws.readyState === WebSocket.CONNECTING) {
+          ws.close()
+        }
+      }, HANDSHAKE_TIMEOUT_MS)
+
       ws.onopen = () => {
+        clearTimeout(handshakeTimeout)
         settled = true
         this.connectPromise = null
         this.lastMessageAt = Date.now()
@@ -236,15 +305,8 @@ class BackendClient {
       }
 
       ws.onclose = () => {
-        if (this.ws !== ws) return
-        this.ws = null
-        this.connectPromise = null
-        this.stopStaleCheck()
-        this.setConnectionState('disconnected')
-        // Force list-driven re-subscribe after reconnect — prior state may be gone.
-        this.hasCameraState = false
-        this.subscribeBlocked = false
-        this.rejectAllPending(new Error('WebSocket closed'))
+        clearTimeout(handshakeTimeout)
+        if (!this.dropSocket(ws)) return
 
         if (!settled) {
           settled = true
@@ -264,12 +326,39 @@ class BackendClient {
     return this.connectPromise
   }
 
+  /**
+   * Drop local socket state. Returns false if `ws` is no longer current.
+   * Used by onclose and by the stale timer: a SIGSTOP'd peer never finishes the
+   * WebSocket close handshake, so waiting for onclose alone leaves the UI "connected".
+   */
+  private dropSocket(ws: WebSocket): boolean {
+    if (this.ws !== ws) return false
+    this.ws = null
+    this.connectPromise = null
+    this.stopStaleCheck()
+    this.setConnectionState('disconnected')
+    // Force list-driven re-subscribe after reconnect — prior state may be gone.
+    this.hasCameraState = false
+    this.subscribeBlocked = false
+    this.rejectAllPending(new Error('WebSocket closed'))
+    return true
+  }
+
   private startStaleCheck(): void {
     this.stopStaleCheck()
     this.staleCheckTimer = setInterval(() => {
-      if (this.ws?.readyState !== WebSocket.OPEN) return
-      if (Date.now() - this.lastMessageAt < STALE_CONNECTION_MS) return
-      this.ws.close()
+      const ws = this.ws
+      if (ws?.readyState !== WebSocket.OPEN) return
+      if (!isWsConnectionStale(this.lastMessageAt, Date.now())) return
+      if (!this.dropSocket(ws)) return
+      if (!this.intentionalClose) {
+        this.scheduleReconnect()
+      }
+      try {
+        ws.close()
+      } catch {
+        // Peer may already be unreachable.
+      }
     }, STALE_CONNECTION_MS / 3)
   }
 
@@ -330,20 +419,32 @@ class BackendClient {
     }
 
     if (message.type === 'event') {
-      // Re-subscribe after MCM list arrives only when we still need state
-      // (boot race) or the last reject was unknown_camera — not on every list churn.
-      if (message.event === 'camera/list' && this.subscribedCameraUuid) {
+      // Re-subscribe only when we still need state (boot race) or the last reject was
+      // unknown_camera — not on every list churn. system/health is a trigger too: the
+      // backend also accepts a subscribe once the camera is merely configured, and that
+      // flip is carried by health (expected_missing), never by camera/list.
+      if (
+        (message.event === 'camera/list' || message.event === 'system/health')
+        && this.subscribedCameraUuid
+      ) {
         if (this.subscribeBlocked) {
           // Over capacity — wait for an explicit subscribeCamera (user action).
         } else if (!this.hasCameraState || this.subscribeNeedsRetry) {
           this.queueSubscribe(this.subscribedCameraUuid)
         }
       }
+      if (message.event === 'system/health') {
+        const body = message.body as { diagnostics?: { backend_version?: string } } | null
+        this.noteBackendVersion(body?.diagnostics)
+      }
       if (message.event === 'camera/subscribe_rejected' && this.subscribedCameraUuid) {
         const body = message.body as { camera_uuid?: string; reason?: string } | null
         if (!body?.camera_uuid || body.camera_uuid === this.subscribedCameraUuid) {
           if (body?.reason === 'unknown_camera') {
-            // Retry from the next camera/list — do not immediate-resubscribe (storm).
+            // Retry from the next list/health push — do not immediate-resubscribe (storm).
+            if (!this.subscribeNeedsRetry) {
+              console.warn('Camera subscribe rejected: unknown_camera; retrying on next list/health')
+            }
             this.subscribeNeedsRetry = true
             this.subscribeBlocked = false
           } else if (body?.reason === 'camera_cap') {

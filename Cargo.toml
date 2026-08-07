@@ -15,7 +15,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.2.0-beta.14"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 authors = ["João Antônio Cardoso"]
@@ -47,6 +47,9 @@ vergen-gix = { version = "1.0.9", default-features = false, features = ["build",
 
 [profile.release]
 strip = true
+# A panicked task would otherwise leave a process that still serves the UI and reports
+# its last known state forever. Aborting lets the extension be restarted instead.
+panic = 'abort'
 
 [profile.release-small]
 inherits = "release"

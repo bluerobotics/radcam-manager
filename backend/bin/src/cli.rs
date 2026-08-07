@@ -209,7 +209,7 @@ pub fn mcm_skip_hardware_check() -> bool {
 pub async fn blueos_address() -> std::net::SocketAddr {
     let address = &args().blueos_address;
 
-    let (host, port) = address.split_once(':').unwrap_or((&address, "80"));
+    let (host, port) = address.split_once(':').unwrap_or((address, "80"));
     let address = format!("{host}:{port}");
 
     resolve_address(&address).await.unwrap()

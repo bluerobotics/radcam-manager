@@ -2,7 +2,7 @@ use std::{future::Future, pin::Pin};
 
 use anyhow::{Context, Result};
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use mcm_client::{Camera, get_camera};
+use mcm_client::camera_address;
 use protocol::{
     display::{advanced_display::AdvancedParameterSetting, base_display::BaseParameterSetting},
     video::video_parameters::VideoParameterSettings,
@@ -345,28 +345,24 @@ async fn get_camera_api_url(camera_control: &CameraControl) -> Result<Url> {
     let action_map = action_value.as_object().unwrap();
     let action = action_map.get("action").unwrap().as_str().unwrap();
 
-    let Camera {
-        hostname,
-        credentials,
-        ..
-    } = get_camera(&camera_uuid).await.context("Camera not found")?;
+    let hostname = camera_address(&camera_uuid)
+        .await
+        .context("Camera address unknown")?;
 
     let port = 80;
 
-    match credentials {
-        // NOTE: This part of the protocol is not working: only the get requests using cgi_action parameter are working.
-        // I'm leaving it here in case they fix it:
-        // Some(Credentials { username, password }) => {
-        //     format!(
-        //         "http://{hostname}:{port}/action/cgi_action?user={username}&pwd={password}&action={action}", password=hash_password(&password)
-        //     )
-        // }
-        // None => format!("http://{hostname}:{port}/action/{action}"),
-        // So for now we are just using the protocol without the authentication:
-        _ => format!("http://{hostname}:{port}/action/{action}"),
-    }
-    .parse()
-    .context("Invalid URl")
+    // NOTE: This part of the protocol is not working: only the get requests using cgi_action parameter are working.
+    // I'm leaving it here in case they fix it:
+    // Some(Credentials { username, password }) => {
+    //     format!(
+    //         "http://{hostname}:{port}/action/cgi_action?user={username}&pwd={password}&action={action}", password=hash_password(&password)
+    //     )
+    // }
+    // None => format!("http://{hostname}:{port}/action/{action}"),
+    // So for now we are just using the protocol without the authentication:
+    format!("http://{hostname}:{port}/action/{action}")
+        .parse()
+        .context("Invalid URl")
 }
 
 #[instrument(level = "debug")]

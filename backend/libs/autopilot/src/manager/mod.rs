@@ -2,6 +2,7 @@ mod calibration;
 mod camera;
 mod focus;
 mod macros;
+pub(crate) mod owned_parameters;
 mod script;
 mod tilt;
 mod zoom;
@@ -287,6 +288,8 @@ impl Manager {
         }
 
         Self::save_actuators_settings().await?;
+        owned_parameters::rebuild().await;
+        owned_parameters::reevaluate_after_apply().await;
         Ok(false)
     }
 
@@ -300,7 +303,10 @@ impl Manager {
             Self::update_script_enable(camera_uuid, parameters, true).await?;
             Self::update_script_gain(camera_uuid, parameters, true).await?;
         }
-        Self::save_actuators_settings().await
+        Self::save_actuators_settings().await?;
+        owned_parameters::rebuild().await;
+        owned_parameters::reevaluate_after_apply().await;
+        Ok(())
     }
 
     #[instrument(level = "debug")]
@@ -344,7 +350,11 @@ pub async fn init(
         });
     }
 
-    if mavlink::component().is_ok() {
+    if let Ok(component) = mavlink::component() {
+        owned_parameters::rebuild().await;
+        let cache = component.inner.parameters.read().await;
+        owned_parameters::establish_baseline_from_cache(&cache);
+        crate::health::refresh_lua_script_status().await;
         return Ok(());
     }
 
@@ -353,6 +363,8 @@ pub async fn init(
     mavlink::init_component(mavlink)?;
 
     crate::actuators_watch::start();
+
+    crate::health::refresh_lua_script_status().await;
 
     Ok(())
 }
@@ -385,6 +397,12 @@ pub async fn clear_saved_settings() -> Result<()> {
         guard.settings = settings;
     }
     drop(apply);
+
+    owned_parameters::rebuild().await;
+    if let Ok(component) = mavlink::component() {
+        let cache = component.inner.parameters.read().await;
+        owned_parameters::establish_baseline_from_cache(&cache);
+    }
 
     Ok(())
 }

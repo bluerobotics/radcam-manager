@@ -45,6 +45,10 @@ jobs:
       - name: Build
         run: ./build.sh --all-features --locked --verbose
 
+      - name: Run frontend self-checks
+        working-directory: frontend
+        run: npm run selfcheck
+
       - name: Install clippy
         run: rustup component add clippy
       - name: Check clippy

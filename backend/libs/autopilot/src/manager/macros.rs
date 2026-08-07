@@ -2,6 +2,7 @@
 macro_rules! generate_update_channel_param_function {
     (
         $fn_name:ident,
+        $expect_fn:ident,
         $field_name:ident,
         $param_prefix:expr,
         $param_suffix:expr,
@@ -78,6 +79,17 @@ macro_rules! generate_update_channel_param_function {
 
             Ok(())
         }
+
+        fn $expect_fn(
+            parameters: &$crate::parameters::ActuatorsParameters,
+            map: &mut indexmap::IndexMap<String, $crate::parameters::ParamType>,
+        ) {
+            let channel = parameters.$channel_field as u8;
+            map.insert(
+                format!("{}{}_{}", $param_prefix, channel, $param_suffix),
+                $crate::parameters::ParamType::$ty(parameters.$field_name),
+            );
+        }
     };
 }
 
@@ -85,6 +97,7 @@ macro_rules! generate_update_channel_param_function {
 macro_rules! generate_update_mount_param_function {
     (
         $fn_name:ident,
+        $expect_fn:ident,
         $field_name:ident,
         $param_suffix:expr,
         $ty:ident
@@ -107,10 +120,7 @@ macro_rules! generate_update_mount_param_function {
                     .entry(*camera_uuid)
                     .or_default()
                     .parameters;
-                let mount_id = match current_parameters.camera_id {
-                    api::CameraID::CAM1 => TiltChannelFunction::MNT1,
-                    api::CameraID::CAM2 => TiltChannelFunction::MNT2,
-                };
+                let mount_id = $crate::manager::tilt::tilt_mount_id(current_parameters.camera_id);
                 let param_name = format!("{mount_id:?}_{}", $param_suffix);
                 let new_value = match (parameters.$field_name, force_apply) {
                     (Some(value), _) => value,
@@ -156,6 +166,17 @@ macro_rules! generate_update_mount_param_function {
                     stringify!($field_name)
                 )),
             }
+        }
+
+        fn $expect_fn(
+            parameters: &$crate::parameters::ActuatorsParameters,
+            map: &mut indexmap::IndexMap<String, $crate::parameters::ParamType>,
+        ) {
+            let mount_id = $crate::manager::tilt::tilt_mount_id(parameters.camera_id);
+            map.insert(
+                format!("{mount_id:?}_{}", $param_suffix),
+                $crate::parameters::ParamType::$ty(parameters.$field_name),
+            );
         }
     };
 }

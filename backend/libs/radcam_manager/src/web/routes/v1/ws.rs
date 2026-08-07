@@ -12,7 +12,7 @@ use axum::{
     response::Response,
 };
 use futures::{SinkExt, StreamExt};
-use radcam_api::{CameraStateEvent, WsClientMessage, WsEvent, WsRequest, WsResponse};
+use radcam_api::{CameraStateEvent, SystemHealth, WsClientMessage, WsEvent, WsRequest, WsResponse};
 use radcam_commands::CameraControl;
 use serde_json::Value;
 use tokio::sync::{Notify, Semaphore, broadcast::error::RecvError, mpsc};
@@ -20,7 +20,7 @@ use tracing::*;
 use uuid::Uuid;
 
 use crate::web::ws_connections::ConnectionId;
-use crate::web::{self, camera_state, camera_ui, control_bridge, ws_connections};
+use crate::web::{self, camera_state, camera_ui, connectivity, control_bridge, ws_connections};
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// Drop the connection when no pong has arrived within this wall-clock duration.
@@ -28,6 +28,7 @@ const PONG_TIMEOUT: Duration = Duration::from_secs(90);
 /// Bound socket writes so a half-open TCP peer cannot stall cleanup forever.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const STATS_INTERVAL: Duration = Duration::from_secs(5);
+const HEALTH_INTERVAL: Duration = Duration::from_secs(15);
 /// Outbound queue depth; the select loop drains it, so a full queue means a stuck client.
 const RESPONSE_QUEUE: usize = 64;
 /// Upper bound on concurrent request handlers per connection.
@@ -91,6 +92,7 @@ async fn websocket_connection(socket: WebSocket) {
     let (mut sender, mut receiver) = socket.split();
     let mut cameras_receiver = mcm_client::subscribe_cameras();
     let mut state_receiver = camera_state::subscribe_state();
+    let mut health_receiver = connectivity::subscribe();
     let (response_tx, mut response_rx) = mpsc::channel::<String>(RESPONSE_QUEUE);
     let request_permits = Arc::new(Semaphore::new(MAX_INFLIGHT_REQUESTS));
     let snapshot_permits = Arc::new(Semaphore::new(MAX_INFLIGHT_SNAPSHOTS));
@@ -105,19 +107,23 @@ async fn websocket_connection(socket: WebSocket) {
     let mut stats_interval = tokio::time::interval(STATS_INTERVAL);
     stats_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     stats_interval.tick().await;
+    let mut health_interval = tokio::time::interval(HEALTH_INTERVAL);
+    health_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    health_interval.tick().await;
 
     if send_camera_list_event(&mut sender, connection_id).await == Err(SendFailure::Socket) {
         return;
     }
 
-    match connection_stats_text(connection_id) {
-        Some(text) => {
-            last_stats_text = Some(text.clone());
-            if send_text(&mut sender, connection_id, text).await.is_err() {
-                return;
-            }
+    if push_health(&mut sender, connection_id).await.is_err() {
+        return;
+    }
+
+    if let Some(text) = connection_stats_text(connection_id) {
+        last_stats_text = Some(text.clone());
+        if send_text(&mut sender, connection_id, text).await.is_err() {
+            return;
         }
-        None => {}
     }
 
     'connection: loop {
@@ -209,6 +215,7 @@ async fn websocket_connection(socket: WebSocket) {
                         break 'connection;
                     }
                     Err(RecvError::Lagged(samples)) => {
+                        camera_state::record_state_events_lagged(samples);
                         debug!("WebSocket {connection_id} lagged by {samples} state events");
                         spawn_lag_recovery(
                             connection_id,
@@ -240,6 +247,24 @@ async fn websocket_connection(socket: WebSocket) {
                 last_stats_text = Some(text.clone());
                 if send_text(&mut sender, connection_id, text).await.is_err() {
                     break 'connection;
+                }
+            }
+            _ = health_interval.tick() => {
+                // Safety net for changes that reach no notifier; the aggregator
+                // no-ops when only volatile ages moved, so clients see nothing.
+                connectivity::publish_health_if_changed().await;
+            }
+            health = health_receiver.recv() => {
+                match health {
+                    Ok(()) | Err(RecvError::Lagged(_)) => {
+                        if push_health(&mut sender, connection_id).await.is_err() {
+                            break 'connection;
+                        }
+                    }
+                    Err(RecvError::Closed) => {
+                        warn!("System health broadcast closed; dropping WebSocket {connection_id}");
+                        break 'connection;
+                    }
                 }
             }
         }
@@ -345,7 +370,7 @@ async fn handle_client_text(
     if let Ok(message) = serde_json::from_str::<WsClientMessage>(text) {
         match message {
             WsClientMessage::Subscribe { camera_uuid } => {
-                if mcm_client::get_camera(&camera_uuid).await.is_none() {
+                if !connectivity::subscribe_allowed(camera_uuid, connection_id).await {
                     warn!(%connection_id, %camera_uuid, "Rejecting subscribe for unknown camera");
                     // close_notify already woken on Full; read loop exits via the notify arm.
                     let _ = queue_subscribe_rejected(
@@ -590,6 +615,36 @@ fn connection_stats_text(connection_id: ConnectionId) -> Option<String> {
             None
         }
     }
+}
+
+#[instrument(level = "debug", skip_all)]
+fn system_health_event_text(health: &SystemHealth) -> Option<String> {
+    let body = match serde_json::to_value(health) {
+        Ok(body) => body,
+        Err(error) => {
+            warn!("Failed serializing system health: {error}");
+            return None;
+        }
+    };
+    match serde_json::to_string(&WsEvent::new("system/health", body)) {
+        Ok(text) => Some(text),
+        Err(error) => {
+            warn!("Failed serializing system/health event: {error}");
+            None
+        }
+    }
+}
+
+#[instrument(level = "debug", skip_all, fields(%connection_id))]
+async fn push_health(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    connection_id: ConnectionId,
+) -> Result<(), SendFailure> {
+    let health = connectivity::system_health().await;
+    let Some(text) = system_health_event_text(&health) else {
+        return Ok(());
+    };
+    send_text(sender, connection_id, text).await
 }
 
 #[instrument(level = "debug", skip_all, fields(%connection_id, %camera_uuid, reason))]

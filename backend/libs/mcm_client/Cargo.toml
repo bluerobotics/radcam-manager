@@ -12,6 +12,7 @@ path = "src/mod.rs"
 bench = false
 
 [dependencies]
+radcam_api = { path = "../radcam_api" }
 web_client = { path = "../web_client" }
 
 anyhow = { workspace = true }
@@ -27,3 +28,6 @@ tracing = { workspace = true }
 ts-rs = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

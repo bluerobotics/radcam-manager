@@ -77,6 +77,7 @@ fn generate_typescript_bindings_for_mcm_client() -> Result<()> {
         mcm_types::VideoCaptureConfiguration::export_to_string()?,
         mcm_types::RedirectCaptureConfiguration::export_to_string()?,
         mcm_types::StreamStatus::export_to_string()?,
+        mcm_types::StreamStatusState::export_to_string()?,
         mcm_types::VideoAndStreamInformation::export_to_string()?,
         mcm_types::VideoSourceOnvif::export_to_string()?,
         mcm_types::VideoSourceLocal::export_to_string()?,
@@ -165,6 +166,14 @@ fn generate_typescript_bindings_for_radcam_api() -> Result<()> {
     prepare_output(&output)?;
 
     let ts_rs_bindings = [
+        radcam_api::CameraConnectivity::export_to_string()?,
+        radcam_api::McmHealth::export_to_string()?,
+        radcam_api::AutopilotHealth::export_to_string()?,
+        radcam_api::LuaScriptStatus::export_to_string()?,
+        radcam_api::ExpectedCamera::export_to_string()?,
+        radcam_api::ParameterDrift::export_to_string()?,
+        radcam_api::Diagnostics::export_to_string()?,
+        radcam_api::SystemHealth::export_to_string()?,
         radcam_api::CameraStateEvent::export_to_string()?,
         radcam_api::CameraUiState::export_to_string()?,
         radcam_api::OnePushAwbStatus::export_to_string()?,

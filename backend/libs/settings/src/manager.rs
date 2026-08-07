@@ -1,16 +1,21 @@
 use anyhow::{Context, Result, anyhow};
-use chrono::Utc;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
-use std::path::{Path, PathBuf};
-use tokio::{fs, io, sync::RwLock};
-use tokio_stream::{StreamExt, wrappers::ReadDirStream};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
+use tokio::{fs, io::AsyncWriteExt, sync::RwLock};
 use tracing::*;
 use uuid::Uuid;
 
 use crate::{CameraActuatorsSettings, RawSettingsData, SettingsDataImpl, v1::SettingsDataV1};
 
 pub static MANAGER: OnceCell<RwLock<Manager>> = OnceCell::new();
+
+/// A read-only filesystem or a full SD card only surfaces as a failed request at the
+/// moment the user changes something, which is long after it starts mattering.
+static LAST_SAVE_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
 #[derive(Debug)]
 pub struct Manager {
@@ -39,24 +44,27 @@ impl Settings {
     }
 
     pub async fn from_path(path: &Path) -> Result<Self> {
-        async fn read_inner(path: &Path) -> Result<Settings> {
-            let contents = fs::read_to_string(path)
+        // Reading a backup must still leave the manager writing to the live file, or every
+        // later save lands on the backup — which, with a single fixed backup name, would
+        // copy that file over itself.
+        async fn read_inner(source: &Path, destination: &Path) -> Result<Settings> {
+            let contents = fs::read_to_string(source)
                 .await
-                .with_context(|| format!("Failed to read settings file: {path:?}"))?;
+                .with_context(|| format!("Failed to read settings file: {source:?}"))?;
 
             let raw: RawSettingsData = serde_json::from_str(&contents)
-                .with_context(|| format!("Failed to parse JSON from settings: {path:?}"))?;
+                .with_context(|| format!("Failed to parse JSON from settings: {source:?}"))?;
 
             let inner = match raw {
                 RawSettingsData::V1(v1) => Box::new(v1),
                 RawSettingsData::V0(v0) => {
-                    warn!("Migrating settings V0 to V1 from {path:?}");
+                    warn!("Migrating settings V0 to V1 from {source:?}");
                     Box::new(SettingsDataV1::from(v0))
                 }
             };
 
             let settings = Settings {
-                path: path.to_owned(),
+                path: destination.to_owned(),
                 inner,
             };
 
@@ -66,46 +74,39 @@ impl Settings {
         }
 
         if path.exists() {
-            return read_inner(path).await;
-        }
-
-        let dir = path.parent().unwrap_or_else(|| Path::new("."));
-        let read_dir = fs::read_dir(dir).await?;
-        let mut entries = ReadDirStream::new(read_dir);
-
-        let mut backups = vec![];
-        while let Some(entry) = entries.next().await {
-            if let Ok(entry) = entry {
-                let file_name = entry.file_name();
-                if file_name.to_string_lossy().starts_with("settings.json.")
-                    && entry
-                        .path()
-                        .extension()
-                        .map(|e| e == "bak")
-                        .unwrap_or(false)
-                {
-                    backups.push(entry);
+            match read_inner(path, path).await {
+                Ok(settings) => return Ok(settings),
+                Err(error) => {
+                    warn!("Failed reading settings from {path:?}: {error:?}");
+                    let corrupt_path = corrupt_path_for(path);
+                    if let Err(error) = fs::rename(path, &corrupt_path).await {
+                        warn!(
+                            "Failed renaming unreadable settings {path:?} to {corrupt_path:?}: {error:?}"
+                        );
+                    }
                 }
             }
         }
 
-        if let Some(latest_backup) =
-            futures::future::try_join_all(backups.iter().map(|e| async move {
-                let meta = e.metadata().await.ok();
-                Ok::<_, io::Error>((meta.and_then(|m| m.modified().ok()), e.path()))
-            }))
-            .await?
-            .into_iter()
-            .max_by_key(|(mod_time, _)| *mod_time)
-            .map(|(_, path)| path)
-        {
-            return read_inner(&latest_backup).await;
+        let backup_path = backup_path_for(path);
+        if backup_path.exists() {
+            return read_inner(&backup_path, path).await;
         }
 
         Err(anyhow!("No settings file or backup found"))
     }
 
     pub async fn save(&self) -> Result<()> {
+        let result = self.save_inner().await;
+
+        if let Ok(mut last) = LAST_SAVE_ERROR.lock() {
+            *last = result.as_ref().err().map(|error| format!("{error:#}"));
+        }
+
+        result
+    }
+
+    async fn save_inner(&self) -> Result<()> {
         let path = self.path.as_path();
         let settings_file = path.to_string_lossy();
 
@@ -123,8 +124,7 @@ impl Settings {
                 return Ok(());
             }
 
-            let now = Utc::now().timestamp();
-            let backup_path = path.with_file_name(format!("settings.json.{now}.bak"));
+            let backup_path = backup_path_for(path);
 
             fs::copy(path, &backup_path)
                 .await
@@ -132,9 +132,22 @@ impl Settings {
             debug!("Created settings backup: {backup_path:?}");
         }
 
-        fs::write(path, &new_contents)
+        // Rename is atomic within a filesystem, so an unclean power-down can lose the new
+        // settings but can never leave a torn file where they used to be.
+        let temporary_path = temp_path_for(path);
+        let mut file = fs::File::create(&temporary_path)
             .await
-            .with_context(|| format!("Failed to write settings to {settings_file:?}"))?;
+            .with_context(|| format!("Failed to create {temporary_path:?}"))?;
+        file.write_all(new_contents.as_bytes())
+            .await
+            .with_context(|| format!("Failed to write settings to {temporary_path:?}"))?;
+        file.sync_all()
+            .await
+            .with_context(|| format!("Failed to flush settings to {temporary_path:?}"))?;
+
+        fs::rename(&temporary_path, path)
+            .await
+            .with_context(|| format!("Failed to replace settings at {settings_file:?}"))?;
 
         debug!("Wrote new settings to {settings_file:?}:\n{:?}", self.inner);
 
@@ -161,6 +174,12 @@ pub async fn init(settings_file: String, reset: bool) -> Result<()> {
     let settings = match (reset, Settings::from_path(settings_path).await) {
         (false, Ok(settings)) => settings,
         (false, Err(error)) => {
+            if backup_path_for(settings_path).exists() {
+                return Err(error).context(
+                    "Settings file is unreadable and backup could not be recovered; refusing to overwrite backup with empty settings",
+                );
+            }
+
             warn!("Failed reading settings file: {error:?}. Using empty settings.");
 
             Settings::try_new(settings_path.to_path_buf(), IndexMap::default()).await?
@@ -184,6 +203,11 @@ pub async fn init(settings_file: String, reset: bool) -> Result<()> {
     Ok(())
 }
 
+/// Text of the last failed settings write, cleared by the next successful one.
+pub fn last_save_error() -> Option<String> {
+    LAST_SAVE_ERROR.lock().ok()?.clone()
+}
+
 #[instrument(level = "debug")]
 pub async fn clear() -> Result<()> {
     let manager = MANAGER.get().context("settings not initialized")?;
@@ -191,6 +215,26 @@ pub async fn clear() -> Result<()> {
 
     guard.settings.get_actuators_mut().clear();
     guard.settings.save().await
+}
+
+fn sibling_path(path: &Path, suffix: &str) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_else(|| "settings.json".into());
+    path.with_file_name(format!("{name}{suffix}"))
+}
+
+fn backup_path_for(path: &Path) -> PathBuf {
+    sibling_path(path, ".bak")
+}
+
+fn temp_path_for(path: &Path) -> PathBuf {
+    sibling_path(path, ".tmp")
+}
+
+fn corrupt_path_for(path: &Path) -> PathBuf {
+    sibling_path(path, ".corrupt")
 }
 
 // #[cfg(test)]
@@ -252,3 +296,36 @@ pub async fn clear() -> Result<()> {
 //         Ok(())
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn repeated_saves_leave_one_backup_and_no_temporary() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("settings.json");
+
+        let settings = Settings::try_new(path.clone(), IndexMap::default()).await?;
+        let expected = fs::read_to_string(&path).await?;
+
+        // An unchanged file is skipped, so dirty the live copy to force a real write.
+        for revision in 0..3 {
+            fs::write(&path, format!("clobbered {revision}")).await?;
+            settings.save().await?;
+
+            assert_eq!(fs::read_to_string(&path).await?, expected);
+        }
+
+        let mut leftovers: Vec<String> = std::fs::read_dir(dir.path())?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "settings.json")
+            .collect();
+        leftovers.sort();
+
+        assert_eq!(leftovers, vec!["settings.json.bak".to_string()]);
+
+        Ok(())
+    }
+}
