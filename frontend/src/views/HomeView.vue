@@ -369,7 +369,6 @@ import {
   minimizeHealthDialog,
   noteActiveProblems,
   noteForgetSuccess,
-  noteMcmAttempts,
   recoveryWhileMinimizedToast,
   reduceHealthDialogOnProblems,
   reopenHealthDialog,
@@ -541,7 +540,8 @@ const healthInputBase = computed(() => ({
 const healthFlags = computed(() =>
   evaluateHealthFlags({
     ...healthInputBase.value,
-    mcmAttemptsPeak: healthDialog.value.mcmAttemptsPeak,
+    problemFirstSeen: healthDialog.value.problemFirstSeen,
+    nowMs: healthProblemsNowMs.value,
   }),
 )
 const healthProblems = computed(() =>
@@ -951,10 +951,8 @@ watch(
   (base) => {
     const flags = healthFlags.value
 
-    const failures = base.systemHealth?.diagnostics.mcm_consecutive_failures ?? 0
     const before = healthDialog.value
     let next = before
-    next = noteMcmAttempts(next, failures)
     next = noteActiveProblems(next, flags.problems, Date.now())
     next = reduceHealthDialogOnProblems(next, flags.degraded)
     if (
