@@ -60,16 +60,10 @@ pub struct McmHealthSnapshot {
 }
 
 #[derive(Debug)]
-struct StreamFailure {
-    episode_key: String,
-    detail: String,
-}
-
-#[derive(Debug)]
 struct Manager {
     cameras: Cameras,
     auth_failures: HashMap<Uuid, String>,
-    stream_failures: HashMap<Uuid, StreamFailure>,
+    stream_failures: HashMap<Uuid, String>,
     _authentication_task_handler: JoinHandle<()>,
     _start_radcams_task_handler: JoinHandle<()>,
 }
@@ -116,7 +110,9 @@ pub async fn init(mcm_address: SocketAddr, skip_hardware_check: bool) {
                 async move { authenticate_radcams(&mcm_address, skip_hardware_check).await },
             );
         lock._start_radcams_task_handler =
-            tokio::spawn(async move { start_radcams_streams(&mcm_address).await });
+            tokio::spawn(
+                async move { start_radcams_streams(&mcm_address, skip_hardware_check).await },
+            );
         return;
     }
 
@@ -124,7 +120,7 @@ pub async fn init(mcm_address: SocketAddr, skip_hardware_check: bool) {
     let _authentication_task_handler =
         tokio::spawn(async move { authenticate_radcams(&mcm_address, skip_hardware_check).await });
     let _start_radcams_task_handler =
-        tokio::spawn(async move { start_radcams_streams(&mcm_address).await });
+        tokio::spawn(async move { start_radcams_streams(&mcm_address, skip_hardware_check).await });
 
     MANAGER.get_or_init(|| {
         RwLock::new(Manager {
@@ -235,14 +231,14 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
 }
 
 #[instrument(level = "debug")]
-async fn start_radcams_streams(mcm_address: &SocketAddr) {
+async fn start_radcams_streams(mcm_address: &SocketAddr, skip_hardware_check: bool) {
     let mut stream_failure_counts: HashMap<Url, u32> = HashMap::new();
 
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        let Some(mcm) = probe_mcm_link(*mcm_address, "/info", || {
-            MCMClient::try_new(mcm_address, false)
+        let Some(mcm) = await_mcm_probe(*mcm_address, "/info", || {
+            MCMClient::try_new(mcm_address, skip_hardware_check)
         })
         .await
         else {
@@ -252,14 +248,16 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-            let Some(existing_radcam_streams) = fetch_radcam_streams(&mcm).await else {
-                continue;
+            let Some(existing_radcam_streams) =
+                await_mcm_probe(mcm.address, "streams", || mcm.get_radcam_streams()).await
+            else {
+                break;
             };
 
             let Some(available_radcam_sources) =
-                probe_mcm_link(mcm.address, "v4l", || mcm.get_radcam_video_sources()).await
+                await_mcm_probe(mcm.address, "v4l", || mcm.get_radcam_video_sources()).await
             else {
-                continue;
+                break;
             };
 
             let mut observed_sources = HashSet::new();
@@ -299,7 +297,7 @@ async fn start_radcams_streams(mcm_address: &SocketAddr) {
                             .or_insert(0);
                         *count += 1;
 
-                        if *count >= STREAM_FAILURES_TO_RECREATE {
+                        if stream_failure_count_triggers_recreate(*count) {
                             set_stream_failure_for_source(
                                 &available_source,
                                 stream.state,
@@ -357,12 +355,7 @@ pub async fn authentication_failure(uuid: &Uuid) -> Option<String> {
 /// Per-camera video stream failure, when MCM's stream stayed broken through self-heal backoff.
 pub async fn stream_failure(uuid: &Uuid) -> Option<String> {
     let manager = MANAGER.get()?;
-    manager
-        .read()
-        .await
-        .stream_failures
-        .get(uuid)
-        .map(|failure| failure.detail.clone())
+    manager.read().await.stream_failures.get(uuid).cloned()
 }
 
 #[instrument(level = "debug")]
@@ -624,13 +617,12 @@ async fn prune_auth_failures(visible: &HashSet<Uuid>) {
 
 async fn set_stream_failure_for_source(
     source: &Url,
-    state: StreamStatusState,
+    _state: StreamStatusState,
     error: Option<&str>,
 ) {
     let Some(uuid) = camera_uuid_for_stream_source(source).await else {
         return;
     };
-    let episode_key = stream_failure_episode_key(state);
     let detail = stream_failure_detail(error);
     let Some(manager) = MANAGER.get() else {
         return;
@@ -638,22 +630,9 @@ async fn set_stream_failure_for_source(
     let changed = {
         let mut lock = manager.write().await;
         match lock.stream_failures.get(&uuid) {
-            Some(existing) if existing.episode_key == episode_key => {
-                if existing.detail != detail
-                    && let Some(record) = lock.stream_failures.get_mut(&uuid)
-                {
-                    record.detail = detail;
-                }
-                false
-            }
+            Some(existing) if existing == &detail => false,
             _ => {
-                lock.stream_failures.insert(
-                    uuid,
-                    StreamFailure {
-                        episode_key,
-                        detail,
-                    },
-                );
+                lock.stream_failures.insert(uuid, detail);
                 true
             }
         }
@@ -684,10 +663,6 @@ async fn clear_stream_failure_for_source(source: &Url) {
     }
 }
 
-fn stream_failure_episode_key(state: StreamStatusState) -> String {
-    format!("{state:?}")
-}
-
 fn stream_failure_detail(error: Option<&str>) -> String {
     error
         .map(str::to_string)
@@ -707,8 +682,8 @@ async fn camera_uuid_for_stream_source(source: &Url) -> Option<Uuid> {
         .map(|(uuid, _)| *uuid)
 }
 
-async fn fetch_radcam_streams(mcm: &MCMClient) -> Option<Vec<Stream>> {
-    probe_mcm_link(mcm.address, "streams", || mcm.get_radcam_streams()).await
+fn stream_failure_count_triggers_recreate(count: u32) -> bool {
+    count >= STREAM_FAILURES_TO_RECREATE
 }
 
 // Link health: a timeout means MCM did not answer; an error response means it did.
@@ -757,6 +732,27 @@ fn unanswered_detail(endpoint: &str, address: SocketAddr) -> String {
     )
 }
 
+async fn await_mcm_probe<T, F, Fut>(address: SocketAddr, endpoint: &str, op: F) -> Option<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    match tokio::time::timeout(MCM_PROBE_TIMEOUT, op()).await {
+        Ok(Ok(value)) => Some(value),
+        Ok(Err(error)) => {
+            debug!("MCM probe {endpoint} failed: {error:?}");
+            None
+        }
+        Err(_) => {
+            debug!(
+                "MCM probe {endpoint} timed out within {}s at {address}",
+                MCM_PROBE_TIMEOUT.as_secs()
+            );
+            None
+        }
+    }
+}
+
 async fn await_mcm_mutation<T, F, Fut>(address: SocketAddr, endpoint: &str, op: F) -> Result<T>
 where
     F: FnOnce() -> Fut,
@@ -772,183 +768,360 @@ where
 }
 
 #[cfg(test)]
-// Resets in-process MCM health counters for unit tests. The process-lifetime
-// OnceCell is not cleared — tests share globals and must reset observable
-// state or use disjoint inputs (see S-T6).
-fn health_reset() {
-    let mut guard = health_state().lock().expect("health lock");
-    guard.state = McmHealth::Unknown;
-    guard.detail = None;
-    guard.consecutive_failures = 0;
-    guard.first_failure_at = None;
-}
+mod tests {
+    use super::*;
+    use tokio::sync::broadcast::error::TryRecvError;
 
-#[test]
-fn health_needs_three_failures() {
-    health_reset();
-    let address: SocketAddr = "127.0.0.1:6021".parse().unwrap();
+    static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-    report_success(address);
-    assert_eq!(health().state, McmHealth::Online);
-
-    let refused = format!("connection refused at {address}");
-    report_failure(refused.clone(), address);
-    assert_eq!(health().state, McmHealth::Online);
-    assert_eq!(health().consecutive_failures, 1);
-
-    report_failure(refused.clone(), address);
-    assert_eq!(health().state, McmHealth::Online);
-    assert_eq!(health().consecutive_failures, 2);
-
-    report_failure(refused.clone(), address);
-    assert_eq!(health().state, McmHealth::Down);
-    assert_eq!(health().detail, Some(refused));
-
-    report_success(address);
-    assert_eq!(health().state, McmHealth::Online);
-    assert_eq!(health().consecutive_failures, 0);
-    assert_eq!(health().detail, None);
-
-    health_reset();
-    report_success(address);
-    for _ in 0..3 {
-        report_failure("MCM did not answer /info within 5s".to_string(), address);
+    async fn test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.lock().await
     }
-    assert_eq!(health().state, McmHealth::Down);
-    assert_eq!(
-        health().detail,
-        Some("MCM did not answer /info within 5s".to_string())
-    );
-}
 
-#[tokio::test(start_paused = true)]
-async fn hung_streams_poll_reports_and_reaches_down_within_three_cycles() {
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-    };
+    // Resets in-process MCM health counters for unit tests. The process-lifetime
+    // OnceCell is not cleared — tests share globals and must reset observable
+    // state or use disjoint inputs (see S-T6).
+    fn health_reset() {
+        let mut guard = health_state().lock().expect("health lock");
+        guard.state = McmHealth::Unknown;
+        guard.detail = None;
+        guard.consecutive_failures = 0;
+        guard.first_failure_at = None;
+    }
 
-    health_reset();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    report_success(address);
+    fn drain_cameras_notifications(receiver: &mut broadcast::Receiver<()>) {
+        while receiver.try_recv().is_ok() {}
+    }
 
-    tokio::spawn(async move {
-        let info_body =
-            r#"{"name":"mcm","version":"0.2.4","sha":"test","build_date":"","authors":""}"#;
-        let info_response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{info_body}",
-            info_body.len()
-        );
+    #[tokio::test]
+    async fn health_needs_three_failures() {
+        let _guard = test_guard().await;
+        health_reset();
+        let address: SocketAddr = "127.0.0.1:6021".parse().unwrap();
 
-        loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
-                break;
-            };
-            let mut buf = [0u8; 1024];
-            let Ok(n) = stream.read(&mut buf).await else {
-                continue;
-            };
-            let request = String::from_utf8_lossy(&buf[..n]);
-            if request.contains("GET /info") {
-                let _ = stream.write_all(info_response.as_bytes()).await;
-            }
-        }
-    });
-
-    let mcm = MCMClient::try_new(&address, false).await.unwrap();
-
-    for failures in 1..=2 {
-        let probe = fetch_radcam_streams(&mcm);
-        tokio::pin!(probe);
-        tokio::time::advance(MCM_PROBE_TIMEOUT).await;
-        assert!(probe.await.is_none(), "cycle {failures}");
-        assert_eq!(health().consecutive_failures, failures);
+        report_success(address);
         assert_eq!(health().state, McmHealth::Online);
-    }
 
-    let probe = fetch_radcam_streams(&mcm);
-    tokio::pin!(probe);
-    tokio::time::advance(MCM_PROBE_TIMEOUT).await;
-    assert!(probe.await.is_none());
-    assert_eq!(health().state, McmHealth::Down);
-    assert_eq!(health().consecutive_failures, 3);
-}
+        let refused = format!("connection refused at {address}");
+        report_failure(refused.clone(), address);
+        assert_eq!(health().state, McmHealth::Online);
+        assert_eq!(health().consecutive_failures, 1);
 
-#[tokio::test(start_paused = true)]
-async fn slow_mcm_mutation_timeout_does_not_degrade_link() {
-    health_reset();
-    let address: SocketAddr = "127.0.0.1:6021".parse().unwrap();
-    report_success(address);
+        report_failure(refused.clone(), address);
+        assert_eq!(health().state, McmHealth::Online);
+        assert_eq!(health().consecutive_failures, 2);
 
-    async fn hang() -> Result<()> {
-        std::future::pending().await
-    }
+        report_failure(refused.clone(), address);
+        assert_eq!(health().state, McmHealth::Down);
+        assert_eq!(health().detail, Some(refused));
 
-    for cycle in 1..=3 {
-        let call = await_mcm_mutation(address, "streams", hang);
-        tokio::pin!(call);
-        tokio::time::advance(MCM_MUTATION_TIMEOUT).await;
-        assert!(call.await.is_err(), "cycle {cycle}");
+        report_success(address);
         assert_eq!(health().state, McmHealth::Online);
         assert_eq!(health().consecutive_failures, 0);
+        assert_eq!(health().detail, None);
+
+        health_reset();
+        report_success(address);
+        for _ in 0..3 {
+            report_failure("MCM did not answer /info within 5s".to_string(), address);
+        }
+        assert_eq!(health().state, McmHealth::Down);
+        assert_eq!(
+            health().detail,
+            Some("MCM did not answer /info within 5s".to_string())
+        );
     }
-}
 
-#[tokio::test]
-async fn test_camera_manager_full_cycle() {
-    let mcm_address = "127.0.0.1:6021".parse().unwrap();
-    init(mcm_address, false).await;
-    init(mcm_address, false).await;
-    shutdown().await;
-    init(mcm_address, false).await;
+    /// A suspended MCM answers nothing, which is what the live SIGSTOP test reproduces.
+    /// The auth loop is the only link prober, so detection has to come from here.
+    #[tokio::test(start_paused = true)]
+    async fn hung_device_list_poll_reaches_down_within_three_cycles() {
+        let _guard = test_guard().await;
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
 
-    let test_camera = Camera {
-        uuid: "bc071801-c50f-8301-ac36-bc071801c50f".parse().unwrap(),
-        hostname: "192.168.0.200".parse().unwrap(),
-        credentials: Some(Credentials {
-            username: "test_user".to_string(),
-            password: "test_password".to_string(),
-        }),
-        streams: IndexMap::new(),
-    };
+        health_reset();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        report_success(address);
 
-    // Add the test camera
-    add_camera(&test_camera).await.unwrap();
+        tokio::spawn(async move {
+            let info_body =
+                r#"{"name":"mcm","version":"0.2.4","sha":"test","build_date":"","authors":""}"#;
+            let info_response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{info_body}",
+                info_body.len()
+            );
 
-    // Verify the camera was added
-    let all_cameras = cameras().await;
-    assert_eq!(all_cameras.len(), 1);
-    assert!(all_cameras.contains_key(&test_camera.uuid));
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let info_response = info_response.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let Ok(n) = stream.read(&mut buf).await else {
+                        return;
+                    };
+                    if String::from_utf8_lossy(&buf[..n]).contains("GET /info") {
+                        let _ = stream.write_all(info_response.as_bytes()).await;
+                        return;
+                    }
+                    // Hold the connection open without answering, as a SIGSTOPed
+                    // process does: the client must hit its own timeout.
+                    std::future::pending::<()>().await;
+                });
+            }
+        });
 
-    // Retrieve the test camera
-    let retrieved_camera = get_camera(&test_camera.uuid).await;
-    assert!(retrieved_camera.is_some());
-    assert_eq!(retrieved_camera.unwrap(), test_camera);
+        let mcm = MCMClient::try_new(&address, false).await.unwrap();
 
-    // Remove the test camera
-    let removed_camera = remove_camera(&test_camera.uuid).await.unwrap();
-    assert_eq!(removed_camera, test_camera);
+        for failures in 1..=2 {
+            let probe = probe_mcm_link(mcm.address, "device list", || mcm.get_radcams());
+            tokio::pin!(probe);
+            tokio::time::advance(MCM_PROBE_TIMEOUT).await;
+            assert!(probe.await.is_none(), "cycle {failures}");
+            assert_eq!(health().consecutive_failures, failures);
+            assert_eq!(health().state, McmHealth::Online);
+        }
 
-    // Verify the camera was removed
-    let all_cameras = cameras().await;
-    assert_eq!(all_cameras.len(), 0);
-    assert!(!all_cameras.contains_key(&test_camera.uuid));
+        let probe = probe_mcm_link(mcm.address, "device list", || mcm.get_radcams());
+        tokio::pin!(probe);
+        tokio::time::advance(MCM_PROBE_TIMEOUT).await;
+        assert!(probe.await.is_none());
+        assert_eq!(health().state, McmHealth::Down);
+        assert_eq!(
+            health().detail,
+            Some(format!(
+                "MCM did not answer device list within 5s at {address}"
+            ))
+        );
+    }
 
-    // Dropping out of discovery must not make the camera unaddressable: its HTTP API
-    // keeps answering while ONVIF rediscovers it.
-    assert_eq!(
-        camera_address(&test_camera.uuid).await,
-        Some(test_camera.hostname)
-    );
-    assert_eq!(camera_address(&Uuid::nil()).await, None);
-}
+    #[tokio::test(start_paused = true)]
+    async fn hung_streams_poll_does_not_degrade_link_health() {
+        let _guard = test_guard().await;
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
 
-#[test]
-fn stream_needs_recreation_predicate() {
-    // Only Stopped means current failure; Idle may still carry a stale MCM error string.
-    assert!(!stream_needs_recreation(StreamStatusState::Idle));
-    assert!(!stream_needs_recreation(StreamStatusState::Running));
-    assert!(!stream_needs_recreation(StreamStatusState::Unknown));
-    assert!(stream_needs_recreation(StreamStatusState::Stopped));
+        health_reset();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        report_success(address);
+
+        tokio::spawn(async move {
+            let info_body =
+                r#"{"name":"mcm","version":"0.2.4","sha":"test","build_date":"","authors":""}"#;
+            let info_response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{info_body}",
+                info_body.len()
+            );
+
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = [0u8; 1024];
+                let Ok(n) = stream.read(&mut buf).await else {
+                    continue;
+                };
+                let request = String::from_utf8_lossy(&buf[..n]);
+                if request.contains("GET /info") {
+                    let _ = stream.write_all(info_response.as_bytes()).await;
+                }
+            }
+        });
+
+        let mcm = MCMClient::try_new(&address, false).await.unwrap();
+
+        for cycle in 1..=5 {
+            let probe = await_mcm_probe(mcm.address, "streams", || mcm.get_radcam_streams());
+            tokio::pin!(probe);
+            tokio::time::advance(MCM_PROBE_TIMEOUT).await;
+            assert!(probe.await.is_none(), "cycle {cycle}");
+            assert_eq!(health().consecutive_failures, 0);
+            assert_eq!(health().state, McmHealth::Online);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_mcm_mutation_timeout_does_not_degrade_link() {
+        let _guard = test_guard().await;
+        health_reset();
+        let address: SocketAddr = "127.0.0.1:6021".parse().unwrap();
+        report_success(address);
+
+        async fn hang() -> Result<()> {
+            std::future::pending().await
+        }
+
+        for cycle in 1..=3 {
+            let call = await_mcm_mutation(address, "streams", hang);
+            tokio::pin!(call);
+            tokio::time::advance(MCM_MUTATION_TIMEOUT).await;
+            assert!(call.await.is_err(), "cycle {cycle}");
+            assert_eq!(health().state, McmHealth::Online);
+            assert_eq!(health().consecutive_failures, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_camera_manager_full_cycle() {
+        let _guard = test_guard().await;
+        let mcm_address = "127.0.0.1:6021".parse().unwrap();
+        init(mcm_address, false).await;
+        init(mcm_address, false).await;
+        shutdown().await;
+        init(mcm_address, false).await;
+
+        let test_camera = Camera {
+            uuid: "bc071801-c50f-8301-ac36-bc071801c50f".parse().unwrap(),
+            hostname: "192.168.0.200".parse().unwrap(),
+            credentials: Some(Credentials {
+                username: "test_user".to_string(),
+                password: "test_password".to_string(),
+            }),
+            streams: IndexMap::new(),
+        };
+
+        add_camera(&test_camera).await.unwrap();
+
+        let all_cameras = cameras().await;
+        assert_eq!(all_cameras.len(), 1);
+        assert!(all_cameras.contains_key(&test_camera.uuid));
+
+        let retrieved_camera = get_camera(&test_camera.uuid).await;
+        assert!(retrieved_camera.is_some());
+        assert_eq!(retrieved_camera.unwrap(), test_camera);
+
+        let removed_camera = remove_camera(&test_camera.uuid).await.unwrap();
+        assert_eq!(removed_camera, test_camera);
+
+        let all_cameras = cameras().await;
+        assert_eq!(all_cameras.len(), 0);
+        assert!(!all_cameras.contains_key(&test_camera.uuid));
+
+        assert_eq!(
+            camera_address(&test_camera.uuid).await,
+            Some(test_camera.hostname)
+        );
+        assert_eq!(camera_address(&Uuid::nil()).await, None);
+    }
+
+    #[test]
+    fn stream_needs_recreation_predicate() {
+        // Only Stopped means current failure; Idle may still carry a stale MCM error string.
+        assert!(!stream_needs_recreation(StreamStatusState::Idle));
+        assert!(!stream_needs_recreation(StreamStatusState::Running));
+        assert!(!stream_needs_recreation(StreamStatusState::Unknown));
+        assert!(stream_needs_recreation(StreamStatusState::Stopped));
+    }
+
+    #[test]
+    fn stream_failure_count_triggers_recreate_at_threshold() {
+        assert!(!stream_failure_count_triggers_recreate(
+            STREAM_FAILURES_TO_RECREATE - 1
+        ));
+        assert!(stream_failure_count_triggers_recreate(
+            STREAM_FAILURES_TO_RECREATE
+        ));
+    }
+
+    #[tokio::test]
+    async fn stream_failure_detail_update_notifies() {
+        let _guard = test_guard().await;
+        let mcm_address: SocketAddr = "127.0.0.1:6021".parse().unwrap();
+        shutdown().await;
+        init(mcm_address, false).await;
+
+        let uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".parse().unwrap();
+        let hostname: Ipv4Addr = "10.0.0.5".parse().unwrap();
+        add_camera(&Camera {
+            uuid,
+            hostname,
+            credentials: None,
+            streams: IndexMap::new(),
+        })
+        .await
+        .unwrap();
+
+        let source = Url::parse("rtsp://10.0.0.5/stream_0").unwrap();
+        let mut rx = subscribe_cameras();
+        drain_cameras_notifications(&mut rx);
+
+        set_stream_failure_for_source(&source, StreamStatusState::Stopped, Some("error A")).await;
+        assert_eq!(stream_failure(&uuid).await, Some("error A".to_string()));
+        assert!(matches!(rx.try_recv(), Ok(())));
+
+        set_stream_failure_for_source(&source, StreamStatusState::Stopped, Some("error B")).await;
+        assert_eq!(stream_failure(&uuid).await, Some("error B".to_string()));
+        assert!(
+            matches!(rx.try_recv(), Ok(())),
+            "detail change must notify subscribers"
+        );
+
+        drain_cameras_notifications(&mut rx);
+        set_stream_failure_for_source(&source, StreamStatusState::Stopped, Some("error B")).await;
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+
+        clear_stream_failure_for_source(&source).await;
+        assert_eq!(stream_failure(&uuid).await, None);
+        assert!(matches!(rx.try_recv(), Ok(())));
+
+        shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn auth_failure_record_clear_and_prune() {
+        let _guard = test_guard().await;
+        let mcm_address: SocketAddr = "127.0.0.1:6021".parse().unwrap();
+        shutdown().await;
+        init(mcm_address, false).await;
+
+        let visible = "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee".parse().unwrap();
+        let stale = "cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee".parse().unwrap();
+        let mut rx = subscribe_cameras();
+        drain_cameras_notifications(&mut rx);
+
+        record_auth_failure(visible, "bad password".to_string()).await;
+        assert_eq!(
+            authentication_failure(&visible).await,
+            Some("bad password".to_string())
+        );
+        assert!(matches!(rx.try_recv(), Ok(())));
+
+        drain_cameras_notifications(&mut rx);
+        record_auth_failure(visible, "bad password".to_string()).await;
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+
+        drain_cameras_notifications(&mut rx);
+        record_auth_failure(visible, "wrong user".to_string()).await;
+        assert_eq!(
+            authentication_failure(&visible).await,
+            Some("wrong user".to_string())
+        );
+        assert!(matches!(rx.try_recv(), Ok(())));
+
+        record_auth_failure(stale, "gone".to_string()).await;
+        drain_cameras_notifications(&mut rx);
+
+        prune_auth_failures(&HashSet::from([visible])).await;
+        assert_eq!(
+            authentication_failure(&visible).await,
+            Some("wrong user".to_string())
+        );
+        assert_eq!(authentication_failure(&stale).await, None);
+        assert!(matches!(rx.try_recv(), Ok(())));
+
+        drain_cameras_notifications(&mut rx);
+        clear_auth_failure(&visible).await;
+        assert_eq!(authentication_failure(&visible).await, None);
+        assert!(matches!(rx.try_recv(), Ok(())));
+
+        shutdown().await;
+    }
 }
