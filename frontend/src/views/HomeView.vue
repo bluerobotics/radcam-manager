@@ -337,11 +337,14 @@
     :message="errorDialogMessage"
     @close="dismissErrorDialog"
   />
-  <WarningToast :message="warningToastMessage" />
+  <WarningToast
+    :message="warningToastMessage"
+    :icon="warningToastIcon"
+  />
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouteQuery } from '@vueuse/router'
 
 import type { Camera } from '@/bindings/mcm_client'
@@ -616,7 +619,10 @@ const uiRebooting = ref(false)
 const busyMinimized = ref(false)
 const onePushAwb = ref<OnePushAwbStatus | null>(null)
 const errorDialogMessage = ref<string | null>(null)
+const WARNING_TOAST_ICON = 'mdi-alert-circle-outline'
+const RECOVERY_TOAST_ICON = 'mdi-check-circle-outline'
 const warningToastMessage = ref<string | null>(null)
+const warningToastIcon = ref(WARNING_TOAST_ICON)
 const showStaleBundleBanner = ref(false)
 const isCockpitMode = useRouteQuery<string, boolean>('cockpit_mode', 'false', {
   transform: {
@@ -649,6 +655,7 @@ const applyCameraUi = (ui: CameraUiState) => {
   uiRebooting.value = ui.rebooting
   onePushAwb.value = ui.one_push_awb ?? null
   errorDialogMessage.value = ui.error_dialog ?? null
+  warningToastIcon.value = WARNING_TOAST_ICON
   warningToastMessage.value = ui.warning_toast ?? null
   // A backend too old to send connectivity must not gray out every camera control:
   // treat an absent field as 'unknown', which keeps them usable.
@@ -790,8 +797,10 @@ const onHealthCameraForgotten = (cameraUuid: string): void => {
   onCameraForgotten(cameraUuid)
 }
 
-const onHealthGoToSetup = (): void => {
+const onHealthGoToSetup = async (): Promise<void> => {
   healthDialog.value = minimizeHealthDialog(healthDialog.value)
+  configMode.value = 'basic'
+  await nextTick()
   cameraControls.value?.scrollToHardwareSetup()
 }
 
@@ -961,6 +970,7 @@ watch(
       && !flags.degraded
       && next.mode === 'hidden'
     ) {
+      warningToastIcon.value = RECOVERY_TOAST_ICON
       warningToastMessage.value = recoveryWhileMinimizedToast(before)
     }
     if (next !== before) {
@@ -990,7 +1000,7 @@ const startHealthProblemsNowTick = (): void => {
   healthProblemsNowMs.value = Date.now()
   healthProblemsNowInterval = setInterval(() => {
     healthProblemsNowMs.value = Date.now()
-  }, 30000)
+  }, 5000)
 }
 
 watch(needsHealthProblemsNowTick, (needs) => {
@@ -1008,7 +1018,10 @@ onMounted(() => {
 })
 
 watch(warningToastMessage, (message, _previous, onCleanup) => {
-  if (!message) return
+  if (!message) {
+    warningToastIcon.value = WARNING_TOAST_ICON
+    return
+  }
 
   const cameraUuid = selectedCameraUUID.value
   const cachedToast =
