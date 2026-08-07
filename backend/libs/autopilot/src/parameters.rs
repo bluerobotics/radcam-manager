@@ -9,12 +9,10 @@ use crate::{
 };
 
 /// Tolerance for [`ParamType::REAL32`] / [`ParamType::REAL64`] actuator values only.
-/// No current owned-parameter expectation is float-valued; integer parameters are
-/// compared exactly after normalising to a common numeric representation. This branch
-/// exists for when a future expectation uses a float type.
-/// Lua param-table values such as `RCAM1_ENABLE` arrive as `REAL32` while the
-/// expectation holds `UINT8`, so the comparison must coerce by value, not by
-/// encoded MAVLink wire form.
+/// Integer parameters are compared exactly after normalising to a common numeric
+/// representation. Lua param-table values such as `RCAM1_ENABLE` arrive as `REAL32`
+/// while the expectation holds `UINT8`, so the comparison must coerce by value, not
+/// by encoded MAVLink wire form.
 pub(crate) const PARAM_DRIFT_TOLERANCE: f32 = 0.5;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -516,6 +514,27 @@ mod drift_tests {
         assert!(!param_values_match(
             &ParamType::UINT16(1100),
             &actual,
+            PARAM_DRIFT_TOLERANCE,
+        ));
+    }
+
+    #[test]
+    fn param_drift_tolerance_applies_to_real32_expectations() {
+        let expected = ParamType::REAL32(1.5);
+
+        assert!(param_values_match(
+            &expected,
+            &ParamType::REAL32(1.5),
+            PARAM_DRIFT_TOLERANCE,
+        ));
+        assert!(param_values_match(
+            &expected,
+            &ParamType::REAL32(1.2),
+            PARAM_DRIFT_TOLERANCE,
+        ));
+        assert!(!param_values_match(
+            &expected,
+            &ParamType::REAL32(2.1),
             PARAM_DRIFT_TOLERANCE,
         ));
     }
