@@ -28,6 +28,8 @@ use crate::web::connectivity;
 use crate::web::ws_connections::ConnectionId;
 
 const SLOW_WATCH_INTERVAL: Duration = Duration::from_secs(2);
+// Half of connectivity's 6s unhealthy grace: second tick sample commits debounce within one period.
+const CAMERA_LIST_WATCHER_TICK: Duration = Duration::from_secs(3);
 const CAMERA_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Cap concurrent slow HTTP fetches so a flood of subscriptions cannot fan out unbounded.
 const SLOW_FETCH_CONCURRENCY: usize = 4;
@@ -677,70 +679,17 @@ fn ensure_camera_list_watcher() {
 
     tokio::spawn(async {
         let mut receiver = mcm_client::subscribe_cameras();
+        let mut interval = tokio::time::interval(CAMERA_LIST_WATCHER_TICK);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            match receiver.recv().await {
-                Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
-                    let discovered = mcm_client::cameras().await;
-                    let known: HashSet<Uuid> = discovered.keys().copied().collect();
-                    for (camera_uuid, camera) in &discovered {
-                        connectivity::observe_camera(*camera_uuid, camera.hostname);
-                    }
-
-                    let expected: HashSet<Uuid> =
-                        autopilot::configured_cameras().await.into_iter().collect();
-                    let missing: Vec<Uuid> = expected.difference(&known).copied().collect();
-                    let updates = stream::iter(missing)
-                        .map(|camera_uuid| async move {
-                            let next = if let Some(hostname) =
-                                connectivity::last_hostname(camera_uuid).await
-                            {
-                                let tcp_ok = connectivity::tcp_probe(hostname, 80).await;
-                                connectivity::classify_table(connectivity::ClassifyEvidence {
-                                    in_mcm_list: false,
-                                    expected: true,
-                                    camera_answered: false,
-                                    tcp_ok,
-                                    probed: true,
-                                })
-                            } else {
-                                connectivity::classify_table(connectivity::ClassifyEvidence {
-                                    in_mcm_list: false,
-                                    expected: true,
-                                    camera_answered: false,
-                                    tcp_ok: false,
-                                    probed: false,
-                                })
-                            };
-                            (camera_uuid, next)
-                        })
-                        .buffer_unordered(SLOW_FETCH_CONCURRENCY)
-                        .collect::<Vec<_>>()
-                        .await;
-                    for (camera_uuid, next) in updates {
-                        connectivity::publish(camera_uuid, next, "absent from MCM list");
-                    }
-
-                    let subscribed = {
-                        let registry = registry().lock().unwrap();
-                        registry
-                            .camera_interest
-                            .keys()
-                            .copied()
-                            .collect::<HashSet<_>>()
-                    };
-                    let keep = known
-                        .iter()
-                        .chain(subscribed.iter())
-                        .chain(expected.iter())
-                        .copied()
-                        .collect::<HashSet<_>>();
-                    crate::web::one_push_awb::retain_known_cameras(&keep);
-                    camera_ui::retain_known_cameras(&keep);
-                    connectivity::retain(&keep);
+            tokio::select! {
+                _ = receiver.recv() => {
+                    refresh_cameras_missing_from_mcm().await;
                 }
-                Err(broadcast::error::RecvError::Closed) => {
-                    warn!("Camera list broadcast closed; stopping camera-list watcher");
-                    break;
+                _ = interval.tick() => {
+                    if connectivity::has_pending_debounce() {
+                        refresh_cameras_missing_from_mcm().await;
+                    }
                 }
             }
         }
@@ -1097,6 +1046,63 @@ async fn fetch_advanced_parameters(camera_uuid: Uuid) -> Result<serde_json::Valu
     .await
     .map_err(|error| format!("{error:?}"))?;
     serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+async fn refresh_cameras_missing_from_mcm() {
+    let discovered = mcm_client::cameras().await;
+    let known: HashSet<Uuid> = discovered.keys().copied().collect();
+    for (camera_uuid, camera) in &discovered {
+        connectivity::observe_camera(*camera_uuid, camera.hostname);
+    }
+
+    let expected: HashSet<Uuid> = autopilot::configured_cameras().await.into_iter().collect();
+    let missing: Vec<Uuid> = expected.difference(&known).copied().collect();
+    let updates = stream::iter(missing)
+        .map(|camera_uuid| async move {
+            let next = if let Some(hostname) = connectivity::last_hostname(camera_uuid).await {
+                let tcp_ok = connectivity::tcp_probe(hostname, 80).await;
+                connectivity::classify_table(connectivity::ClassifyEvidence {
+                    in_mcm_list: false,
+                    expected: true,
+                    camera_answered: false,
+                    tcp_ok,
+                    probed: true,
+                })
+            } else {
+                connectivity::classify_table(connectivity::ClassifyEvidence {
+                    in_mcm_list: false,
+                    expected: true,
+                    camera_answered: false,
+                    tcp_ok: false,
+                    probed: false,
+                })
+            };
+            (camera_uuid, next)
+        })
+        .buffer_unordered(SLOW_FETCH_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+    for (camera_uuid, next) in updates {
+        connectivity::publish(camera_uuid, next, "absent from MCM list");
+    }
+
+    let subscribed = {
+        let registry = registry().lock().unwrap();
+        registry
+            .camera_interest
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>()
+    };
+    let keep = known
+        .iter()
+        .chain(subscribed.iter())
+        .chain(expected.iter())
+        .copied()
+        .collect::<HashSet<_>>();
+    crate::web::one_push_awb::retain_known_cameras(&keep);
+    camera_ui::retain_known_cameras(&keep);
+    connectivity::retain(&keep);
 }
 
 async fn camera_fetch_timeout(
