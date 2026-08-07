@@ -58,14 +58,13 @@ struct Health {
     lua_scripting_disabled_logged: bool,
     lua_script: LuaScriptStatus,
     lua_script_failure: Option<(Instant, String)>,
-    param_drifts: IndexMap<String, ParameterDrift>,
+    param_drifts: IndexMap<(Uuid, String), ParameterDrift>,
     script_reloads: u32,
     frames_lagged: u64,
     ever_online: bool,
     pending: Option<(AutopilotHealth, Instant)>,
 }
 
-/// Snapshot inputs for [`classify_health`].
 pub(crate) struct ClassifyHealthInput<'a> {
     pub endpoint_ok: Option<bool>,
     pub endpoint_detail: Option<&'a str>,
@@ -197,9 +196,7 @@ pub(crate) fn clear_lua_script_failure() {
 pub(crate) fn clear_stale_parameter_drifts(expected: &HashSet<(Uuid, String)>) {
     let mut guard = health_state().lock().expect("health lock");
     let before = guard.param_drifts.len();
-    guard
-        .param_drifts
-        .retain(|key, _| drift_key_parts(key).is_some_and(|parts| expected.contains(&parts)));
+    guard.param_drifts.retain(|key, _| expected.contains(key));
     if guard.param_drifts.len() != before {
         drop(guard);
         notify_health();
@@ -223,7 +220,7 @@ pub(crate) fn observe_owned_parameter_value(
     expected: &ParamType,
     source: ObserveSource,
 ) {
-    let drift_key = drift_key(camera_uuid, name);
+    let drift_key = (*camera_uuid, name.to_owned());
     if parameters::param_values_match(expected, actual, parameters::PARAM_DRIFT_TOLERANCE) {
         crate::manager::owned_parameters::mark_eligible(camera_uuid, name);
         let mut guard = health_state().lock().expect("health lock");
@@ -266,15 +263,6 @@ pub(crate) fn observe_owned_parameter_value(
     notify_health();
 }
 
-fn drift_key(camera_uuid: &Uuid, name: &str) -> String {
-    format!("{camera_uuid}:{name}")
-}
-
-fn drift_key_parts(key: &str) -> Option<(Uuid, String)> {
-    let (camera_uuid, name) = key.split_once(':')?;
-    Some((Uuid::parse_str(camera_uuid).ok()?, name.to_owned()))
-}
-
 /// Re-read the installed Lua script and publish the result.
 ///
 /// Call it right after the script file is written or removed: without it the change
@@ -288,7 +276,6 @@ pub(crate) async fn refresh_lua_script_status() {
     }
 }
 
-/// Support-oriented counters for the autopilot path.
 pub fn diagnostics() -> Diagnostics {
     ensure_started();
     let guard = health_state().lock().expect("health lock");
@@ -324,7 +311,6 @@ pub fn diagnostics() -> Diagnostics {
     diagnostics
 }
 
-/// Set the backend version string reported in health diagnostics (from the bin crate).
 pub fn set_backend_version(version: String) {
     // OnceLock: a second set is a deliberate no-op.
     let _ = BACKEND_VERSION.set(version);
@@ -337,13 +323,11 @@ fn backend_version_string() -> String {
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
 }
 
-/// Subscribe to autopilot health change notifications.
 pub fn subscribe_health() -> broadcast::Receiver<()> {
     ensure_started();
     health_sender().subscribe()
 }
 
-/// Report the outcome of a BlueOS MAVLink endpoint setup attempt.
 #[instrument(level = "debug", skip_all)]
 pub fn report_endpoint_setup(ok: bool, detail: Option<String>) {
     ensure_started();
@@ -354,8 +338,6 @@ pub fn report_endpoint_setup(ok: bool, detail: Option<String>) {
     run_classifier();
 }
 
-/// Record a successful MAVLink command RPC.
-#[instrument(level = "debug", skip_all)]
 pub fn rpc_ok() {
     ensure_started();
     let mut guard = health_state().lock().expect("health lock");
@@ -375,7 +357,6 @@ pub fn rpc_failed(reason: &str) {
     run_classifier();
 }
 
-/// Mark parameter sync in progress.
 #[instrument(level = "debug", skip_all)]
 pub fn set_syncing(syncing: bool) {
     ensure_started();
@@ -599,7 +580,6 @@ fn run_classifier() {
     }
 }
 
-#[instrument(level = "debug", skip_all)]
 async fn run_classifier_async() {
     let lua_disabled = if let Ok(component) = mavlink::component() {
         let params = component.inner.parameters.read().await;
@@ -725,7 +705,6 @@ fn publish_transition(guard: &mut Health, candidate: (AutopilotHealth, Option<St
     notify_health();
 }
 
-/// Derive autopilot health from a [`ClassifyHealthInput`] snapshot.
 pub(crate) fn classify_health(input: ClassifyHealthInput<'_>) -> (AutopilotHealth, Option<String>) {
     if input.endpoint_ok.is_none() {
         return (AutopilotHealth::Unknown, None);
