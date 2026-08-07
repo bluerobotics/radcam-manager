@@ -10,7 +10,7 @@ export type HealthProblemKind =
   | 'camera'
   | 'camera_stream'
   | 'camera_onvif_auth'
-  | 'lua'
+  | 'lua_scripting_disabled'
   | 'lua_script'
   | 'parameter_drift'
 
@@ -36,7 +36,6 @@ export type HealthProblem = {
   /** Operator-facing "since HH:MM (N min)" — set by enrichHealthProblems. */
   since?: string | null
   showForget?: boolean
-  showReboot?: boolean
   showGoToSetup?: boolean
   showUpdateLuaScript?: boolean
 }
@@ -100,7 +99,7 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
 
     if (health.autopilot === 'online' && health.lua_scripting_disabled) {
       problems.push({
-        kind: 'lua',
+        kind: 'lua_scripting_disabled',
         severity: 'warning',
         title: 'Focus and zoom won\'t follow the autopilot',
         body: 'Lua scripting is disabled on the autopilot (SCR_ENABLE). Open hardware setup to re-apply it, then reboot the autopilot.',
@@ -108,7 +107,7 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
       })
     }
 
-    const script = luaScriptProblem(health)
+    const script = luaScriptProblem(health, input.cameraUuid)
     if (script) problems.push(script)
   }
 
@@ -161,6 +160,15 @@ export function sortProblemsBySeverity(problems: HealthProblem[]): HealthProblem
   )
 }
 
+/** True when every error/warning problem is a kind the backend retries on its own. */
+export function allNotableProblemsSelfRecover(problems: HealthProblem[]): boolean {
+  const notable = problems.filter(
+    (problem) => problem.severity === 'error' || problem.severity === 'warning',
+  )
+  if (notable.length === 0) return false
+  return notable.every((problem) => SELF_RECOVERING_KINDS.includes(problem.kind))
+}
+
 export function problemsSummary(problems: HealthProblem[]): string | null {
   const notable = problems.filter((problem) => problem.severity !== 'info')
   if (notable.length <= 1) return null
@@ -197,9 +205,11 @@ export function recoveryTitle(
   forgetSuccess: boolean,
 ): string {
   if (forgetSuccess) return 'Camera removed from setup'
-  const kinds = resolvedKinds.filter((kind) => kind !== 'lua')
+  const kinds = resolvedKinds.filter((kind) => kind !== 'lua_scripting_disabled')
   if (kinds.length === 0) {
-    return resolvedKinds.includes('lua') ? 'Lua scripting enabled' : 'All clear'
+    return resolvedKinds.includes('lua_scripting_disabled')
+      ? 'Lua scripting enabled'
+      : 'All clear'
   }
   if (kinds.length === 1) {
     switch (kinds[0]) {
@@ -257,7 +267,7 @@ export function recoveryMessage(
   if (resolvedKinds.includes('camera_onvif_auth')) {
     parts.push('ONVIF login succeeded and video is available again')
   }
-  if (resolvedKinds.includes('lua')) {
+  if (resolvedKinds.includes('lua_scripting_disabled')) {
     parts.push('Focus and zoom correlation is ready')
   }
   if (resolvedKinds.includes('lua_script')) {
@@ -371,10 +381,15 @@ function parameterDriftProblem(health: SystemHealth): HealthProblem | null {
   }
 }
 
-function luaScriptProblem(health: SystemHealth): HealthProblem | null {
+function luaScriptProblem(
+  health: SystemHealth,
+  cameraUuid: string | null,
+): HealthProblem | null {
   // Applying the script reloads scripting over MAVLink, so there is nothing the operator
   // can do about it until the autopilot is back.
   if (health.autopilot !== 'online') return null
+
+  const canUpdate = cameraUuid != null
 
   switch (health.lua_script) {
     case 'missing':
@@ -382,25 +397,31 @@ function luaScriptProblem(health: SystemHealth): HealthProblem | null {
         kind: 'lua_script',
         severity: 'warning',
         title: 'Autopilot script is not installed',
-        body: 'The script that drives focus and zoom from the autopilot is not on the flight controller, so focus and zoom will not follow the camera. Install it now — the autopilot may reboot.',
-        showUpdateLuaScript: true,
+        body: canUpdate
+          ? 'The script that drives focus and zoom from the autopilot is not on the flight controller, so focus and zoom will not follow the camera. Install it now — the autopilot may reboot.'
+          : 'The script that drives focus and zoom from the autopilot is not on the flight controller, so focus and zoom will not follow the camera. A camera must be discovered before the script can be installed.',
+        showUpdateLuaScript: canUpdate,
       }
     case 'outdated':
       return {
         kind: 'lua_script',
         severity: 'warning',
         title: 'Autopilot script is out of date',
-        body: 'The script installed on the flight controller is not the one this version of RadCam Manager expects, so focus and zoom may misbehave. Update it — the autopilot may reboot.',
-        showUpdateLuaScript: true,
+        body: canUpdate
+          ? 'The script installed on the flight controller is not the one this version of RadCam Manager expects, so focus and zoom may misbehave. Update it — the autopilot may reboot.'
+          : 'The script installed on the flight controller is not the one this version of RadCam Manager expects, so focus and zoom may misbehave. A camera must be discovered before the script can be updated.',
+        showUpdateLuaScript: canUpdate,
       }
     case 'failing':
       return {
         kind: 'lua_script',
         severity: 'warning',
         title: 'Autopilot script is failing',
-        body: 'The right script is installed, but the autopilot reports it is erroring, so focus and zoom will not follow the camera. Re-installing it often clears this — the autopilot may reboot.',
+        body: canUpdate
+          ? 'The right script is installed, but the autopilot reports it is erroring, so focus and zoom will not follow the camera. Re-installing it often clears this — the autopilot may reboot.'
+          : 'The right script is installed, but the autopilot reports it is erroring, so focus and zoom will not follow the camera. A camera must be discovered before the script can be re-installed.',
         detail: health.lua_script_detail ?? null,
-        showUpdateLuaScript: true,
+        showUpdateLuaScript: canUpdate,
       }
     default:
       return null

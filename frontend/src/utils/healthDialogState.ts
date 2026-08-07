@@ -106,7 +106,7 @@ export function reduceHealthDialogOnProblems(
     setHealthDialogMinimizedPersisted(false)
     return initialHealthDialogState()
   }
-  return { ...state, episodeDegraded: false }
+  return state
 }
 
 export function minimizeHealthDialog(state: HealthDialogState): HealthDialogState {
@@ -134,7 +134,7 @@ export function healthDialogStateOnDisconnect(state: HealthDialogState): HealthD
 
 export function degradedBannerCopy(problems: HealthProblem[]): { title: string; body: string } {
   const notable = problems.filter((problem) => problem.severity !== 'info')
-  const summary = problemsSummary(notable)
+  const summary = problemsSummary(problems)
   if (summary) {
     return {
       title: summary,
@@ -210,7 +210,6 @@ export function noteForgetSuccess(state: HealthDialogState): HealthDialogState {
     : [...state.episodeKinds, 'camera']
   return {
     ...state,
-    awaitingClose: true,
     forgetSuccess: true,
     episodeKinds: kinds,
   }
