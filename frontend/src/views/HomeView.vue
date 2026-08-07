@@ -948,7 +948,7 @@ const unsubscribeConnectionState = backendClient.onConnectionState((state, previ
 
 watch(
   healthInputBase,
-  (base) => {
+  () => {
     const flags = healthFlags.value
 
     const before = healthDialog.value
