@@ -385,6 +385,15 @@ fn notify_health() {
     }
 }
 
+/// True when any camera has a debounced connectivity transition awaiting a second sample.
+pub(crate) fn has_pending_debounce() -> bool {
+    cameras()
+        .lock()
+        .expect("connectivity lock")
+        .values()
+        .any(|entry| entry.pending.is_some())
+}
+
 async fn sync_mcm_camera_errors() {
     let discovered = mcm_client::cameras().await;
     let configured = autopilot::configured_cameras().await;
@@ -416,25 +425,13 @@ fn ensure_fan_in() {
 
         loop {
             tokio::select! {
-                message = mcm_rx.recv() => {
-                    if matches!(message, Err(broadcast::error::RecvError::Closed)) {
-                        warn!("MCM health broadcast closed; stopping connectivity fan-in");
-                        break;
-                    } else if mcm_client::health().state == McmHealth::Online {
+                _ = mcm_rx.recv() => {
+                    if mcm_client::health().state == McmHealth::Online {
                         reset_after_mcm_recovery();
                     }
                 }
-                message = autopilot_rx.recv() => {
-                    if matches!(message, Err(broadcast::error::RecvError::Closed)) {
-                        warn!("Autopilot health broadcast closed; stopping connectivity fan-in");
-                        break;
-                    }
-                }
-                message = cameras_rx.recv() => {
-                    if matches!(message, Err(broadcast::error::RecvError::Closed)) {
-                        warn!("MCM camera list broadcast closed; stopping connectivity fan-in");
-                        break;
-                    }
+                _ = autopilot_rx.recv() => {}
+                _ = cameras_rx.recv() => {
                     sync_mcm_camera_errors().await;
                 }
             }
@@ -639,6 +636,33 @@ mod tests {
             }),
             CameraConnectivity::Unknown
         );
+    }
+
+    #[allow(clippy::await_holding_lock)] // test lock must span paused clock advances to serialize globals
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn pending_resolves_on_republish_without_new_evidence() {
+        let _lock = connectivity_test_lock();
+        let camera_uuid = Uuid::from_u128(0xdeb0_0000_0000_0003);
+
+        publish(
+            camera_uuid,
+            CameraConnectivity::Unreachable,
+            "absent from MCM list",
+        );
+        assert_eq!(get(camera_uuid), CameraConnectivity::Unknown);
+        assert!(has_pending_debounce());
+
+        tokio::time::advance(UNHEALTHY_GRACE).await;
+        // Camera-list watcher tick re-probes and republishes the same candidate.
+        publish(
+            camera_uuid,
+            CameraConnectivity::Unreachable,
+            "absent from MCM list",
+        );
+        assert_eq!(get(camera_uuid), CameraConnectivity::Unreachable);
+        assert!(!has_pending_debounce());
+
+        cameras().lock().unwrap().remove(&camera_uuid);
     }
 
     #[allow(clippy::await_holding_lock)] // test lock must span paused clock advances to serialize globals
