@@ -66,36 +66,9 @@ const {
   copyDiagnostics: copyDiagnosticsPayload,
 } = useCopyDiagnostics()
 
-const formatOptional = (value?: bigint | number | string | null): string =>
-  value == null || value === '' ? '—' : String(value)
-
-const rawHealthText = computed((): string => {
-  const health = props.systemHealth
-  if (!health) return ''
-  const diagnostics = health.diagnostics
-  const lines: string[] = [
-    `mcm: ${health.mcm}`,
-    `mcm_detail: ${formatOptional(health.mcm_detail)}`,
-    `cameras_discovered: ${health.cameras_discovered}`,
-    `autopilot: ${health.autopilot}`,
-    `autopilot_detail: ${formatOptional(health.autopilot_detail)}`,
-    `param_encoding: ${formatOptional(diagnostics.param_encoding)}`,
-    `mavlink_reconnects: ${diagnostics.mavlink_reconnects}`,
-    `mavlink_frames_lagged: ${diagnostics.mavlink_frames_lagged}`,
-    `state_events_lagged: ${diagnostics.state_events_lagged}`,
-    `mcm_consecutive_failures: ${diagnostics.mcm_consecutive_failures}`,
-    `script_reloads: ${diagnostics.script_reloads}`,
-    `last_frame_age_ms: ${formatOptional(diagnostics.last_frame_age_ms)}`,
-    `last_heartbeat_age_ms: ${formatOptional(diagnostics.last_heartbeat_age_ms)}`,
-    `last_servo_age_ms: ${formatOptional(diagnostics.last_servo_age_ms)}`,
-    `backend_version: ${diagnostics.backend_version}`,
-    `settings_error: ${formatOptional(diagnostics.settings_error)}`,
-  ]
-  if (props.cameraConnectivity != null) {
-    lines.push(`camera_connectivity: ${props.cameraConnectivity}`)
-  }
-  return lines.join('\n')
-})
+const rawHealthText = computed((): string =>
+  props.systemHealth ? JSON.stringify(props.systemHealth, null, 2) : '',
+)
 
 const copyHealthDiagnostics = async (): Promise<void> => {
   await copyDiagnosticsPayload({
