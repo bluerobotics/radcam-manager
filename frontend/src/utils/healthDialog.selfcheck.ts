@@ -1,3 +1,4 @@
+import type { CameraConnectivity, SystemHealth } from '@/bindings/radcam_api'
 import {
   closeHealthDialog,
   degradedBannerCopy,
@@ -19,720 +20,339 @@ import {
   recoveryMessage,
   recoveryTitle,
   SELF_RECOVERING_KINDS,
+  type HealthProblem,
+  type HealthProblemKind,
   type HealthProblemsInput,
 } from './systemHealthProblems'
 
+type ProblemCase = {
+  name: string
+  input: HealthProblemsInput
+  /** Full ordered problem titles, when the whole set matters (ranking/suppression). */
+  titles?: string[]
+  kinds?: HealthProblemKind[]
+  degraded?: boolean
+  check?: (problems: HealthProblem[]) => boolean
+}
+
+/** `[resolved kinds, title, message without the Close hint]`. */
+type RecoveryCase = [HealthProblemKind[], string, string]
+
+const DIAGNOSTICS = {
+  mavlink_reconnects: 0,
+  mavlink_frames_lagged: 0,
+  state_events_lagged: 0,
+  mcm_consecutive_failures: 0,
+  script_reloads: 0,
+  backend_version: 'test',
+}
+
+const MCM_DOWN: SystemHealth = health({
+  mcm: 'down',
+  mcm_detail: 'connection refused',
+  cameras_discovered: 0,
+  diagnostics: { ...DIAGNOSTICS, mcm_consecutive_failures: 3 },
+})
+
+const CAMERA = { cameraUuid: 'cam', cameraLabel: 'RadCam' }
+const ONVIF_ERROR = 'ONVIF authentication failed: wrong password'
+
+const MCM_TITLE = 'BlueOS video service unavailable'
+const CAMERA_UNKNOWN_TITLE = 'Camera status unknown'
+const CAMERA_UNREACHABLE_TITLE = 'Camera unavailable'
+const ONVIF_TITLE = 'Camera ONVIF password does not match'
+const STREAM_TITLE = 'Camera video stream not running'
+
+/** Every recovery copy row uses the same peak so one round trip covers the mcm duration too. */
+const MCM_PEAK_MS = 5000
+
 export function runHealthDialogSelfCheck(): void {
-  let state = initialHealthDialogState()
-  const baseInput = (overrides: Partial<HealthProblemsInput> = {}): HealthProblemsInput => ({
-    systemHealth: {
-      mcm: 'down',
-      mcm_detail: 'connection refused',
-      cameras_discovered: 0,
-      expected_missing: [],
-      autopilot: 'online',
-      lua_scripting_disabled: false,
-      lua_script: 'ok',
-      diagnostics: {
-        mavlink_reconnects: 0,
-        mavlink_frames_lagged: 0,
-        state_events_lagged: 0,
-        mcm_consecutive_failures: 3,
-        script_reloads: 0,
-        backend_version: 'test',
-      },
-    },
-    cameraUuid: null,
-    cameraLabel: '',
-    cameraConnectivity: 'unknown',
-    ...overrides,
-  })
-
-  const down = evaluate(baseInput())
-  const mcmDownProblems = evaluateHealthFlags(baseInput()).problems
-  if (!down.active || !down.degraded) {
-    throw new Error('healthDialog: MCM down must be active+degraded')
-  }
-  if (collectHealthProblems(baseInput()).length !== 1) {
-    throw new Error('healthDialog: expected one MCM problem')
-  }
-
-  state = reduceHealthDialogOnProblems(initialHealthDialogState(), down.degraded)
-  if (state.mode !== 'open') throw new Error('healthDialog: must auto-open on degraded problems')
-
-  state = noteActiveProblems(state, mcmDownProblems, 5000)
-  state = noteActiveProblems(state, mcmDownProblems, 10_000)
-
-  // Idempotent while already open — must keep the same reference.
-  const openAgain = reduceHealthDialogOnProblems(state, down.degraded)
-  if (openAgain !== state) {
-    throw new Error('healthDialog: reduce while open must be idempotent')
-  }
-
-  state = minimizeHealthDialog(state)
-  let view = healthDialogView(state, true)
-  if (view.showDialog || !view.showDegradedBanner) {
-    throw new Error('healthDialog: minimize must show banner only')
-  }
-
-  state = reopenHealthDialog(state)
-  view = healthDialogView(state, true)
-  if (!view.showDialog || view.showDegradedBanner) {
-    throw new Error('healthDialog: reopen must show dialog')
-  }
-
-  // Recovery while open → sticky until Close.
-  state = reduceHealthDialogOnProblems(state, false)
-  view = healthDialogView(state, false)
-  if (!view.showDialog || !view.awaitingClose) {
-    throw new Error('healthDialog: recovery must keep dialog open awaiting close')
-  }
-  if (recoveryTitle(['mcm'], false) !== 'Video service restored') {
-    throw new Error(`healthDialog: bad recovery title: ${recoveryTitle(['mcm'], false)}`)
-  }
-  if (
-    recoveryMessage(['mcm'], 5000, false)
-    !== 'BlueOS video service is back (after about 5 sec). Click Close to continue.'
-  ) {
-    throw new Error(`healthDialog: bad recovery line: ${recoveryMessage(['mcm'], 5000, false)}`)
-  }
-  if (recoveryMessage([], 0, false) !== 'All clear. Click Close to continue.') {
-    throw new Error(`healthDialog: bad empty recovery line: ${recoveryMessage([], 0, false)}`)
-  }
-  if (
-    recoveryWhileMinimizedToast({
-      ...initialHealthDialogState(),
-      episodeKinds: ['mcm'],
-      mcmOutageMsPeak: 5000,
-    })
-    !== 'BlueOS video service is back (after about 5 sec).'
-  ) {
-    throw new Error('healthDialog: minimized recovery toast must omit Close hint')
-  }
-
-  state = closeHealthDialog()
-  if (state.mode !== 'hidden' || state.mcmOutageMsPeak !== 0) {
-    throw new Error('healthDialog: close must reset')
-  }
-
-  // Recovery while minimized → clear banner.
-  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
-  state = minimizeHealthDialog(state)
-  state = reduceHealthDialogOnProblems(state, false)
-  view = healthDialogView(state, false)
-  if (view.showDialog || view.showDegradedBanner || state.mode !== 'hidden') {
-    throw new Error('healthDialog: recovery while minimized must clear')
-  }
-
-  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
-  state = minimizeHealthDialog(state)
-  view = healthDialogView(state, true)
-  if (!view.showDegradedBanner) {
-    throw new Error('healthDialog: minimized+degraded must show banner')
-  }
-
-  // Camera + MCM together — camera cable blame suppressed while MCM is down.
-  const multi = collectHealthProblems(
-    baseInput({
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      cameraConnectivity: 'unreachable',
-    }),
-  )
-  if (multi.length !== 2) {
-    throw new Error(`healthDialog: expected MCM+camera-unknown problems, got ${multi.length}`)
-  }
-  if (multi[1]?.title !== 'Camera status unknown') {
-    throw new Error(`healthDialog: expected camera status unknown, got ${multi[1]?.title}`)
-  }
-
-  // Syncing is not a modal problem.
-  const syncingInput = baseInput({
-    systemHealth: {
-      mcm: 'online',
-      cameras_discovered: 1,
-      expected_missing: [],
-      autopilot: 'syncing',
-      lua_scripting_disabled: false,
-      lua_script: 'ok',
-      diagnostics: {
-        mavlink_reconnects: 0,
-        mavlink_frames_lagged: 0,
-        state_events_lagged: 0,
-        mcm_consecutive_failures: 0,
-        script_reloads: 0,
-        backend_version: 'test',
-      },
-    },
-  })
-  const syncing = evaluate(syncingInput)
-  if (syncing.active || syncing.degraded) {
-    throw new Error('healthDialog: syncing must not be active or degraded')
-  }
-  state = reduceHealthDialogOnProblems(initialHealthDialogState(), syncing.degraded)
-  if (state.mode !== 'hidden') {
-    throw new Error('healthDialog: syncing must not open sticky modal')
-  }
-
-  const mavlinkNever = baseInput({
-    systemHealth: {
-      mcm: 'online',
-      cameras_discovered: 0,
-      expected_missing: [],
-      autopilot: 'mavlink_down',
-      autopilot_detail: 'MAVLink component unavailable',
-      lua_scripting_disabled: false,
-      lua_script: 'ok',
-      diagnostics: {
-        mavlink_reconnects: 0,
-        mavlink_frames_lagged: 0,
-        state_events_lagged: 0,
-        mcm_consecutive_failures: 0,
-        script_reloads: 0,
-        backend_version: 'test',
-      },
-    },
-  })
-  const mavlinkFlags = evaluate(mavlinkNever)
-  if (!mavlinkFlags.degraded) {
-    throw new Error('healthDialog: mavlink_down without frame age must be degraded')
-  }
-  const mavlinkProblems = collectHealthProblems(mavlinkNever)
-  if (mavlinkProblems.length === 0 || mavlinkProblems[0]?.kind !== 'autopilot') {
-    throw new Error('healthDialog: mavlink_down without frame age must yield autopilot problem')
-  }
-
-  const unknownInput = baseInput({
-    systemHealth: {
-      mcm: 'online',
-      cameras_discovered: 0,
-      expected_missing: [],
-      autopilot: 'unknown',
-      lua_scripting_disabled: false,
-      lua_script: 'ok',
-      diagnostics: {
-        mavlink_reconnects: 0,
-        mavlink_frames_lagged: 0,
-        state_events_lagged: 0,
-        mcm_consecutive_failures: 0,
-        script_reloads: 0,
-        backend_version: 'test',
-      },
-    },
-  })
-  const unknownProblems = collectHealthProblems(unknownInput)
-  if (unknownProblems.length === 0 || unknownProblems[0]?.kind !== 'autopilot') {
-    throw new Error('healthDialog: unknown autopilot must yield operator copy')
-  }
-  if (evaluate(unknownInput).degraded) {
-    throw new Error('healthDialog: unknown during boot must not be degraded')
-  }
-
-  // Healthy boot: unknown → syncing → online must stay hidden.
-  state = initialHealthDialogState()
-  for (const autopilot of ['unknown', 'syncing', 'online'] as const) {
-    const input = baseInput({
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: autopilot === 'online' ? 1 : 0,
-        expected_missing: [],
-        autopilot,
-        lua_scripting_disabled: false,
-        lua_script: 'ok',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-        script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-    })
-    const flags = evaluate(input)
-    if (flags.degraded) {
-      throw new Error(`healthDialog: boot step autopilot=${autopilot} must not be degraded`)
+  for (const { name, input, titles, kinds, degraded, check } of problemCases()) {
+    const problems = collectHealthProblems(input)
+    if (titles) assertList(problems.map((problem) => problem.title), titles, `${name}: titles`)
+    if (kinds) assertList(problems.map((problem) => problem.kind), kinds, `${name}: kinds`)
+    if (degraded != null) {
+      assert(evaluateHealthFlags(input).degraded === degraded, `${name}: degraded must be ${degraded}`)
     }
-    state = reduceHealthDialogOnProblems(state, flags.degraded)
-    if (state.mode !== 'hidden' || state.awaitingClose) {
-      throw new Error(`healthDialog: boot step autopilot=${autopilot} must not open modal`)
+    if (check) assert(check(problems), `${name}: check failed`)
+  }
+
+  for (const [kinds, title, message] of recoveryCases()) {
+    const label = kinds.join('+') || 'none'
+    assert(recoveryTitle(kinds, false) === title, `recovery title ${label}: ${recoveryTitle(kinds, false)}`)
+    const line = recoveryMessage(kinds, MCM_PEAK_MS, false)
+    assert(line === `${message} Click Close to continue.`, `recovery message ${label}: ${line}`)
+  }
+
+  for (const [name, input, expected] of selfRecoveryCases()) {
+    const all = allNotableProblemsSelfRecover(collectHealthProblems(input))
+    assert(all === expected, `${name}: allNotableProblemsSelfRecover must be ${expected}`)
+  }
+  assert(!SELF_RECOVERING_KINDS.includes('lua_script'), 'lua_script must not be self-recovering')
+
+  for (const [name, run] of stateCases()) {
+    try {
+      run()
+    } catch (error) {
+      throw new Error(`healthDialog: ${name} -> ${(error as Error).message}`)
     }
-  }
-
-  // A stale or absent autopilot script must offer the one-click fix when a camera is
-  // selected, and only while the autopilot can actually take it.
-  for (const lua_script of ['missing', 'outdated', 'failing'] as const) {
-    const scriptInput = baseInput({
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: 1,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script,
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-          script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-    })
-    const scriptProblem = collectHealthProblems(scriptInput).find(
-      (problem) => problem.kind === 'lua_script',
-    )
-    if (!scriptProblem?.showUpdateLuaScript) {
-      throw new Error(`healthDialog: lua_script=${lua_script} must offer the update button`)
-    }
-
-    const noCameraProblem = collectHealthProblems({
-      ...scriptInput,
-      cameraUuid: null,
-      cameraLabel: '',
-    }).find((problem) => problem.kind === 'lua_script')
-    if (noCameraProblem?.showUpdateLuaScript) {
-      throw new Error(`healthDialog: lua_script=${lua_script} must hide update without camera`)
-    }
-    if (!noCameraProblem?.body.includes('discovered')) {
-      throw new Error(`healthDialog: lua_script=${lua_script} without camera must mention discovery`)
-    }
-
-    const offlineProblems = collectHealthProblems(
-      baseInput({
-        systemHealth: { ...scriptInput.systemHealth!, autopilot: 'mavlink_down' },
-      }),
-    )
-    if (offlineProblems.some((problem) => problem.kind === 'lua_script')) {
-      throw new Error('healthDialog: lua_script problem must stay hidden while autopilot is down')
-    }
-  }
-
-  const luaScriptUnknownProblems = collectHealthProblems(
-    baseInput({
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: 1,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script: 'unknown',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-        script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-    }),
-  )
-  if (luaScriptUnknownProblems.some((problem) => problem.kind === 'lua_script')) {
-    throw new Error('healthDialog: lua_script unknown must not yield a problem')
-  }
-
-  if (recoveryTitle(['lua_script'], false) !== 'Autopilot script updated') {
-    throw new Error(`healthDialog: bad lua_script recovery title: ${recoveryTitle(['lua_script'], false)}`)
-  }
-  if (
-    recoveryMessage(['lua_script'], 0, false)
-    !== 'Autopilot script is up to date. Click Close to continue.'
-  ) {
-    throw new Error(`healthDialog: bad lua_script recovery line: ${recoveryMessage(['lua_script'], 0, false)}`)
-  }
-
-  if (recoveryTitle(['lua_scripting_disabled'], false) !== 'Lua scripting enabled') {
-    throw new Error(
-      `healthDialog: bad lua_scripting_disabled recovery title: ${recoveryTitle(['lua_scripting_disabled'], false)}`,
-    )
-  }
-
-  if (SELF_RECOVERING_KINDS.includes('lua_script' as never)) {
-    throw new Error('healthDialog: lua_script must not be self-recovering')
-  }
-  const mcmOnly = collectHealthProblems(baseInput())
-  if (!allNotableProblemsSelfRecover(mcmOnly)) {
-    throw new Error('healthDialog: lone MCM outage must be self-recovering')
-  }
-  const luaScriptOnly = collectHealthProblems(
-    baseInput({
-      cameraUuid: 'cam',
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: 1,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script: 'missing',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-          script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-    }),
-  )
-  if (allNotableProblemsSelfRecover(luaScriptOnly)) {
-    throw new Error('healthDialog: lua_script must not count as self-recovering')
-  }
-  const mcmAndLuaScript = collectHealthProblems(
-    baseInput({
-      cameraUuid: 'cam',
-      systemHealth: {
-        mcm: 'down',
-        mcm_detail: 'down',
-        cameras_discovered: 0,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script: 'missing',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 3,
-          script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-    }),
-  )
-  if (allNotableProblemsSelfRecover(mcmAndLuaScript)) {
-    throw new Error('healthDialog: mixed self-recovering and lua_script must not all self-recover')
-  }
-  const twoSelfRecovering = collectHealthProblems(
-    baseInput({
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      cameraConnectivity: 'unreachable',
-    }),
-  )
-  if (!allNotableProblemsSelfRecover(twoSelfRecovering)) {
-    throw new Error('healthDialog: MCM+camera unreachable must all be self-recovering')
-  }
-
-  const banner = degradedBannerCopy([
-    { kind: 'mcm', severity: 'error', title: 'MCM down', body: 'video service down' },
-    { kind: 'autopilot', severity: 'warning', title: 'AP warn', body: 'autopilot warn' },
-  ])
-  if (!banner.title.includes('2 issues')) {
-    throw new Error(`healthDialog: degraded banner must summarize multiple issues: ${banner.title}`)
-  }
-  if (!banner.body.includes('MCM down') || !banner.body.includes('AP warn')) {
-    throw new Error(`healthDialog: degraded banner must list titles: ${banner.body}`)
-  }
-
-  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
-  state = minimizeHealthDialog(state)
-  state = healthDialogStateOnDisconnect(state)
-  if (state.mode !== 'minimized') {
-    throw new Error('healthDialog: disconnect must preserve minimized mode')
-  }
-  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
-  state = reopenHealthDialog(state)
-  state = healthDialogStateOnDisconnect(state)
-  if (state.mode !== 'hidden') {
-    throw new Error('healthDialog: disconnect while open must reset to hidden')
-  }
-
-  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
-  state = noteActiveProblems(state, mcmDownProblems, 5000)
-  state = noteForgetSuccess(state)
-  if (state.awaitingClose) {
-    throw new Error('healthDialog: forget during MCM outage must not switch to recovery view')
-  }
-  if (!state.forgetSuccess) {
-    throw new Error('healthDialog: forget must record forgetSuccess')
-  }
-  state = reduceHealthDialogOnProblems(state, false)
-  if (!state.awaitingClose) {
-    throw new Error('healthDialog: forget recovery must await close after problems clear')
-  }
-
-  const onvifAuth = collectHealthProblems(
-    baseInput({
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: 0,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script: 'ok',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-        script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      cameraConnectivity: 'online',
-      cameraOnvifAuthError: 'ONVIF authentication failed: wrong password',
-    }),
-  )
-  if (onvifAuth.length !== 1 || onvifAuth[0]?.title !== 'Camera ONVIF password does not match') {
-    throw new Error(`healthDialog: expected ONVIF auth problem, got ${onvifAuth[0]?.title}`)
-  }
-  if (onvifAuth[0]?.kind !== 'camera_onvif_auth') {
-    throw new Error(`healthDialog: expected camera_onvif_auth kind, got ${onvifAuth[0]?.kind}`)
-  }
-
-  if (recoveryTitle(['camera_stream'], false) !== 'Camera video stream restored') {
-    throw new Error(`healthDialog: bad camera_stream recovery title: ${recoveryTitle(['camera_stream'], false)}`)
-  }
-  if (
-    recoveryMessage(['camera_stream'], 0, false)
-    !== 'Camera video stream is running again. Click Close to continue.'
-  ) {
-    throw new Error(`healthDialog: bad camera_stream recovery line: ${recoveryMessage(['camera_stream'], 0, false)}`)
-  }
-
-  if (recoveryTitle(['camera_onvif_auth'], false) !== 'Camera ONVIF login restored') {
-    throw new Error(`healthDialog: bad camera_onvif_auth recovery title: ${recoveryTitle(['camera_onvif_auth'], false)}`)
-  }
-  if (
-    recoveryMessage(['camera_onvif_auth'], 0, false)
-    !== 'ONVIF login succeeded and video is available again. Click Close to continue.'
-  ) {
-    throw new Error(`healthDialog: bad camera_onvif_auth recovery line: ${recoveryMessage(['camera_onvif_auth'], 0, false)}`)
-  }
-
-  const streamError = collectHealthProblems(
-    baseInput({
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: 1,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script: 'ok',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-        script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      cameraConnectivity: 'online',
-      cameraStreamError: 'pipeline error',
-    }),
-  )
-  if (streamError.length !== 1 || streamError[0]?.title !== 'Camera video stream not running') {
-    throw new Error(`healthDialog: expected stream problem, got ${streamError[0]?.title}`)
-  }
-  if (streamError[0]?.kind !== 'camera_stream') {
-    throw new Error(`healthDialog: expected camera_stream kind, got ${streamError[0]?.kind}`)
-  }
-
-  const streamErrorWhileUnreachable = collectHealthProblems(
-    baseInput({
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: 1,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script: 'ok',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-        script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      cameraConnectivity: 'unreachable',
-      cameraStreamError: 'MCM stream state: stopped',
-    }),
-  )
-  if (streamErrorWhileUnreachable.some((problem) => problem.title === 'Camera video stream not running')) {
-    throw new Error('healthDialog: stream error must stay hidden while camera is unreachable')
-  }
-  if (streamErrorWhileUnreachable.length !== 1 || streamErrorWhileUnreachable[0]?.title !== 'Camera unavailable') {
-    throw new Error(`healthDialog: expected unreachable only, got ${streamErrorWhileUnreachable.map((p) => p.title).join(', ')}`)
-  }
-
-  const driftInput = baseInput({
-    systemHealth: {
-      mcm: 'online',
-      cameras_discovered: 1,
-      expected_missing: [],
-      autopilot: 'online',
-      lua_scripting_disabled: false,
-      lua_script: 'ok',
-      parameter_drifts: [
-        { name: 'SERVO1_FUNCTION', expected: 33, actual: 0 },
-        { name: 'SERVO2_FUNCTION', expected: 34, actual: 0 },
-      ],
-      diagnostics: {
-        mavlink_reconnects: 0,
-        mavlink_frames_lagged: 0,
-        state_events_lagged: 0,
-        mcm_consecutive_failures: 0,
-        script_reloads: 0,
-        backend_version: 'test',
-      },
-    },
-  })
-  const driftProblem = collectHealthProblems(driftInput).find(
-    (problem) => problem.kind === 'parameter_drift',
-  )
-  if (!driftProblem?.showGoToSetup) {
-    throw new Error('healthDialog: parameter drift must offer hardware setup')
-  }
-  if (driftProblem.severity !== 'warning') {
-    throw new Error(`healthDialog: parameter drift must be warning, got ${driftProblem.severity}`)
-  }
-  if (!driftProblem.detail?.includes('SERVO1_FUNCTION: saved 33, autopilot has 0')) {
-    throw new Error(`healthDialog: bad drift detail: ${driftProblem.detail}`)
-  }
-  if (!evaluate(driftInput).degraded) {
-    throw new Error('healthDialog: parameter drift must be degraded')
-  }
-
-  const manyDrifts = Array.from({ length: 5 }, (_, index) => ({
-    name: `SERVO${index + 1}_FUNCTION`,
-    expected: 33 + index,
-    actual: 0,
-  }))
-  const cappedDetail = collectHealthProblems(
-    baseInput({
-      systemHealth: { ...driftInput.systemHealth!, parameter_drifts: manyDrifts },
-    }),
-  ).find((problem) => problem.kind === 'parameter_drift')?.detail
-  if (!cappedDetail?.includes('…and 2 more')) {
-    throw new Error(`healthDialog: expected capped drift detail, got ${cappedDetail}`)
-  }
-
-  const driftWhileOffline = collectHealthProblems(
-    baseInput({
-      systemHealth: { ...driftInput.systemHealth!, autopilot: 'mavlink_down' },
-    }),
-  )
-  if (driftWhileOffline.some((problem) => problem.kind === 'parameter_drift')) {
-    throw new Error('healthDialog: parameter drift must stay hidden while autopilot is down')
-  }
-
-  if (recoveryTitle(['parameter_drift'], false) !== 'Autopilot parameters restored') {
-    throw new Error(`healthDialog: bad parameter_drift recovery title: ${recoveryTitle(['parameter_drift'], false)}`)
-  }
-  if (
-    recoveryMessage(['parameter_drift'], 0, false)
-    !== 'Autopilot parameters match the saved configuration again. Click Close to continue.'
-  ) {
-    throw new Error(`healthDialog: bad parameter_drift recovery line: ${recoveryMessage(['parameter_drift'], 0, false)}`)
-  }
-
-  const suppressed = collectHealthProblems(
-    baseInput({
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      cameraConnectivity: 'online',
-      cameraOnvifAuthError: 'ONVIF authentication failed: wrong password',
-      cameraStreamError: 'pipeline error',
-    }),
-  )
-  if (suppressed.length !== 2) {
-    throw new Error(`healthDialog: expected MCM+camera-unknown problems, got ${suppressed.length}`)
-  }
-  if (suppressed.some((problem) => problem.title === 'Camera ONVIF password does not match')) {
-    throw new Error('healthDialog: ONVIF auth must be suppressed while MCM is down')
-  }
-  if (suppressed.some((problem) => problem.title === 'Camera video stream not running')) {
-    throw new Error('healthDialog: stream error must be suppressed while MCM is down')
-  }
-
-  const onvifAuthWhileUnreachable = collectHealthProblems(
-    baseInput({
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: 1,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script: 'ok',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-        script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      cameraConnectivity: 'unreachable',
-      cameraOnvifAuthError: 'ONVIF authentication failed: wrong password',
-    }),
-  )
-  if (onvifAuthWhileUnreachable.some((problem) => problem.title === 'Camera ONVIF password does not match')) {
-    throw new Error('healthDialog: ONVIF auth must stay hidden while camera is unreachable')
-  }
-
-  const mcmSince = 1_000_000
-  const mcmNow = mcmSince + 45_000
-  const mcmProgress = collectHealthProblems(
-    baseInput({ problemFirstSeen: { mcm: mcmSince }, nowMs: mcmNow }),
-  )[0]?.progress
-  if (mcmProgress !== 'Retrying every 1 sec (about 45 sec so far)…') {
-    throw new Error(`healthDialog: MCM progress must use first-seen clock: ${mcmProgress}`)
-  }
-
-  const autopilotError = {
-    kind: 'autopilot' as const,
-    severity: 'error' as const,
-    title: 'MAVLink connection unavailable',
-    body: 'test',
-  }
-  let firstSeenState = noteActiveProblems(initialHealthDialogState(), [autopilotError], 1_000_000)
-  firstSeenState = noteActiveProblems(firstSeenState, [], 1_060_000)
-  firstSeenState = noteActiveProblems(firstSeenState, [autopilotError], 1_120_000)
-  if (firstSeenState.problemFirstSeen.autopilot !== 1_120_000) {
-    throw new Error(
-      `healthDialog: reappeared problem must get fresh first-seen: ${firstSeenState.problemFirstSeen.autopilot}`,
-    )
-  }
-
-  const sinceTenSec = formatProblemSince(1_000_000, 1_010_000)
-  if (!sinceTenSec.includes('(10 sec)')) {
-    throw new Error(`healthDialog: formatProblemSince must show seconds below 1 min: ${sinceTenSec}`)
-  }
-
-  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
-  state = noteActiveProblems(state, mcmDownProblems, 5000)
-  state = noteActiveProblems(state, mcmDownProblems, 60_000)
-  state = reduceHealthDialogOnProblems(state, false)
-  state = reduceHealthDialogOnProblems(state, true)
-  if (state.episodeKinds.length !== 0 || state.mcmOutageMsPeak !== 0) {
-    throw new Error('healthDialog: new problem during recovery must reset episode tracking')
-  }
-
-  if (!driftProblem?.body.includes('Autopilot-driven camera controls')) {
-    throw new Error(`healthDialog: parameter drift copy must be generic: ${driftProblem?.body}`)
   }
 
   console.log('healthDialog self-check ok')
 }
 
-function evaluate(input: HealthProblemsInput): { active: boolean; degraded: boolean } {
-  const flags = evaluateHealthFlags(input)
-  return { active: flags.active, degraded: flags.degraded }
+function health(overrides: Partial<SystemHealth> = {}): SystemHealth {
+  return {
+    mcm: 'online',
+    cameras_discovered: 1,
+    expected_missing: [],
+    autopilot: 'online',
+    lua_scripting_disabled: false,
+    lua_script: 'ok',
+    diagnostics: DIAGNOSTICS,
+    ...overrides,
+  }
+}
+
+function baseInput(overrides: Partial<HealthProblemsInput> = {}): HealthProblemsInput {
+  return {
+    systemHealth: MCM_DOWN,
+    cameraUuid: null,
+    cameraLabel: '',
+    cameraConnectivity: 'unknown',
+    ...overrides,
+  }
+}
+
+/** Healthy backend with the selected camera in a given connectivity state. */
+function cameraInput(
+  cameraConnectivity: CameraConnectivity,
+  overrides: Partial<HealthProblemsInput> = {},
+): HealthProblemsInput {
+  return baseInput({ ...CAMERA, systemHealth: health(), cameraConnectivity, ...overrides })
+}
+
+function problemCases(): ProblemCase[] {
+  const driftHealth = health({
+    parameter_drifts: [
+      { name: 'SERVO1_FUNCTION', expected: 33, actual: 0 },
+      { name: 'SERVO2_FUNCTION', expected: 34, actual: 0 },
+    ],
+  })
+  const luaScript = (problems: HealthProblem[]) =>
+    problems.find((problem) => problem.kind === 'lua_script')
+  const drift = (problems: HealthProblem[]) =>
+    problems.find((problem) => problem.kind === 'parameter_drift')
+
+  return [
+    { name: 'mcm down alone', input: baseInput(), titles: [MCM_TITLE], degraded: true },
+    { name: 'mcm down hides camera cable blame',
+      input: baseInput({ ...CAMERA, cameraConnectivity: 'unreachable' }),
+      titles: [MCM_TITLE, CAMERA_UNKNOWN_TITLE] },
+    { name: 'mcm down suppresses onvif and stream blame',
+      input: baseInput({
+        ...CAMERA,
+        cameraConnectivity: 'online',
+        cameraOnvifAuthError: ONVIF_ERROR,
+        cameraStreamError: 'pipeline error',
+      }),
+      titles: [MCM_TITLE, CAMERA_UNKNOWN_TITLE] },
+    { name: 'autopilot syncing is not a modal problem',
+      input: baseInput({ systemHealth: health({ autopilot: 'syncing' }) }),
+      titles: [],
+      degraded: false },
+    { name: 'mavlink_down without frame age',
+      input: baseInput({
+        systemHealth: health({ autopilot: 'mavlink_down', autopilot_detail: 'MAVLink component unavailable' }),
+      }),
+      kinds: ['autopilot'],
+      degraded: true },
+    { name: 'autopilot unknown during boot',
+      input: baseInput({ systemHealth: health({ autopilot: 'unknown' }) }),
+      kinds: ['autopilot'],
+      degraded: false },
+    ...(['missing', 'outdated', 'failing'] as const).flatMap((lua_script): ProblemCase[] => [
+      { name: `lua_script=${lua_script} with camera offers the fix`,
+        input: baseInput({ ...CAMERA, systemHealth: health({ lua_script }) }),
+        check: (problems) => luaScript(problems)?.showUpdateLuaScript === true },
+      { name: `lua_script=${lua_script} without camera hides the fix`,
+        input: baseInput({ systemHealth: health({ lua_script }) }),
+        check: (problems) =>
+          !luaScript(problems)?.showUpdateLuaScript
+          && luaScript(problems)?.body.includes('discovered') === true },
+      { name: `lua_script=${lua_script} hidden while autopilot is down`,
+        input: baseInput({ ...CAMERA, systemHealth: health({ lua_script, autopilot: 'mavlink_down' }) }),
+        check: (problems) => luaScript(problems) == null },
+    ]),
+    { name: 'lua_script unknown yields no problem',
+      input: baseInput({ ...CAMERA, systemHealth: health({ lua_script: 'unknown' }) }),
+      check: (problems) => luaScript(problems) == null },
+    { name: 'onvif auth while camera online',
+      input: cameraInput('online', { cameraOnvifAuthError: ONVIF_ERROR }),
+      titles: [ONVIF_TITLE],
+      kinds: ['camera_onvif_auth'] },
+    { name: 'onvif auth hidden while camera unreachable',
+      input: cameraInput('unreachable', { cameraOnvifAuthError: ONVIF_ERROR }),
+      titles: [CAMERA_UNREACHABLE_TITLE] },
+    { name: 'stream error while camera online',
+      input: cameraInput('online', { cameraStreamError: 'pipeline error' }),
+      titles: [STREAM_TITLE],
+      kinds: ['camera_stream'] },
+    { name: 'stream error hidden while camera unreachable',
+      input: cameraInput('unreachable', { cameraStreamError: 'MCM stream state: stopped' }),
+      titles: [CAMERA_UNREACHABLE_TITLE] },
+    { name: 'parameter drift',
+      input: baseInput({ systemHealth: driftHealth }),
+      degraded: true,
+      check: (problems) => {
+        const problem = drift(problems)
+        return problem?.showGoToSetup === true && problem.severity === 'warning'
+          && problem.detail?.includes('SERVO1_FUNCTION: saved 33, autopilot has 0') === true
+          && problem.body.includes('Autopilot-driven camera controls')
+      } },
+    { name: 'parameter drift detail caps the list',
+      input: baseInput({
+        systemHealth: health({
+          parameter_drifts: Array.from({ length: 5 }, (_, index) => ({
+            name: `SERVO${index + 1}_FUNCTION`,
+            expected: 33 + index,
+            actual: 0,
+          })),
+        }),
+      }),
+      check: (problems) => drift(problems)?.detail?.includes('…and 2 more') === true },
+    { name: 'parameter drift hidden while autopilot is down',
+      input: baseInput({ systemHealth: health({ ...driftHealth, autopilot: 'mavlink_down' }) }),
+      check: (problems) => drift(problems) == null },
+    { name: 'mcm progress uses the first-seen clock',
+      input: baseInput({ problemFirstSeen: { mcm: 1_000_000 }, nowMs: 1_045_000 }),
+      check: (problems) => problems[0]?.progress === 'Retrying every 1 sec (about 45 sec so far)…' },
+  ]
+}
+
+function recoveryCases(): RecoveryCase[] {
+  return [
+    [[], 'All clear', 'All clear.'],
+    [['mcm'], 'Video service restored', 'BlueOS video service is back (after about 5 sec).'],
+    [['autopilot'], 'Autopilot connection restored', 'Autopilot connection is working again.'],
+    [['camera'], 'Camera connection restored', 'Camera connection is working again.'],
+    [['camera_stream'], 'Camera video stream restored', 'Camera video stream is running again.'],
+    [['camera_onvif_auth'], 'Camera ONVIF login restored', 'ONVIF login succeeded and video is available again.'],
+    [['lua_script'], 'Autopilot script updated', 'Autopilot script is up to date.'],
+    [['lua_scripting_disabled'], 'Lua scripting enabled', 'Focus and zoom correlation is ready.'],
+    [['parameter_drift'], 'Autopilot parameters restored', 'Autopilot parameters match the saved configuration again.'],
+    [['mcm', 'camera'], 'Issues resolved', 'BlueOS video service is back (after about 5 sec). Camera connection is working again.'],
+  ]
+}
+
+/** `[name, input, every notable problem self-recovers]`. */
+function selfRecoveryCases(): [string, HealthProblemsInput, boolean][] {
+  return [
+    ['lone mcm outage', baseInput(), true],
+    ['lone lua_script', baseInput({ ...CAMERA, systemHealth: health({ lua_script: 'missing' }) }), false],
+    ['mcm + lua_script', baseInput({ ...CAMERA, systemHealth: health({ ...MCM_DOWN, lua_script: 'missing' }) }), false],
+    ['mcm + camera unreachable', baseInput({ ...CAMERA, cameraConnectivity: 'unreachable' }), true],
+  ]
+}
+
+function stateCases(): [name: string, run: () => void][] {
+  const degradedOpen = () => reduceHealthDialogOnProblems(initialHealthDialogState(), true)
+  const mcmProblems = collectHealthProblems(baseInput())
+
+  return [
+    ['auto-open on degraded problems, idempotent while open', () => {
+      const state = degradedOpen()
+      assert(state.mode === 'open', 'must auto-open on degraded problems')
+      assert(reduceHealthDialogOnProblems(state, true) === state, 'reduce while open must be idempotent')
+    }],
+    ['minimize shows the banner only, reopen shows the dialog', () => {
+      const minimized = minimizeHealthDialog(degradedOpen())
+      const banner = healthDialogView(minimized, true)
+      assert(!banner.showDialog && banner.showDegradedBanner, 'minimize must show banner only')
+      const reopened = healthDialogView(reopenHealthDialog(minimized), true)
+      assert(reopened.showDialog && !reopened.showDegradedBanner, 'reopen must show dialog')
+    }],
+    ['recovery while open stays sticky until Close', () => {
+      let state = noteActiveProblems(degradedOpen(), mcmProblems, 5000)
+      state = reduceHealthDialogOnProblems(noteActiveProblems(state, mcmProblems, 10_000), false)
+      const view = healthDialogView(state, false)
+      assert(view.showDialog && view.awaitingClose, 'recovery must keep dialog open awaiting close')
+      const closed = closeHealthDialog()
+      assert(closed.mode === 'hidden' && closed.mcmOutageMsPeak === 0, 'close must reset')
+    }],
+    ['recovery while minimized clears through the toast', () => {
+      const state = reduceHealthDialogOnProblems(minimizeHealthDialog(degradedOpen()), false)
+      const view = healthDialogView(state, false)
+      assert(!view.showDialog && !view.showDegradedBanner && state.mode === 'hidden', 'recovery while minimized must clear')
+      const toast = recoveryWhileMinimizedToast({
+        ...initialHealthDialogState(),
+        episodeKinds: ['mcm'],
+        mcmOutageMsPeak: MCM_PEAK_MS,
+      })
+      assert(toast === 'BlueOS video service is back (after about 5 sec).', `toast must omit Close hint: ${toast}`)
+      assert(healthDialogView(minimizeHealthDialog(degradedOpen()), true).showDegradedBanner, 'minimized+degraded must show banner')
+    }],
+    ['healthy boot never opens the modal', () => {
+      let state = initialHealthDialogState()
+      for (const autopilot of ['unknown', 'syncing', 'online'] as const) {
+        const booting = health({ autopilot, cameras_discovered: autopilot === 'online' ? 1 : 0 })
+        const { degraded } = evaluateHealthFlags(baseInput({ systemHealth: booting }))
+        assert(!degraded, `boot step autopilot=${autopilot} must not be degraded`)
+        state = reduceHealthDialogOnProblems(state, degraded)
+        assert(state.mode === 'hidden' && !state.awaitingClose, `boot step autopilot=${autopilot} must not open modal`)
+      }
+    }],
+    ['disconnect preserves minimized and resets while open', () => {
+      const minimized = healthDialogStateOnDisconnect(minimizeHealthDialog(degradedOpen()))
+      assert(minimized.mode === 'minimized', 'disconnect must preserve minimized mode')
+      const opened = healthDialogStateOnDisconnect(reopenHealthDialog(degradedOpen()))
+      assert(opened.mode === 'hidden', 'disconnect while open must reset to hidden')
+    }],
+    ['forget waits for the problems to clear', () => {
+      let state = noteForgetSuccess(noteActiveProblems(degradedOpen(), mcmProblems, 5000))
+      assert(!state.awaitingClose, 'forget during MCM outage must not switch to recovery view')
+      assert(state.forgetSuccess, 'forget must record forgetSuccess')
+      state = reduceHealthDialogOnProblems(state, false)
+      assert(state.awaitingClose, 'forget recovery must await close after problems clear')
+    }],
+    ['new problem during recovery resets episode tracking', () => {
+      let state = noteActiveProblems(degradedOpen(), mcmProblems, 5000)
+      state = reduceHealthDialogOnProblems(noteActiveProblems(state, mcmProblems, 60_000), false)
+      state = reduceHealthDialogOnProblems(state, true)
+      assert(state.episodeKinds.length === 0 && state.mcmOutageMsPeak === 0, 'episode tracking must reset')
+    }],
+    ['reappeared problem gets a fresh first-seen', () => {
+      const autopilotError: HealthProblem = {
+        kind: 'autopilot',
+        severity: 'error',
+        title: 'MAVLink connection unavailable',
+        body: 'test',
+      }
+      let state = noteActiveProblems(initialHealthDialogState(), [autopilotError], 1_000_000)
+      state = noteActiveProblems(state, [], 1_060_000)
+      state = noteActiveProblems(state, [autopilotError], 1_120_000)
+      assert(state.problemFirstSeen.autopilot === 1_120_000, `fresh first-seen: ${state.problemFirstSeen.autopilot}`)
+      const since = formatProblemSince(1_000_000, 1_010_000)
+      assert(since.includes('(10 sec)'), `formatProblemSince must show seconds below 1 min: ${since}`)
+    }],
+    ['degraded banner summarizes multiple issues', () => {
+      const banner = degradedBannerCopy([
+        { kind: 'mcm', severity: 'error', title: 'MCM down', body: 'video service down' },
+        { kind: 'autopilot', severity: 'warning', title: 'AP warn', body: 'autopilot warn' },
+      ])
+      assert(banner.title.includes('2 issues'), `banner must summarize multiple issues: ${banner.title}`)
+      assert(banner.body.includes('MCM down') && banner.body.includes('AP warn'), `banner must list titles: ${banner.body}`)
+    }],
+  ]
+}
+
+function assertList(actual: string[], expected: string[], label: string): void {
+  assert(
+    actual.length === expected.length && actual.every((value, index) => value === expected[index]),
+    `${label}: expected [${expected.join(' | ')}], got [${actual.join(' | ')}]`,
+  )
+}
+
+function assert(condition: unknown, message: string): void {
+  if (!condition) throw new Error(`healthDialog: ${message}`)
 }
