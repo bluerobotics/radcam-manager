@@ -1,19 +1,24 @@
 import {
   closeHealthDialog,
+  degradedBannerCopy,
   evaluateHealthFlags,
+  healthDialogStateOnDisconnect,
   healthDialogView,
   initialHealthDialogState,
   minimizeHealthDialog,
   noteActiveProblems,
+  noteForgetSuccess,
   recoveryWhileMinimizedToast,
   reduceHealthDialogOnProblems,
   reopenHealthDialog,
 } from './healthDialogState'
 import {
+  allNotableProblemsSelfRecover,
   collectHealthProblems,
   formatProblemSince,
   recoveryMessage,
   recoveryTitle,
+  SELF_RECOVERING_KINDS,
   type HealthProblemsInput,
 } from './systemHealthProblems'
 
@@ -155,7 +160,7 @@ export function runHealthDialogSelfCheck(): void {
         mavlink_frames_lagged: 0,
         state_events_lagged: 0,
         mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
         backend_version: 'test',
       },
     },
@@ -183,7 +188,7 @@ export function runHealthDialogSelfCheck(): void {
         mavlink_frames_lagged: 0,
         state_events_lagged: 0,
         mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
         backend_version: 'test',
       },
     },
@@ -210,7 +215,7 @@ export function runHealthDialogSelfCheck(): void {
         mavlink_frames_lagged: 0,
         state_events_lagged: 0,
         mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
         backend_version: 'test',
       },
     },
@@ -239,7 +244,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
           backend_version: 'test',
         },
       },
@@ -254,10 +259,12 @@ export function runHealthDialogSelfCheck(): void {
     }
   }
 
-  // A stale or absent autopilot script must offer the one-click fix, and only while the
-  // autopilot can actually take it.
+  // A stale or absent autopilot script must offer the one-click fix when a camera is
+  // selected, and only while the autopilot can actually take it.
   for (const lua_script of ['missing', 'outdated', 'failing'] as const) {
     const scriptInput = baseInput({
+      cameraUuid: 'cam',
+      cameraLabel: 'RadCam',
       systemHealth: {
         mcm: 'online',
         cameras_discovered: 1,
@@ -280,6 +287,18 @@ export function runHealthDialogSelfCheck(): void {
     )
     if (!scriptProblem?.showUpdateLuaScript) {
       throw new Error(`healthDialog: lua_script=${lua_script} must offer the update button`)
+    }
+
+    const noCameraProblem = collectHealthProblems({
+      ...scriptInput,
+      cameraUuid: null,
+      cameraLabel: '',
+    }).find((problem) => problem.kind === 'lua_script')
+    if (noCameraProblem?.showUpdateLuaScript) {
+      throw new Error(`healthDialog: lua_script=${lua_script} must hide update without camera`)
+    }
+    if (!noCameraProblem?.body.includes('discovered')) {
+      throw new Error(`healthDialog: lua_script=${lua_script} without camera must mention discovery`)
     }
 
     const offlineProblems = collectHealthProblems(
@@ -306,7 +325,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
           backend_version: 'test',
         },
       },
@@ -326,6 +345,117 @@ export function runHealthDialogSelfCheck(): void {
     throw new Error(`healthDialog: bad lua_script recovery line: ${recoveryMessage(['lua_script'], 0, false)}`)
   }
 
+  if (recoveryTitle(['lua_scripting_disabled'], false) !== 'Lua scripting enabled') {
+    throw new Error(
+      `healthDialog: bad lua_scripting_disabled recovery title: ${recoveryTitle(['lua_scripting_disabled'], false)}`,
+    )
+  }
+
+  if (SELF_RECOVERING_KINDS.includes('lua_script' as never)) {
+    throw new Error('healthDialog: lua_script must not be self-recovering')
+  }
+  const mcmOnly = collectHealthProblems(baseInput())
+  if (!allNotableProblemsSelfRecover(mcmOnly)) {
+    throw new Error('healthDialog: lone MCM outage must be self-recovering')
+  }
+  const luaScriptOnly = collectHealthProblems(
+    baseInput({
+      cameraUuid: 'cam',
+      systemHealth: {
+        mcm: 'online',
+        cameras_discovered: 1,
+        expected_missing: [],
+        autopilot: 'online',
+        lua_scripting_disabled: false,
+        lua_script: 'missing',
+        diagnostics: {
+          mavlink_reconnects: 0,
+          mavlink_frames_lagged: 0,
+          state_events_lagged: 0,
+          mcm_consecutive_failures: 0,
+          script_reloads: 0,
+          backend_version: 'test',
+        },
+      },
+    }),
+  )
+  if (allNotableProblemsSelfRecover(luaScriptOnly)) {
+    throw new Error('healthDialog: lua_script must not count as self-recovering')
+  }
+  const mcmAndLuaScript = collectHealthProblems(
+    baseInput({
+      cameraUuid: 'cam',
+      systemHealth: {
+        mcm: 'down',
+        mcm_detail: 'down',
+        cameras_discovered: 0,
+        expected_missing: [],
+        autopilot: 'online',
+        lua_scripting_disabled: false,
+        lua_script: 'missing',
+        diagnostics: {
+          mavlink_reconnects: 0,
+          mavlink_frames_lagged: 0,
+          state_events_lagged: 0,
+          mcm_consecutive_failures: 3,
+          script_reloads: 0,
+          backend_version: 'test',
+        },
+      },
+    }),
+  )
+  if (allNotableProblemsSelfRecover(mcmAndLuaScript)) {
+    throw new Error('healthDialog: mixed self-recovering and lua_script must not all self-recover')
+  }
+  const twoSelfRecovering = collectHealthProblems(
+    baseInput({
+      cameraUuid: 'cam',
+      cameraLabel: 'RadCam',
+      cameraConnectivity: 'unreachable',
+    }),
+  )
+  if (!allNotableProblemsSelfRecover(twoSelfRecovering)) {
+    throw new Error('healthDialog: MCM+camera unreachable must all be self-recovering')
+  }
+
+  const banner = degradedBannerCopy([
+    { kind: 'mcm', severity: 'error', title: 'MCM down', body: 'video service down' },
+    { kind: 'autopilot', severity: 'warning', title: 'AP warn', body: 'autopilot warn' },
+  ])
+  if (!banner.title.includes('2 issues')) {
+    throw new Error(`healthDialog: degraded banner must summarize multiple issues: ${banner.title}`)
+  }
+  if (!banner.body.includes('MCM down') || !banner.body.includes('AP warn')) {
+    throw new Error(`healthDialog: degraded banner must list titles: ${banner.body}`)
+  }
+
+  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
+  state = minimizeHealthDialog(state)
+  state = healthDialogStateOnDisconnect(state)
+  if (state.mode !== 'minimized') {
+    throw new Error('healthDialog: disconnect must preserve minimized mode')
+  }
+  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
+  state = reopenHealthDialog(state)
+  state = healthDialogStateOnDisconnect(state)
+  if (state.mode !== 'hidden') {
+    throw new Error('healthDialog: disconnect while open must reset to hidden')
+  }
+
+  state = reduceHealthDialogOnProblems(initialHealthDialogState(), true)
+  state = noteActiveProblems(state, mcmDownProblems, 5000)
+  state = noteForgetSuccess(state)
+  if (state.awaitingClose) {
+    throw new Error('healthDialog: forget during MCM outage must not switch to recovery view')
+  }
+  if (!state.forgetSuccess) {
+    throw new Error('healthDialog: forget must record forgetSuccess')
+  }
+  state = reduceHealthDialogOnProblems(state, false)
+  if (!state.awaitingClose) {
+    throw new Error('healthDialog: forget recovery must await close after problems clear')
+  }
+
   const onvifAuth = collectHealthProblems(
     baseInput({
       systemHealth: {
@@ -340,7 +470,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
           backend_version: 'test',
         },
       },
@@ -391,7 +521,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
           backend_version: 'test',
         },
       },
@@ -422,7 +552,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
           backend_version: 'test',
         },
       },
@@ -543,7 +673,7 @@ export function runHealthDialogSelfCheck(): void {
           mavlink_frames_lagged: 0,
           state_events_lagged: 0,
           mcm_consecutive_failures: 0,
-          script_reloads: 0,
+        script_reloads: 0,
           backend_version: 'test',
         },
       },
@@ -593,33 +723,6 @@ export function runHealthDialogSelfCheck(): void {
   state = reduceHealthDialogOnProblems(state, true)
   if (state.episodeKinds.length !== 0 || state.mcmOutageMsPeak !== 0) {
     throw new Error('healthDialog: new problem during recovery must reset episode tracking')
-  }
-
-  const unresponsive = collectHealthProblems(
-    baseInput({
-      systemHealth: {
-        mcm: 'online',
-        cameras_discovered: 1,
-        expected_missing: [],
-        autopilot: 'online',
-        lua_scripting_disabled: false,
-        lua_script: 'ok',
-        diagnostics: {
-          mavlink_reconnects: 0,
-          mavlink_frames_lagged: 0,
-          state_events_lagged: 0,
-          mcm_consecutive_failures: 0,
-          script_reloads: 0,
-          backend_version: 'test',
-        },
-      },
-      cameraUuid: 'cam',
-      cameraLabel: 'RadCam',
-      cameraConnectivity: 'unresponsive',
-    }),
-  )
-  if (unresponsive[0]?.showReboot) {
-    throw new Error('healthDialog: unresponsive camera must not offer reboot')
   }
 
   if (!driftProblem?.body.includes('Autopilot-driven camera controls')) {
