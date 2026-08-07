@@ -29,17 +29,18 @@
       title="Image"
       :expanded="panelsOpen.image"
       theme="dark"
+      @update:expanded="panelsOpen.image = $event"
     >
       <BlueButtonGroup
         label="Water environment White Balance"
-        :disabled="isConfigured !== true || cameraBackedDisabled || wbBusy"
+        :disabled="isConfigured !== true || cameraControlsDisabled || wbBusy"
         :button-items="WhiteBalanceSceneButtonItems"
         theme="dark"
         type="switch"
       />
       <BlueButtonGroup
         label="White Balance Mode"
-        :disabled="isConfigured !== true || cameraBackedDisabled || wbBusy"
+        :disabled="isConfigured !== true || cameraControlsDisabled || wbBusy"
         :button-items="whiteBalanceModeButtonItems"
         theme="dark"
         type="switch"
@@ -49,7 +50,7 @@
         class="d-flex flex-col align-end mt-6"
       >
         <v-btn
-          :disabled="cameraBackedDisabled || wbBusy"
+          :disabled="cameraControlsDisabled || wbBusy"
           class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
           size="small"
           variant="elevated"
@@ -72,7 +73,7 @@
       >
         <BlueSlider
           v-model="baseParams.awb_red"
-          :disabled="isConfigured !== true || cameraBackedDisabled || wbBusy"
+          :disabled="isConfigured !== true || cameraControlsDisabled || wbBusy"
           name="red"
           label="Red"
           :min="0"
@@ -85,7 +86,7 @@
         />
         <BlueSlider
           v-model="baseParams.awb_blue"
-          :disabled="isConfigured !== true || cameraBackedDisabled || wbBusy"
+          :disabled="isConfigured !== true || cameraControlsDisabled || wbBusy"
           name="blue"
           label="Blue"
           :min="0"
@@ -103,6 +104,7 @@
       title="Actuators"
       :expanded="panelsOpen.actuators"
       theme="dark"
+      @update:expanded="panelsOpen.actuators = $event"
     >
       <BlueSlider
         v-if="actuatorsState"
@@ -167,6 +169,7 @@
         title="more"
         :expanded="panelsOpen.actuatorsMore"
         theme="dark"
+        @update:expanded="panelsOpen.actuatorsMore = $event"
       >
         <div>
           <BlueSwitch
@@ -179,7 +182,7 @@
           />
           <!-- <BlueSlider
             v-model="focusOffsetUI"
-            :disabled="isConfigured !== true || cameraBackedDisabled"
+            :disabled="isConfigured !== true || cameraControlsDisabled"
             name="focus-offset"
             label="Focus compensation"
             :min="-10"
@@ -197,10 +200,11 @@
       title="Video"
       :expanded="panelsOpen.video"
       theme="dark"
+      @update:expanded="panelsOpen.video = $event"
     >
       <BlueSelect
         v-model="selectedVideoResolution"
-        :disabled="isConfigured !== true || cameraBackedDisabled"
+        :disabled="isConfigured !== true || cameraControlsDisabled"
         label="Resolution"
         :items="resolutionOptions || [{ name: 'No resolutions available', value: null }]"
         theme="dark"
@@ -208,7 +212,7 @@
       />
       <BlueSelect
         v-model="selectedVideoBitrate"
-        :disabled="isConfigured !== true || cameraBackedDisabled"
+        :disabled="isConfigured !== true || cameraControlsDisabled"
         label="Bitrate"
         :items="bitrateOptions || [{ name: 'No bitrates available', value: null }]"
         theme="dark"
@@ -289,7 +293,7 @@
         class="flex justify-end mt-8 mb-[-20px]"
       >
         <v-btn
-          :disabled="isConfigured !== true || cameraBackedDisabled"
+          :disabled="isConfigured !== true || cameraControlsDisabled"
           class="py-1 px-3 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
           :class="{ 'opacity-50 pointer-events-none': !hasUnsavedVideoChanges }"
           size="small"
@@ -713,10 +717,9 @@ const props = defineProps<{
   welcomeOverlayUnblocked: boolean
 }>()
 
-const { autopilotState, autopilotOnline } = useSystemHealth()
+const { autopilotState, systemHealth } = useSystemHealth()
 
 const wbBusy = computed(() => props.onePushAwb != null)
-const cameraBackedDisabled = computed(() => props.cameraControlsDisabled)
 const onePushLabel = computed(() => {
   if (props.onePushAwb != null) return 'Processing...'
   return 'One-Push White Balance'
@@ -905,16 +908,28 @@ watch(isConfigured, (value, previous) => {
   applyPanelLayout(value === true)
 })
 
+const autopilotBlocksControls = computed(() => {
+  const health = systemHealth.value
+  if (health == null) return false
+  const state = health.autopilot
+  return state !== 'online' && state !== 'syncing'
+})
+
 const actuatorControlsDisabled = computed(
-  () => isConfigured.value !== true || props.disabled || !autopilotOnline.value,
+  () => isConfigured.value !== true || props.disabled || autopilotBlocksControls.value,
 )
 const hardwareSetupControlsDisabled = computed(
-  () => props.disabled || !autopilotOnline.value,
+  () => props.disabled || autopilotBlocksControls.value,
 )
 const hardwareSetupDisabledReason = computed(() => {
   if (!hardwareSetupControlsDisabled.value) return null
   if (!props.backendConnected) return 'Connect to the backend to apply hardware setup.'
-  if (!autopilotOnline.value) return 'Autopilot must be online to apply hardware setup.'
+  if (autopilotState.value === 'syncing') {
+    return 'Waiting for the autopilot to finish syncing parameters…'
+  }
+  if (autopilotState.value !== 'online') {
+    return 'Autopilot must be online to apply hardware setup.'
+  }
   return null
 })
 const showWelcomeDialog = ref<boolean>(true)
@@ -993,10 +1008,7 @@ const hasUnsavedVideoChanges = ref<boolean>(false)
 
 watch(
   () => props.selectedCameraUuid,
-  (uuid, previousUuid) => {
-    // Same camera identity — keep panel/config state across list flaps.
-    if (uuid === previousUuid) return
-
+  () => {
     hasUserEditedVideo.value = false
     hasUnsavedVideoChanges.value = false
     actuatorsRequestGeneration.value += 1
@@ -1866,8 +1878,6 @@ const resetToRecommendedDefaults = async (): Promise<void> => {
 }
 
 defineExpose({
-  showWelcomeDialog,
-  isConfigured,
   updateLuaScript,
   applyRecommendedCameraSettings,
   rebootCamera: doRestart,
