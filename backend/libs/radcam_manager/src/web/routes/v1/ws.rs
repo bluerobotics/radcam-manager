@@ -115,13 +115,8 @@ async fn websocket_connection(socket: WebSocket) {
         return;
     }
 
-    let payload = connectivity::system_health().await;
-    let mut last_health_comparable = None;
-    if let Some(text) = system_health_event_text(&payload) {
-        if send_text(&mut sender, connection_id, text).await.is_err() {
-            return;
-        }
-        last_health_comparable = Some(health_without_volatile_ages(payload));
+    if push_health(&mut sender, connection_id).await.is_err() {
+        return;
     }
 
     if let Some(text) = connection_stats_text(connection_id) {
@@ -255,28 +250,14 @@ async fn websocket_connection(socket: WebSocket) {
                 }
             }
             _ = health_interval.tick() => {
-                if push_health_if_changed(
-                    &mut sender,
-                    connection_id,
-                    &mut last_health_comparable,
-                )
-                .await
-                .is_err()
-                {
-                    break 'connection;
-                }
+                // Safety net for changes that reach no notifier; the aggregator
+                // no-ops when only volatile ages moved, so clients see nothing.
+                connectivity::publish_health_if_changed().await;
             }
             health = health_receiver.recv() => {
                 match health {
                     Ok(()) | Err(RecvError::Lagged(_)) => {
-                        if push_health_if_changed(
-                            &mut sender,
-                            connection_id,
-                            &mut last_health_comparable,
-                        )
-                        .await
-                        .is_err()
-                        {
+                        if push_health(&mut sender, connection_id).await.is_err() {
                             break 'connection;
                         }
                     }
@@ -636,14 +617,6 @@ fn connection_stats_text(connection_id: ConnectionId) -> Option<String> {
     }
 }
 
-fn health_without_volatile_ages(mut health: SystemHealth) -> SystemHealth {
-    health.diagnostics.last_frame_age_ms = None;
-    health.diagnostics.last_heartbeat_age_ms = None;
-    health.diagnostics.last_servo_age_ms = None;
-    health.diagnostics.mcm_consecutive_failures = 0;
-    health
-}
-
 #[instrument(level = "debug", skip_all)]
 fn system_health_event_text(health: &SystemHealth) -> Option<String> {
     let body = match serde_json::to_value(health) {
@@ -663,22 +636,15 @@ fn system_health_event_text(health: &SystemHealth) -> Option<String> {
 }
 
 #[instrument(level = "debug", skip_all, fields(%connection_id))]
-async fn push_health_if_changed(
+async fn push_health(
     sender: &mut futures::stream::SplitSink<WebSocket, Message>,
     connection_id: ConnectionId,
-    last_health_comparable: &mut Option<SystemHealth>,
 ) -> Result<(), SendFailure> {
     let health = connectivity::system_health().await;
-    let comparable = health_without_volatile_ages(health.clone());
-    if last_health_comparable.as_ref() == Some(&comparable) {
-        return Ok(());
-    }
     let Some(text) = system_health_event_text(&health) else {
         return Ok(());
     };
-    send_text(sender, connection_id, text).await?;
-    *last_health_comparable = Some(comparable);
-    Ok(())
+    send_text(sender, connection_id, text).await
 }
 
 #[instrument(level = "debug", skip_all, fields(%connection_id, %camera_uuid, reason))]
@@ -802,49 +768,5 @@ async fn handle_request(request: WsRequest) -> WsResponse {
             }
         }
         _ => WsResponse::new(id, 404, Value::String("not found".to_string())),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use radcam_api::{Diagnostics, McmHealth, SystemHealth};
-
-    use super::health_without_volatile_ages;
-
-    fn sample_health(mcm: McmHealth, failures: u32) -> SystemHealth {
-        SystemHealth {
-            mcm,
-            diagnostics: Diagnostics {
-                mcm_consecutive_failures: failures,
-                last_frame_age_ms: Some(100),
-                last_heartbeat_age_ms: Some(200),
-                last_servo_age_ms: Some(300),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn health_comparable_ignores_volatile_diagnostics() {
-        let a = sample_health(McmHealth::Down, 5);
-        let b = sample_health(McmHealth::Down, 99);
-        let mut c = sample_health(McmHealth::Down, 5);
-        c.diagnostics.last_frame_age_ms = Some(999);
-        c.diagnostics.last_heartbeat_age_ms = Some(888);
-        c.diagnostics.last_servo_age_ms = Some(777);
-
-        assert_eq!(
-            health_without_volatile_ages(a.clone()),
-            health_without_volatile_ages(b)
-        );
-        assert_eq!(
-            health_without_volatile_ages(a),
-            health_without_volatile_ages(c)
-        );
-        assert_ne!(
-            health_without_volatile_ages(sample_health(McmHealth::Online, 0)),
-            health_without_volatile_ages(sample_health(McmHealth::Down, 0))
-        );
     }
 }
