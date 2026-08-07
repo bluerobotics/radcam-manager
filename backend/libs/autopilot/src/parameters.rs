@@ -485,6 +485,18 @@ mod drift_tests {
             &ParamType::UINT16(1501),
             PARAM_DRIFT_TOLERANCE,
         ));
+
+        // Floats compare within the tolerance band, not bytewise.
+        assert!(param_values_match(
+            &ParamType::REAL32(1.5),
+            &ParamType::REAL32(1.2),
+            PARAM_DRIFT_TOLERANCE,
+        ));
+        assert!(!param_values_match(
+            &ParamType::REAL32(1.5),
+            &ParamType::REAL32(2.1),
+            PARAM_DRIFT_TOLERANCE,
+        ));
     }
 
     #[test]
@@ -497,44 +509,6 @@ mod drift_tests {
         assert!(!param_values_match(
             &ParamType::UINT16(1500),
             &ParamType::UINT16(1501),
-            PARAM_DRIFT_TOLERANCE,
-        ));
-    }
-
-    #[test]
-    fn reapplied_configuration_values_match_expectations() {
-        let expected = ParamType::UINT16(1200);
-        let actual = ParamType::UINT16(1200);
-
-        assert!(param_values_match(
-            &expected,
-            &actual,
-            PARAM_DRIFT_TOLERANCE,
-        ));
-        assert!(!param_values_match(
-            &ParamType::UINT16(1100),
-            &actual,
-            PARAM_DRIFT_TOLERANCE,
-        ));
-    }
-
-    #[test]
-    fn param_drift_tolerance_applies_to_real32_expectations() {
-        let expected = ParamType::REAL32(1.5);
-
-        assert!(param_values_match(
-            &expected,
-            &ParamType::REAL32(1.5),
-            PARAM_DRIFT_TOLERANCE,
-        ));
-        assert!(param_values_match(
-            &expected,
-            &ParamType::REAL32(1.2),
-            PARAM_DRIFT_TOLERANCE,
-        ));
-        assert!(!param_values_match(
-            &expected,
-            &ParamType::REAL32(2.1),
             PARAM_DRIFT_TOLERANCE,
         ));
     }
