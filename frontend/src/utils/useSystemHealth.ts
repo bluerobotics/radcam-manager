@@ -30,6 +30,7 @@ function releaseSubscription(): void {
   unsubscribeHealth = null
   unsubscribeConnection?.()
   unsubscribeConnection = null
+  systemHealth.value = null
 }
 
 export type UseSystemHealth = {
