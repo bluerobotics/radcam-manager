@@ -41,7 +41,7 @@
         {{ problemsSummaryLine }}
       </p>
       <p
-        v-else-if="anyProblemSelfRecovers"
+        v-if="anyProblemSelfRecovers"
         class="text-sm text-white text-center mb-4 opacity-90"
         aria-live="polite"
       >
@@ -104,7 +104,6 @@
         <div
           v-if="
             problem.showForget
-              || problem.showReboot
               || problem.showGoToSetup
               || problem.showUpdateLuaScript
           "
@@ -142,17 +141,6 @@
           >
             Remove from setup
           </v-btn>
-          <v-btn
-            v-if="problem.showReboot"
-            class="py-1 px-3 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
-            size="small"
-            variant="elevated"
-            theme="dark"
-            :disabled="actionInProgress != null"
-            @click="confirmRebootOpen = true"
-          >
-            Reboot camera
-          </v-btn>
         </div>
       </div>
     </template>
@@ -185,10 +173,7 @@
       aria-label="Diagnostics text for manual copy"
       @focus="($event.target as HTMLTextAreaElement).select()"
     />
-    <template
-      v-if="!viewConnectionCopy"
-      #actions
-    >
+    <template #actions>
       <div
         v-if="!viewBusyCopy"
         class="flex items-center gap-2 min-w-0"
@@ -204,27 +189,29 @@
           Copy diagnostics
         </v-btn>
       </div>
-      <v-spacer />
-      <v-btn
-        v-if="viewAwaitingClose && !viewBusyCopy"
-        class="py-1 px-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
-        size="small"
-        variant="elevated"
-        theme="dark"
-        @click="close"
-      >
-        Close
-      </v-btn>
-      <v-btn
-        v-else
-        class="py-1 px-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
-        size="small"
-        variant="elevated"
-        theme="dark"
-        @click="minimize"
-      >
-        Minimize
-      </v-btn>
+      <template v-if="!viewConnectionCopy">
+        <v-spacer />
+        <v-btn
+          v-if="viewAwaitingClose && !viewBusyCopy"
+          class="py-1 px-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
+          size="small"
+          variant="elevated"
+          theme="dark"
+          @click="close"
+        >
+          Close
+        </v-btn>
+        <v-btn
+          v-else
+          class="py-1 px-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
+          size="small"
+          variant="elevated"
+          theme="dark"
+          @click="minimize"
+        >
+          Minimize
+        </v-btn>
+      </template>
     </template>
   </StatusDialogShell>
 
@@ -261,38 +248,6 @@
     </template>
   </StatusDialogShell>
 
-  <StatusDialogShell
-    :show="confirmRebootOpen"
-    title="Reboot camera?"
-    :persistent="false"
-    :logo="false"
-    @dismiss="confirmRebootOpen = false"
-  >
-    <p class="text-sm text-white text-center">
-      The camera will restart and may be unavailable for a short time.
-    </p>
-    <template #actions>
-      <v-spacer />
-      <v-btn
-        class="py-1 px-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
-        size="small"
-        variant="elevated"
-        theme="dark"
-        @click="confirmRebootOpen = false"
-      >
-        Cancel
-      </v-btn>
-      <v-btn
-        class="py-1 px-4 rounded-md bg-[#0B5087] hover:bg-[#0A3E6B]"
-        size="small"
-        variant="elevated"
-        theme="dark"
-        @click="runReboot"
-      >
-        Reboot
-      </v-btn>
-    </template>
-  </StatusDialogShell>
   <CopyFeedbackToast
     :message="copyFeedback"
     @dismiss="clearCopyFeedbackMessage"
@@ -309,7 +264,10 @@ import { backendClient, type ConnectionState } from '@/utils/backendClient'
 import { useCopyDiagnostics } from '@/utils/useCopyDiagnostics'
 import { formatRequestError } from '@/utils/formatRequestError'
 import type { HealthProblem } from '@/utils/systemHealthProblems'
-import { SELF_RECOVERING_KINDS, problemsSummary } from '@/utils/systemHealthProblems'
+import {
+  allNotableProblemsSelfRecover,
+  problemsSummary,
+} from '@/utils/systemHealthProblems'
 
 const SEVERITY_STYLES: Record<
   HealthProblem['severity'],
@@ -354,7 +312,7 @@ type LeaveSnapshot = {
   busyCopy: StatusCopy | null
 }
 
-type ActionKind = 'forget' | 'reboot' | 'lua_script'
+type ActionKind = 'forget' | 'lua_script'
 
 const props = defineProps<{
   show: boolean
@@ -386,7 +344,6 @@ const {
 } = useCopyDiagnostics()
 
 const confirmForgetOpen = ref(false)
-const confirmRebootOpen = ref(false)
 const actionInProgress = ref<ActionKind | null>(null)
 const actionError = ref<string | null>(null)
 
@@ -458,8 +415,6 @@ const actionProgressLabel = computed(() => {
   switch (actionInProgress.value) {
     case 'forget':
       return 'Removing camera from setup…'
-    case 'reboot':
-      return 'Rebooting camera…'
     case 'lua_script':
       return 'Updating autopilot script…'
     default:
@@ -494,12 +449,12 @@ const viewAwaitingClose = computed(() => {
 })
 const viewRecoveryTitle = computed(() => {
   if (props.show) return props.recoveryTitle ?? 'All clear'
-  return props.recoveryTitle ?? leaveSnapshot.value?.recoveryTitle ?? 'All clear'
+  return leaveSnapshot.value?.recoveryTitle ?? props.recoveryTitle ?? 'All clear'
 })
 const viewRecoveryMessage = computed(() => {
   if (props.show) return props.recoveryMessage ?? 'All clear. Click Close to continue.'
-  return props.recoveryMessage
-    ?? leaveSnapshot.value?.recoveryMessage
+  return leaveSnapshot.value?.recoveryMessage
+    ?? props.recoveryMessage
     ?? 'All clear. Click Close to continue.'
 })
 const viewProblems = computed(() => {
@@ -508,7 +463,7 @@ const viewProblems = computed(() => {
 })
 const problemsSummaryLine = computed(() => problemsSummary(viewProblems.value))
 const anyProblemSelfRecovers = computed(() =>
-  viewProblems.value.some((problem) => SELF_RECOVERING_KINDS.includes(problem.kind)),
+  allNotableProblemsSelfRecover(viewProblems.value),
 )
 const dialogTitle = computed(() => {
   if (viewStatusCopy.value) return viewStatusCopy.value.title
@@ -550,25 +505,6 @@ const runForget = async (): Promise<void> => {
     emit('forgotten', cameraUuid)
   } catch (error) {
     actionError.value = `Failed to remove camera from setup: ${formatRequestError(error)}`
-  } finally {
-    actionInProgress.value = null
-  }
-}
-
-const runReboot = async (): Promise<void> => {
-  const cameraUuid = props.cameraUuid
-  if (!cameraUuid || actionInProgress.value != null) return
-
-  confirmRebootOpen.value = false
-  actionError.value = null
-  actionInProgress.value = 'reboot'
-  try {
-    await backendClient.request('POST', '/camera/control', {
-      camera_uuid: cameraUuid,
-      action: 'restart',
-    })
-  } catch (error) {
-    actionError.value = `Failed to reboot camera: ${formatRequestError(error)}`
   } finally {
     actionInProgress.value = null
   }
