@@ -54,7 +54,7 @@ pub(crate) async fn rebuild() {
         }
     }
     *expectations().write().expect("owned expectations lock") = merged;
-    prune_eligibility_to_expectations();
+    prune_to_expectations();
 }
 
 pub(crate) fn expectations_for_param(name: &str) -> Vec<(Uuid, ParamType)> {
@@ -83,14 +83,9 @@ pub(crate) async fn reevaluate_after_apply() {
 }
 
 fn observe_cached(cache: &IndexMap<String, Parameter>, source: ObserveSource) {
-    let expectations = expectations()
-        .read()
-        .expect("owned expectations lock")
-        .clone();
-    let mut expected_keys = HashSet::new();
-    for (camera_uuid, per_camera) in &expectations {
+    let expectations = expectations().read().expect("owned expectations lock");
+    for (camera_uuid, per_camera) in expectations.iter() {
         for (name, expected) in per_camera {
-            expected_keys.insert((*camera_uuid, name.clone()));
             if let Some(parameter) = cache.get(name) {
                 health::observe_owned_parameter_value(
                     camera_uuid,
@@ -102,10 +97,12 @@ fn observe_cached(cache: &IndexMap<String, Parameter>, source: ObserveSource) {
             }
         }
     }
-    health::clear_stale_parameter_drifts(&expected_keys);
 }
 
-fn prune_eligibility_to_expectations() {
+/// Forget eligibility and reported drift for keys we no longer own.
+///
+/// Expectations only change here, so this is the only place a drift can go stale.
+fn prune_to_expectations() {
     let expected: HashSet<EligibilityKey> = expectations()
         .read()
         .expect("owned expectations lock")
@@ -118,6 +115,7 @@ fn prune_eligibility_to_expectations() {
         .write()
         .expect("owned eligibility lock")
         .retain(|key| expected.contains(key));
+    health::clear_stale_parameter_drifts(&expected);
 }
 
 fn push_all_expectations(parameters: &ActuatorsParameters, map: &mut IndexMap<String, ParamType>) {
