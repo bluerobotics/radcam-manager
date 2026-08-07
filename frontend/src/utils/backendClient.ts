@@ -306,15 +306,7 @@ class BackendClient {
 
       ws.onclose = () => {
         clearTimeout(handshakeTimeout)
-        if (this.ws !== ws) return
-        this.ws = null
-        this.connectPromise = null
-        this.stopStaleCheck()
-        this.setConnectionState('disconnected')
-        // Force list-driven re-subscribe after reconnect — prior state may be gone.
-        this.hasCameraState = false
-        this.subscribeBlocked = false
-        this.rejectAllPending(new Error('WebSocket closed'))
+        if (!this.dropSocket(ws)) return
 
         if (!settled) {
           settled = true
@@ -334,12 +326,39 @@ class BackendClient {
     return this.connectPromise
   }
 
+  /**
+   * Drop local socket state. Returns false if `ws` is no longer current.
+   * Used by onclose and by the stale timer: a SIGSTOP'd peer never finishes the
+   * WebSocket close handshake, so waiting for onclose alone leaves the UI "connected".
+   */
+  private dropSocket(ws: WebSocket): boolean {
+    if (this.ws !== ws) return false
+    this.ws = null
+    this.connectPromise = null
+    this.stopStaleCheck()
+    this.setConnectionState('disconnected')
+    // Force list-driven re-subscribe after reconnect — prior state may be gone.
+    this.hasCameraState = false
+    this.subscribeBlocked = false
+    this.rejectAllPending(new Error('WebSocket closed'))
+    return true
+  }
+
   private startStaleCheck(): void {
     this.stopStaleCheck()
     this.staleCheckTimer = setInterval(() => {
-      if (this.ws?.readyState !== WebSocket.OPEN) return
+      const ws = this.ws
+      if (ws?.readyState !== WebSocket.OPEN) return
       if (!isWsConnectionStale(this.lastMessageAt, Date.now())) return
-      this.ws.close()
+      if (!this.dropSocket(ws)) return
+      if (!this.intentionalClose) {
+        this.scheduleReconnect()
+      }
+      try {
+        ws.close()
+      } catch {
+        // Peer may already be unreachable.
+      }
     }, STALE_CONNECTION_MS / 3)
   }
 
