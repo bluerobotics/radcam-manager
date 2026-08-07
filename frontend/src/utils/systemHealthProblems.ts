@@ -14,17 +14,6 @@ export type HealthProblemKind =
   | 'lua_script'
   | 'parameter_drift'
 
-/**
- * Kinds the backend keeps retrying on its own. The rest wait on the user, so
- * telling them a retry is in progress would be a lie.
- */
-export const SELF_RECOVERING_KINDS: readonly HealthProblemKind[] = [
-  'mcm',
-  'autopilot',
-  'camera',
-  'camera_stream',
-]
-
 export type HealthProblem = {
   kind: HealthProblemKind
   severity: 'error' | 'warning' | 'info'
@@ -38,6 +27,22 @@ export type HealthProblem = {
   showForget?: boolean
   showGoToSetup?: boolean
   showUpdateLuaScript?: boolean
+}
+
+type KindSpec = {
+  /**
+   * The backend keeps retrying this kind on its own. The rest wait on the user,
+   * so telling them a retry is in progress would be a lie.
+   */
+  selfRecovering: boolean
+  recoveryTitle: string
+  /** Recovery sentence fragment, joined by `recoveryMessage` without a period. */
+  recovered: string
+  /** Problem copy for kinds with a single shape; state-dispatched kinds omit it. */
+  problem?: Omit<HealthProblem, 'kind' | 'body' | 'detail' | 'since'> & {
+    /** Function form when the copy names the selected camera. */
+    body: string | ((camera: string) => string)
+  }
 }
 
 export type HealthProblemsInput = {
@@ -54,6 +59,87 @@ export type HealthProblemsInput = {
   problemFirstSeen?: Partial<Record<HealthProblemKind, number>>
   nowMs?: number
 }
+
+/** Everything keyed purely by problem kind. Declaration order is recovery-message order. */
+const KIND_TABLE = {
+  mcm: {
+    selfRecovering: true,
+    recoveryTitle: 'Video service restored',
+    recovered: 'BlueOS video service is back',
+    problem: {
+      severity: 'error',
+      title: 'BlueOS video service unavailable',
+      body: 'RadCam Manager cannot reach the BlueOS video service, so cameras cannot be discovered or controlled.',
+    },
+  },
+  autopilot: {
+    selfRecovering: true,
+    recoveryTitle: 'Autopilot connection restored',
+    recovered: 'Autopilot connection is working again',
+  },
+  camera: {
+    selfRecovering: true,
+    recoveryTitle: 'Camera connection restored',
+    recovered: 'Camera connection is working again',
+  },
+  camera_stream: {
+    selfRecovering: true,
+    recoveryTitle: 'Camera video stream restored',
+    recovered: 'Camera video stream is running again',
+    problem: {
+      severity: 'warning',
+      title: 'Camera video stream not running',
+      body: (camera: string) =>
+        `${camera} is responding, but its video stream is not running. RadCam Manager is restarting it automatically.`,
+      progress: 'Restarting the video stream…',
+    },
+  },
+  camera_onvif_auth: {
+    selfRecovering: false,
+    recoveryTitle: 'Camera ONVIF login restored',
+    recovered: 'ONVIF login succeeded and video is available again',
+    problem: {
+      severity: 'error',
+      title: 'Camera ONVIF password does not match',
+      body: (camera: string) =>
+        `${camera} is responding to RadCam Manager, but the BlueOS video service cannot log in over ONVIF with the expected factory credentials (admin / blue), so there is no video. Restore the camera's ONVIF password to admin / blue.`,
+      progress: 'Waiting for ONVIF login to succeed…',
+    },
+  },
+  lua_scripting_disabled: {
+    selfRecovering: false,
+    recoveryTitle: 'Lua scripting enabled',
+    recovered: 'Focus and zoom correlation is ready',
+    problem: {
+      severity: 'warning',
+      title: 'Focus and zoom won\'t follow the autopilot',
+      body: 'Lua scripting is disabled on the autopilot (SCR_ENABLE). Open hardware setup to re-apply it, then reboot the autopilot.',
+      showGoToSetup: true,
+    },
+  },
+  lua_script: {
+    selfRecovering: false,
+    recoveryTitle: 'Autopilot script updated',
+    recovered: 'Autopilot script is up to date',
+  },
+  parameter_drift: {
+    selfRecovering: false,
+    recoveryTitle: 'Autopilot parameters restored',
+    recovered: 'Autopilot parameters match the saved configuration again',
+    problem: {
+      severity: 'warning',
+      title: 'Autopilot parameters no longer match saved setup',
+      body: 'Another ground station, a parameter reset, or a loaded parameter file changed values on the autopilot. Autopilot-driven camera controls will not work until you re-apply the configuration.',
+      showGoToSetup: true,
+    },
+  },
+} satisfies Record<HealthProblemKind, KindSpec>
+
+const ALL_KINDS = Object.keys(KIND_TABLE) as HealthProblemKind[]
+
+export const SELF_RECOVERING_KINDS: readonly HealthProblemKind[] = ALL_KINDS.filter(
+  (kind) => KIND_TABLE[kind].selfRecovering,
+)
 
 const AUTOPILOT_PROBLEM_STATES: ReadonlySet<AutopilotHealth> = new Set([
   'endpoint_setup_failed',
@@ -82,9 +168,7 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
   if (mcmDown) {
     problems.push({
       kind: 'mcm',
-      severity: 'error',
-      title: 'BlueOS video service unavailable',
-      body: 'RadCam Manager cannot reach the BlueOS video service, so cameras cannot be discovered or controlled.',
+      ...KIND_TABLE.mcm.problem,
       detail: health.mcm_detail ?? null,
       progress: mcmProgressLine(input.problemFirstSeen?.mcm, input.nowMs),
     })
@@ -100,10 +184,7 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
     if (health.autopilot === 'online' && health.lua_scripting_disabled) {
       problems.push({
         kind: 'lua_scripting_disabled',
-        severity: 'warning',
-        title: 'Focus and zoom won\'t follow the autopilot',
-        body: 'Lua scripting is disabled on the autopilot (SCR_ENABLE). Open hardware setup to re-apply it, then reboot the autopilot.',
-        showGoToSetup: true,
+        ...KIND_TABLE.lua_scripting_disabled.problem,
       })
     }
 
@@ -128,24 +209,22 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
       if (camera) problems.push(camera)
 
       if (input.cameraStreamError && input.cameraConnectivity === 'online') {
+        const copy = KIND_TABLE.camera_stream.problem
         problems.push({
           kind: 'camera_stream',
-          severity: 'warning',
-          title: 'Camera video stream not running',
-          body: `${input.cameraLabel} is responding, but its video stream is not running. RadCam Manager is restarting it automatically.`,
+          ...copy,
+          body: copy.body(input.cameraLabel),
           detail: input.cameraStreamError,
-          progress: 'Restarting the video stream…',
         })
       }
 
       if (input.cameraOnvifAuthError && input.cameraConnectivity === 'online') {
+        const copy = KIND_TABLE.camera_onvif_auth.problem
         problems.push({
           kind: 'camera_onvif_auth',
-          severity: 'error',
-          title: 'Camera ONVIF password does not match',
-          body: `${input.cameraLabel} is responding to RadCam Manager, but the BlueOS video service cannot log in over ONVIF with the expected factory credentials (admin / blue), so there is no video. Restore the camera's ONVIF password to admin / blue.`,
+          ...copy,
+          body: copy.body(input.cameraLabel),
           detail: input.cameraOnvifAuthError,
-          progress: 'Waiting for ONVIF login to succeed…',
         })
       }
     }
@@ -208,29 +287,10 @@ export function recoveryTitle(
   const kinds = resolvedKinds.filter((kind) => kind !== 'lua_scripting_disabled')
   if (kinds.length === 0) {
     return resolvedKinds.includes('lua_scripting_disabled')
-      ? 'Lua scripting enabled'
+      ? KIND_TABLE.lua_scripting_disabled.recoveryTitle
       : 'All clear'
   }
-  if (kinds.length === 1) {
-    switch (kinds[0]) {
-      case 'mcm':
-        return 'Video service restored'
-      case 'autopilot':
-        return 'Autopilot connection restored'
-      case 'camera':
-        return 'Camera connection restored'
-      case 'camera_stream':
-        return 'Camera video stream restored'
-      case 'camera_onvif_auth':
-        return 'Camera ONVIF login restored'
-      case 'lua_script':
-        return 'Autopilot script updated'
-      case 'parameter_drift':
-        return 'Autopilot parameters restored'
-      default:
-        break
-    }
-  }
+  if (kinds.length === 1) return KIND_TABLE[kinds[0]].recoveryTitle
   return 'Issues resolved'
 }
 
@@ -246,36 +306,11 @@ export function recoveryMessage(
       : 'This camera was removed from your saved setup.'
   }
 
-  const parts: string[] = []
-  if (resolvedKinds.includes('mcm')) {
-    if (mcmOutageMsPeak > 0) {
-      const duration = formatDurationShort(mcmOutageMsPeak)
-      parts.push(`BlueOS video service is back (after about ${duration})`)
-    } else {
-      parts.push('BlueOS video service is back')
-    }
-  }
-  if (resolvedKinds.includes('autopilot')) {
-    parts.push('Autopilot connection is working again')
-  }
-  if (resolvedKinds.includes('camera')) {
-    parts.push('Camera connection is working again')
-  }
-  if (resolvedKinds.includes('camera_stream')) {
-    parts.push('Camera video stream is running again')
-  }
-  if (resolvedKinds.includes('camera_onvif_auth')) {
-    parts.push('ONVIF login succeeded and video is available again')
-  }
-  if (resolvedKinds.includes('lua_scripting_disabled')) {
-    parts.push('Focus and zoom correlation is ready')
-  }
-  if (resolvedKinds.includes('lua_script')) {
-    parts.push('Autopilot script is up to date')
-  }
-  if (resolvedKinds.includes('parameter_drift')) {
-    parts.push('Autopilot parameters match the saved configuration again')
-  }
+  const parts = ALL_KINDS.filter((kind) => resolvedKinds.includes(kind)).map((kind) =>
+    kind === 'mcm' && mcmOutageMsPeak > 0
+      ? `${KIND_TABLE.mcm.recovered} (after about ${formatDurationShort(mcmOutageMsPeak)})`
+      : KIND_TABLE[kind].recovered,
+  )
 
   if (parts.length === 0) {
     return withCloseHint ? 'All clear. Click Close to continue.' : 'All clear.'
@@ -373,11 +408,8 @@ function parameterDriftProblem(health: SystemHealth): HealthProblem | null {
 
   return {
     kind: 'parameter_drift',
-    severity: 'warning',
-    title: 'Autopilot parameters no longer match saved setup',
-    body: 'Another ground station, a parameter reset, or a loaded parameter file changed values on the autopilot. Autopilot-driven camera controls will not work until you re-apply the configuration.',
+    ...KIND_TABLE.parameter_drift.problem,
     detail: lines.join('\n'),
-    showGoToSetup: true,
   }
 }
 
