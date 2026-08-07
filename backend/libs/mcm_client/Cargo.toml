@@ -28,3 +28,6 @@ tracing = { workspace = true }
 ts-rs = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
