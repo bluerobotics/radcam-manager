@@ -48,7 +48,6 @@ struct HealthState {
     first_failure_at: Option<Instant>,
 }
 
-/// Point-in-time MCM link health for system-health aggregation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McmHealthSnapshot {
     /// Current [`McmHealth`] state (Unknown until the first poll completes).
@@ -366,12 +365,10 @@ pub async fn cameras() -> Cameras {
     manager.read().await.cameras.clone()
 }
 
-/// Subscribe to camera-list change notifications for WebSocket push events.
 pub fn subscribe_cameras() -> broadcast::Receiver<()> {
     cameras_sender().subscribe()
 }
 
-/// Current MCM link health, detail text, and consecutive failing poll cycles.
 pub fn health() -> McmHealthSnapshot {
     let guard = health_state().lock().expect("health lock");
     McmHealthSnapshot {
@@ -381,7 +378,6 @@ pub fn health() -> McmHealthSnapshot {
     }
 }
 
-/// Subscribe to MCM health change notifications.
 pub fn subscribe_health() -> broadcast::Receiver<()> {
     health_sender().subscribe()
 }
@@ -545,7 +541,6 @@ pub async fn get_camera(uuid: &Uuid) -> Option<Camera> {
 ///
 /// ONVIF rediscovery drops cameras from the MCM list for a while after the video service
 /// restarts; the camera itself keeps answering, so control must not wait for discovery.
-#[instrument(level = "debug")]
 pub async fn camera_address(uuid: &Uuid) -> Option<Ipv4Addr> {
     if let Some(camera) = get_camera(uuid).await {
         return Some(camera.hostname);
