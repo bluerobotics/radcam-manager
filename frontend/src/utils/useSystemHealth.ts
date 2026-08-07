@@ -33,6 +33,18 @@ function releaseSubscription(): void {
   systemHealth.value = null
 }
 
+/**
+ * Autopilot-dependent controls (actuators, hardware setup) stay blocked unless
+ * health says the link is usable. Absent health — reconnect gap, or a backend
+ * that never pushes system/health — is treated as unknown, not as "skip the gate".
+ */
+export function autopilotDependentControlsBlocked(
+  autopilot: AutopilotHealth | null | undefined,
+): boolean {
+  const state = autopilot ?? 'unknown'
+  return state !== 'online' && state !== 'syncing'
+}
+
 export type UseSystemHealth = {
   systemHealth: ShallowRef<SystemHealth | null>
   autopilotState: ComputedRef<AutopilotHealth>

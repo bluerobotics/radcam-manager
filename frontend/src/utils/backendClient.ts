@@ -55,7 +55,17 @@ const RECONNECT_BASE_MS = 1_000
 /** Give up on a WebSocket stuck in CONNECTING and let backoff schedule the next try. */
 const HANDSHAKE_TIMEOUT_MS = 10_000
 const RECONNECT_MAX_MS = 30_000
-const STALE_CONNECTION_MS = 90_000
+/** Backend pushes connection/stats every 5s; four misses means the peer is frozen or gone. */
+export const STALE_CONNECTION_MS = 20_000
+
+/** True when no WebSocket data frame has arrived within the stale window. */
+export function isWsConnectionStale(
+  lastMessageAtMs: number,
+  nowMs: number,
+  staleMs: number = STALE_CONNECTION_MS,
+): boolean {
+  return nowMs - lastMessageAtMs >= staleMs
+}
 
 function makeRequestError(status: number, body: unknown): BackendRequestError {
   const error = new Error(`Request failed with status ${status}`) as BackendRequestError
@@ -328,7 +338,7 @@ class BackendClient {
     this.stopStaleCheck()
     this.staleCheckTimer = setInterval(() => {
       if (this.ws?.readyState !== WebSocket.OPEN) return
-      if (Date.now() - this.lastMessageAt < STALE_CONNECTION_MS) return
+      if (!isWsConnectionStale(this.lastMessageAt, Date.now())) return
       this.ws.close()
     }, STALE_CONNECTION_MS / 3)
   }
