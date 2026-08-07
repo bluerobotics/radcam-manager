@@ -703,7 +703,10 @@ import { useCameraState } from '@/utils/useCameraState'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
 import type { CameraStateEvent, OnePushAwbStatus } from '@/bindings/radcam_api'
 import WelcomeDialog from './WelcomeDialog.vue'
-import { useSystemHealth } from '@/utils/useSystemHealth'
+import {
+  autopilotDependentControlsBlocked,
+  useSystemHealth,
+} from '@/utils/useSystemHealth'
 
 
 const props = defineProps<{
@@ -908,12 +911,9 @@ watch(isConfigured, (value, previous) => {
   applyPanelLayout(value === true)
 })
 
-const autopilotBlocksControls = computed(() => {
-  const health = systemHealth.value
-  if (health == null) return false
-  const state = health.autopilot
-  return state !== 'online' && state !== 'syncing'
-})
+const autopilotBlocksControls = computed(() =>
+  autopilotDependentControlsBlocked(systemHealth.value?.autopilot),
+)
 
 const actuatorControlsDisabled = computed(
   () => isConfigured.value !== true || props.disabled || autopilotBlocksControls.value,
