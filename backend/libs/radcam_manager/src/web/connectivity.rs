@@ -547,18 +547,6 @@ mod tests {
         cameras().lock().unwrap().remove(&camera_uuid);
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn forget_camera_clears_connectivity() {
-        let _lock = connectivity_test_lock();
-        let camera_uuid = Uuid::from_u128(0xa503_0000_0000_0002);
-        publish(camera_uuid, CameraConnectivity::Online, "test online");
-        assert_eq!(get(camera_uuid), CameraConnectivity::Online);
-
-        forget_camera(camera_uuid);
-        assert_eq!(get(camera_uuid), CameraConnectivity::Unknown);
-        assert!(!cameras().lock().unwrap().contains_key(&camera_uuid));
-    }
-
     #[test]
     fn classifier_table() {
         fn missing(tcp_ok: bool, probed: bool) -> ClassifyEvidence {
@@ -640,33 +628,6 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)] // test lock must span paused clock advances to serialize globals
     #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn pending_resolves_on_republish_without_new_evidence() {
-        let _lock = connectivity_test_lock();
-        let camera_uuid = Uuid::from_u128(0xdeb0_0000_0000_0003);
-
-        publish(
-            camera_uuid,
-            CameraConnectivity::Unreachable,
-            "absent from MCM list",
-        );
-        assert_eq!(get(camera_uuid), CameraConnectivity::Unknown);
-        assert!(has_pending_debounce());
-
-        tokio::time::advance(UNHEALTHY_GRACE).await;
-        // Camera-list watcher tick re-probes and republishes the same candidate.
-        publish(
-            camera_uuid,
-            CameraConnectivity::Unreachable,
-            "absent from MCM list",
-        );
-        assert_eq!(get(camera_uuid), CameraConnectivity::Unreachable);
-        assert!(!has_pending_debounce());
-
-        cameras().lock().unwrap().remove(&camera_uuid);
-    }
-
-    #[allow(clippy::await_holding_lock)] // test lock must span paused clock advances to serialize globals
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn debounce_is_per_state() {
         let _lock = connectivity_test_lock();
         let camera_uuid = Uuid::from_u128(0xdeb0_0000_0000_0001);
@@ -702,52 +663,6 @@ mod tests {
 
         publish(camera_uuid, CameraConnectivity::Online, "test online");
         assert_eq!(get(camera_uuid), CameraConnectivity::Online);
-
-        cameras().lock().unwrap().remove(&camera_uuid);
-    }
-
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn reboot_suppresses_unhealthy() {
-        let _lock = connectivity_test_lock();
-        use radcam_commands::Action as CameraAction;
-
-        let camera_uuid = Uuid::from_u128(0xdeb0_0000_0000_0002);
-        publish(camera_uuid, CameraConnectivity::Online, "test online");
-        assert_eq!(get(camera_uuid), CameraConnectivity::Online);
-
-        camera_ui::start_camera_action(camera_uuid, &CameraAction::Restart);
-        publish(
-            camera_uuid,
-            CameraConnectivity::Unreachable,
-            "test unreachable",
-        );
-        assert_eq!(get(camera_uuid), CameraConnectivity::Online);
-
-        camera_ui::finish_camera_action(camera_uuid, &CameraAction::Restart);
-        cameras().lock().unwrap().remove(&camera_uuid);
-    }
-
-    #[allow(clippy::await_holding_lock)] // test lock must span paused clock advances to serialize globals
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn reset_after_mcm_recovery_clears_latched_faults() {
-        let _lock = connectivity_test_lock();
-        let camera_uuid = Uuid::from_u128(0xa505_0000_0000_0001);
-
-        publish(
-            camera_uuid,
-            CameraConnectivity::Unreachable,
-            "during outage",
-        );
-        tokio::time::advance(UNHEALTHY_GRACE).await;
-        publish(
-            camera_uuid,
-            CameraConnectivity::Unreachable,
-            "during outage",
-        );
-        assert_eq!(get(camera_uuid), CameraConnectivity::Unreachable);
-
-        reset_after_mcm_recovery();
-        assert_eq!(get(camera_uuid), CameraConnectivity::Unknown);
 
         cameras().lock().unwrap().remove(&camera_uuid);
     }

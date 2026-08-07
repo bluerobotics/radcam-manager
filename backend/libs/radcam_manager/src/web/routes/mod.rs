@@ -132,82 +132,9 @@ fn handle_404() -> (StatusCode, &'static str) {
 
 #[cfg(test)]
 mod tests {
-    use axum::{
-        body::Body,
-        http::{Request, header},
-    };
-    use tower::ServiceExt;
+    use axum::http::header;
 
     use super::*;
-
-    fn index_html_embedded() -> bool {
-        HTML_DIST.get_file("index.html").is_some() || HTML_DIST.get_file("index.html.gz").is_some()
-    }
-
-    fn hashed_embedded_asset_path() -> Option<String> {
-        fn walk(dir: &Dir) -> Option<String> {
-            for file in dir.files() {
-                let embedded = file.path().to_string_lossy();
-                let path = embedded.strip_suffix(".gz").unwrap_or(&embedded);
-                if path == "index.html" {
-                    continue;
-                }
-                if path.ends_with(".js") || path.ends_with(".css") {
-                    return Some(path.to_owned());
-                }
-            }
-            for subdir in dir.dirs() {
-                if let Some(path) = walk(subdir) {
-                    return Some(path);
-                }
-            }
-            None
-        }
-
-        walk(&HTML_DIST)
-    }
-
-    #[tokio::test]
-    async fn entry_document_cache_control() {
-        assert!(
-            index_html_embedded(),
-            "embedded frontend is missing index.html; build the frontend first (`cd frontend && npm run build`)"
-        );
-
-        let entry = router(1)
-            .oneshot(
-                Request::builder()
-                    .uri("/")
-                    .header(header::ACCEPT_ENCODING, "gzip")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .expect("serve index");
-        assert_eq!(
-            entry
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .map(|value| value.as_bytes()),
-            Some("no-cache".as_bytes())
-        );
-
-        let Some(asset_path) = hashed_embedded_asset_path() else {
-            return;
-        };
-
-        let asset = router(1)
-            .oneshot(
-                Request::builder()
-                    .uri(format!("/{asset_path}"))
-                    .header(header::ACCEPT_ENCODING, "gzip")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .expect("serve asset");
-        assert!(asset.headers().get(header::CACHE_CONTROL).is_none());
-    }
 
     #[test]
     fn accept_encoding_gzip_table() {

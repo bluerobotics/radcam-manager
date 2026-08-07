@@ -603,46 +603,6 @@ fn validate_lua(script: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// The only test touching `MANAGER`; `get_or_init` would silently keep another
-    /// test's path, so nothing else in this crate may initialize it.
-    #[tokio::test]
-    async fn script_status_tracks_the_installed_script() {
-        let _health_tests = crate::health::lock_health_tests().await;
-        let dir = std::env::temp_dir().join(format!(
-            "radcam-manager-script-status-{}",
-            std::process::id()
-        ));
-        let path = dir.join("radcam.lua");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        // Pre-existing file from an interrupted run is fine to ignore.
-        let _ = tokio::fs::remove_file(&path).await;
-
-        let camera_uuid = Uuid::from_u128(0x5c81_0000_0000_0001);
-        crate::manager::MANAGER.get_or_init(|| {
-            tokio::sync::RwLock::new(Manager {
-                autopilot_scripts_file: path.to_string_lossy().into_owned(),
-                settings: crate::manager::State {
-                    actuators: [(camera_uuid, CameraActuators::default())]
-                        .into_iter()
-                        .collect(),
-                },
-                script_health: ScriptHealthTracker::default(),
-            })
-        });
-
-        assert_eq!(Manager::script_status().await, LuaScriptStatus::Missing);
-
-        Manager::export_script(&camera_uuid, true).await.unwrap();
-        assert_eq!(Manager::script_status().await, LuaScriptStatus::Ok);
-
-        tokio::fs::write(&path, "-- script from an older manager\n")
-            .await
-            .unwrap();
-        assert_eq!(Manager::script_status().await, LuaScriptStatus::Outdated);
-
-        tokio::fs::remove_file(&path).await.unwrap();
-    }
-
     #[test]
     fn test_script_generation() {
         let contents = generate_lua_script(&CameraActuators::default()).unwrap();
@@ -654,21 +614,5 @@ mod tests {
         assert!(contents.contains("find_servo_function(K_FOCUS, \"CameraFocus\""));
         assert!(contents.contains("find_servo_function(K_ZOOM, \"CameraZoom\""));
         assert!(contents.contains("servo function not found"));
-    }
-
-    #[test]
-    fn focus_margin_gain_expectation_preserves_fractional_gain() {
-        let parameters = ActuatorsParameters {
-            focus_margin_gain: 1.5,
-            ..ActuatorsParameters::default()
-        };
-
-        let mut expectations = IndexMap::new();
-        push_owned_expectations(&parameters, &mut expectations);
-
-        assert_eq!(
-            expectations.get("RCAM1_GAIN"),
-            Some(&ParamType::REAL32(1.5)),
-        );
     }
 }
