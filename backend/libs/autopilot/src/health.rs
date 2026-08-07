@@ -27,6 +27,14 @@ const SERVO_SILENCE: Duration = Duration::from_secs(10);
 /// One exhausted command RPC (already multi-second) is enough evidence.
 const RPC_FAILURES_TO_UNRESPONSIVE: u8 = 1;
 const DEGRADED_GRACE: Duration = Duration::from_secs(1);
+/// ArduPilot re-emits a broken Lua script's STATUSTEXT about once per second; keep
+/// this above that interval so a persistent fault stays visible, but below the time
+/// an operator would treat a one-shot boot glitch as still failing.
+#[cfg(not(test))]
+const LUA_SCRIPT_FAILURE_TTL: Duration = Duration::from_secs(15);
+#[cfg(test)]
+const LUA_SCRIPT_FAILURE_TTL: Duration = Duration::from_millis(50);
+const RAD_CAM_LUA_SCRIPT: &str = "radcam.lua";
 
 static HEALTH: OnceCell<Mutex<Health>> = OnceCell::new();
 static HEALTH_TX: OnceCell<broadcast::Sender<()>> = OnceCell::new();
@@ -49,7 +57,7 @@ struct Health {
     lua_scripting_disabled: bool,
     lua_scripting_disabled_logged: bool,
     lua_script: LuaScriptStatus,
-    lua_script_failure: Option<String>,
+    lua_script_failure: Option<(Instant, String)>,
     param_drifts: IndexMap<String, ParameterDrift>,
     script_reloads: u32,
     frames_lagged: u64,
@@ -69,7 +77,7 @@ pub(crate) struct ClassifyHealthInput<'a> {
     pub servo_stalled: bool,
     pub last_rpc_error: Option<&'a str>,
     pub syncing: bool,
-    pub servo_detail: &'a str,
+    pub servo_detail: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -137,12 +145,23 @@ pub fn lua_scripting_disabled() -> bool {
 /// autopilot said if it is erroring.
 pub fn lua_script_status() -> (LuaScriptStatus, Option<String>) {
     ensure_started();
-    let guard = health_state().lock().expect("health lock");
+    let mut guard = health_state().lock().expect("health lock");
+
+    let failure = guard.lua_script_failure.as_ref().and_then(|(at, detail)| {
+        if at.elapsed() < LUA_SCRIPT_FAILURE_TTL {
+            Some(detail.clone())
+        } else {
+            None
+        }
+    });
+    if guard.lua_script_failure.is_some() && failure.is_none() {
+        guard.lua_script_failure = None;
+    }
 
     // A reported failure only adds information while the expected script is the one
     // installed: Missing and Outdated already tell the user what to do about it.
-    match (guard.lua_script, &guard.lua_script_failure) {
-        (LuaScriptStatus::Ok, Some(failure)) => (LuaScriptStatus::Failing, Some(failure.clone())),
+    match (guard.lua_script, failure) {
+        (LuaScriptStatus::Ok, Some(failure)) => (LuaScriptStatus::Failing, Some(failure)),
         (status, _) => (status, None),
     }
 }
@@ -331,6 +350,8 @@ pub fn report_endpoint_setup(ok: bool, detail: Option<String>) {
     let mut guard = health_state().lock().expect("health lock");
     guard.endpoint_ok = Some(ok);
     guard.endpoint_detail = detail;
+    drop(guard);
+    run_classifier();
 }
 
 /// Record a successful MAVLink command RPC.
@@ -496,12 +517,16 @@ fn note_statustext(status: &STATUSTEXT_DATA) {
     }
 
     let mut guard = health_state().lock().expect("health lock");
-    if guard.lua_script_failure.as_deref() == Some(text) {
+    if guard
+        .lua_script_failure
+        .as_ref()
+        .is_some_and(|(_, failure)| failure == text)
+    {
         return;
     }
 
     warn!("Autopilot reported a scripting failure: {text}");
-    guard.lua_script_failure = Some(text.to_owned());
+    guard.lua_script_failure = Some((Instant::now(), text.to_owned()));
     drop(guard);
 
     notify_health();
@@ -509,28 +534,38 @@ fn note_statustext(status: &STATUSTEXT_DATA) {
 
 /// Whether a `STATUSTEXT` is the autopilot reporting that scripting is broken.
 ///
-/// Severity is no guide for ArduPilot's `Scripting:` messages: it announces both
-/// `restarted` and `stopped` at CRITICAL on every ordinary restart — including the ones
-/// we ask for — and `saved checksums` at ERROR. A severity gate alone therefore parks
-/// health in a permanent false alarm, so those messages are matched by exact text and
-/// only where they cannot be part of a healthy restart.
+/// `Scripting:` lifecycle noise (`restarted`, `stopped`) arrives at CRITICAL on every
+/// ordinary restart, including the ones we ask for, so those are allow-listed and
+/// everything else at ERROR or above under the prefix is treated as a failure.
 ///
-/// The `Lua:` prefix needs no such care: everything above DEBUG under it is a genuine
-/// script error, which is the case the user actually hits after a firmware upgrade.
+/// `Lua:` errors name the script file; only messages mentioning our deployed script
+/// count — ArduPilot prefixes every script's errors the same way.
 fn is_scripting_failure(severity: MavSeverity, text: &str) -> bool {
-    const SCRIPTING_FAILURES: [&str; 2] = [
-        "Scripting: Unable to allocate memory",
-        "Scripting: failed to start",
-    ];
+    const BENIGN_SCRIPTING_LIFECYCLE: [&str; 2] = ["Scripting: restarted", "Scripting: stopped"];
 
+    if text.starts_with("Lua: ") {
+        return scripting_warning_or_above(severity) && text.contains(RAD_CAM_LUA_SCRIPT);
+    }
+
+    if text.starts_with("Scripting: ") {
+        return scripting_error_or_above(severity) && !BENIGN_SCRIPTING_LIFECYCLE.contains(&text);
+    }
+
+    false
+}
+
+fn scripting_error_or_above(severity: MavSeverity) -> bool {
     matches!(
         severity,
         MavSeverity::MAV_SEVERITY_EMERGENCY
             | MavSeverity::MAV_SEVERITY_ALERT
             | MavSeverity::MAV_SEVERITY_CRITICAL
             | MavSeverity::MAV_SEVERITY_ERROR
-            | MavSeverity::MAV_SEVERITY_WARNING
-    ) && (text.starts_with("Lua: ") || SCRIPTING_FAILURES.contains(&text))
+    )
+}
+
+fn scripting_warning_or_above(severity: MavSeverity) -> bool {
+    scripting_error_or_above(severity) || severity == MavSeverity::MAV_SEVERITY_WARNING
 }
 
 fn classifier_notify() -> &'static Notify {
@@ -575,10 +610,6 @@ async fn run_classifier_async() {
 
     let mut guard = health_state().lock().expect("health lock");
 
-    if guard.rebooting {
-        return;
-    }
-
     let stream = actuators_watch::stream_health();
     let now = Instant::now();
     guard.servo_stalled = servo_stalled(&stream, now);
@@ -619,6 +650,7 @@ fn apply_classifier(guard: &mut Health, stream: &ServoStreamHealth) {
     }
 
     let mavlink_up = mavlink::component().is_ok();
+    let servo_detail = guard.servo_stalled.then(|| stream_detail(stream));
     let candidate = classify_health(ClassifyHealthInput {
         endpoint_ok: guard.endpoint_ok,
         endpoint_detail: guard.endpoint_detail.as_deref(),
@@ -630,7 +662,7 @@ fn apply_classifier(guard: &mut Health, stream: &ServoStreamHealth) {
         servo_stalled: guard.servo_stalled,
         last_rpc_error: guard.last_rpc_error.as_deref(),
         syncing: guard.syncing,
-        servo_detail: &stream_detail(stream),
+        servo_detail: servo_detail.as_deref(),
     });
 
     if candidate.0 == guard.state {
@@ -713,7 +745,7 @@ pub(crate) fn classify_health(input: ClassifyHealthInput<'_>) -> (AutopilotHealt
     if !input.mavlink_up || frame_stale(input.frame_age) {
         let detail = input.frame_age.map_or_else(
             || "MAVLink component unavailable".to_string(),
-            |age| format!("no MAVLink frame for {:.1}s", age.as_secs_f32()),
+            |age| format!("no MAVLink traffic for {:.1}s", age.as_secs_f32()),
         );
         return (AutopilotHealth::MavlinkDown, Some(detail));
     }
@@ -737,7 +769,7 @@ pub(crate) fn classify_health(input: ClassifyHealthInput<'_>) -> (AutopilotHealt
 
     if input.rpc_failures >= RPC_FAILURES_TO_UNRESPONSIVE || input.servo_stalled {
         let detail = if input.servo_stalled {
-            Some(input.servo_detail.to_string())
+            input.servo_detail.map(str::to_string)
         } else {
             input.last_rpc_error.map(str::to_string)
         };
@@ -824,7 +856,7 @@ mod tests {
         classify_health(input).0
     }
 
-    fn base_classify_input(servo_detail: &'static str) -> ClassifyHealthInput<'static> {
+    fn base_classify_input() -> ClassifyHealthInput<'static> {
         ClassifyHealthInput {
             endpoint_ok: Some(true),
             endpoint_detail: None,
@@ -836,7 +868,7 @@ mod tests {
             servo_stalled: false,
             last_rpc_error: None,
             syncing: false,
-            servo_detail,
+            servo_detail: None,
         }
     }
 
@@ -844,8 +876,7 @@ mod tests {
     fn classifier_is_outermost_first() {
         let fresh = Some(Duration::from_secs(1));
         let stale = Some(Duration::from_secs(10));
-        let servo_detail = "SERVO_OUTPUT_RAW stale";
-        let base = || base_classify_input(servo_detail);
+        let base = base_classify_input;
 
         assert_eq!(
             classify(ClassifyHealthInput {
@@ -907,6 +938,7 @@ mod tests {
         assert_eq!(
             classify(ClassifyHealthInput {
                 servo_stalled: true,
+                servo_detail: Some("SERVO_OUTPUT_RAW stale"),
                 ..base()
             }),
             AutopilotHealth::Unresponsive
@@ -936,21 +968,25 @@ mod tests {
                 servo_stalled: false,
                 last_rpc_error: None,
                 syncing: true,
-                servo_detail: "SERVO_OUTPUT_RAW stale",
+                servo_detail: None,
             }),
             AutopilotHealth::Syncing
         );
     }
 
     #[test]
-    fn only_scripting_statustext_is_a_script_failure() {
+    fn scripting_statustext_classifies_failures_and_ignores_lifecycle_noise() {
         assert!(is_scripting_failure(
             MavSeverity::MAV_SEVERITY_CRITICAL,
             "Lua: /scripts/radcam.lua:42: attempt to call a nil value"
         ));
         assert!(is_scripting_failure(
-            MavSeverity::MAV_SEVERITY_CRITICAL,
-            "Scripting: Unable to allocate memory"
+            MavSeverity::MAV_SEVERITY_ERROR,
+            "Scripting: restart not supported on this board"
+        ));
+        assert!(!is_scripting_failure(
+            MavSeverity::MAV_SEVERITY_ERROR,
+            "Lua: /scripts/other.lua:1: attempt to call a nil value"
         ));
         assert!(!is_scripting_failure(
             MavSeverity::MAV_SEVERITY_ERROR,
@@ -960,9 +996,6 @@ mod tests {
             MavSeverity::MAV_SEVERITY_DEBUG,
             "Lua: Running radcam.lua"
         ));
-
-        // An ordinary restart, ours included, reports both of these at CRITICAL. The
-        // vehicle raised a false alarm on the first one.
         assert!(!is_scripting_failure(
             MavSeverity::MAV_SEVERITY_CRITICAL,
             "Scripting: restarted"
@@ -971,6 +1004,31 @@ mod tests {
             MavSeverity::MAV_SEVERITY_CRITICAL,
             "Scripting: stopped"
         ));
+    }
+
+    #[tokio::test]
+    async fn lua_script_failure_expires_without_refresh() {
+        let _health_tests = lock_health_tests().await;
+        health_reset();
+        {
+            let mut guard = health_state().lock().expect("health lock");
+            guard.lua_script = LuaScriptStatus::Ok;
+            guard.lua_script_failure = Some((
+                Instant::now(),
+                "Lua: /scripts/radcam.lua:1: transient boot glitch".to_string(),
+            ));
+        }
+
+        assert_eq!(
+            lua_script_status(),
+            (
+                LuaScriptStatus::Failing,
+                Some("Lua: /scripts/radcam.lua:1: transient boot glitch".to_string())
+            )
+        );
+
+        std::thread::sleep(LUA_SCRIPT_FAILURE_TTL + Duration::from_millis(10));
+        assert_eq!(lua_script_status(), (LuaScriptStatus::Ok, None));
     }
 
     #[test]
@@ -1020,14 +1078,14 @@ mod tests {
             servo_stalled: servo_stalled(&stream, now),
             last_rpc_error: None,
             syncing: false,
-            servo_detail: "SERVO stale",
+            servo_detail: None,
         });
         assert_eq!(candidate.0, AutopilotHealth::Online);
     }
 
     #[test]
     fn rpc_ok_does_not_clear_servo_stall() {
-        let servo_detail = "SERVO_OUTPUT_RAW stale";
+        let servo_detail = Some("SERVO_OUTPUT_RAW stale");
         let fresh = Some(Duration::from_secs(1));
 
         assert_eq!(
