@@ -14,6 +14,17 @@ export type HealthProblemKind =
   | 'lua_script'
   | 'parameter_drift'
 
+/**
+ * Kinds the backend keeps retrying on its own. The rest wait on the user, so
+ * telling them a retry is in progress would be a lie.
+ */
+export const SELF_RECOVERING_KINDS: readonly HealthProblemKind[] = [
+  'mcm',
+  'autopilot',
+  'camera',
+  'camera_stream',
+]
+
 export type HealthProblem = {
   kind: HealthProblemKind
   severity: 'error' | 'warning' | 'info'
