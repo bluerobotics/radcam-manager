@@ -13,7 +13,7 @@ use std::{
 use once_cell::sync::OnceCell;
 use radcam_api::{CameraConnectivity, ExpectedCamera, McmHealth, SystemHealth};
 use tokio::net::TcpStream;
-use tokio::sync::broadcast;
+use tokio::sync::{Notify, broadcast};
 // tokio::time::Instant: debounce timestamps in async tasks (pause-aware under #[tokio::test]).
 use tokio::time::Instant;
 use tracing::*;
@@ -27,6 +27,8 @@ const TCP_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 static CAMERAS: OnceCell<Mutex<HashMap<Uuid, Entry>>> = OnceCell::new();
 static HEALTH_TX: OnceCell<broadcast::Sender<()>> = OnceCell::new();
+static HEALTH_DIRTY: Notify = Notify::const_new();
+static LAST_PUBLISHED_COMPARABLE: Mutex<Option<SystemHealth>> = Mutex::new(None);
 static FAN_IN_STARTED: AtomicBool = AtomicBool::new(false);
 
 struct Entry {
@@ -50,7 +52,6 @@ struct StitchHealthParams<'a> {
     state_events_lagged: u64,
 }
 
-/// Probe inputs for [`classify_table`].
 pub(crate) struct ClassifyEvidence {
     pub in_mcm_list: bool,
     pub expected: bool,
@@ -68,8 +69,6 @@ impl Entry {
     }
 }
 
-/// Pure classifier over probe inputs.
-///
 /// When a configured camera leaves MCM discovery but we can still probe its last
 /// IP, a failed TCP path is [`Unreachable`] (cable/power) — not [`Missing`].
 /// [`Missing`] is reserved for "configured, absent, and no probe possible yet".
@@ -100,7 +99,6 @@ pub(crate) fn classify_table(evidence: ClassifyEvidence) -> CameraConnectivity {
 }
 
 /// Remember the last hostname MCM reported for `camera_uuid`.
-#[instrument(level = "debug", skip_all, fields(%camera_uuid))]
 pub(crate) fn observe_camera(camera_uuid: Uuid, hostname: Ipv4Addr) {
     mcm_client::remember_hostname(camera_uuid, hostname);
     let mut guard = cameras().lock().expect("connectivity lock");
@@ -110,7 +108,6 @@ pub(crate) fn observe_camera(camera_uuid: Uuid, hostname: Ipv4Addr) {
 }
 
 /// Apply per-state debounce and push wire updates through [`camera_ui`].
-#[instrument(level = "debug", skip_all, fields(%camera_uuid, ?next, %reason))]
 pub(crate) fn publish(camera_uuid: Uuid, next: CameraConnectivity, reason: &str) {
     // While MCM is down, list membership and HTTP probes are inconclusive — do not
     // latch Unreachable/Unresponsive that would flash as "camera not responding"
@@ -218,7 +215,6 @@ pub(crate) fn reset_after_mcm_recovery() {
     }
 }
 
-/// Cached connectivity for `camera_uuid`, or [`CameraConnectivity::Unknown`] when unseen.
 #[cfg(test)]
 fn get(camera_uuid: Uuid) -> CameraConnectivity {
     cameras()
@@ -254,7 +250,6 @@ pub(crate) async fn subscribe_allowed(camera_uuid: Uuid, connection_id: Connecti
         || last_hostname(camera_uuid).await.is_some()
 }
 
-/// Hostname last observed for `camera_uuid`, when known.
 pub(crate) async fn last_hostname(camera_uuid: Uuid) -> Option<Ipv4Addr> {
     mcm_client::camera_address(&camera_uuid).await
 }
@@ -345,6 +340,36 @@ pub(crate) async fn system_health() -> SystemHealth {
     )
 }
 
+/// Health with the fields that move on every sample blanked, so equality means
+/// "nothing a client would render has changed".
+pub(crate) fn health_comparable(mut health: SystemHealth) -> SystemHealth {
+    health.diagnostics.last_frame_age_ms = None;
+    health.diagnostics.last_heartbeat_age_ms = None;
+    health.diagnostics.last_servo_age_ms = None;
+    health.diagnostics.mcm_consecutive_failures = 0;
+    health
+}
+
+/// Broadcast a health notification only when the non-volatile fields moved since
+/// the last publish. Every subscriber then pulls the full current snapshot, so
+/// this dedupe is global and cannot starve a second connection.
+#[instrument(level = "debug", skip_all)]
+pub(crate) async fn publish_health_if_changed() {
+    let comparable = health_comparable(system_health().await);
+    {
+        let mut last = LAST_PUBLISHED_COMPARABLE
+            .lock()
+            .expect("health compare lock");
+        if last.as_ref() == Some(&comparable) {
+            return;
+        }
+        *last = Some(comparable);
+    }
+    if let Err(error) = health_sender().send(()) {
+        debug!("No system health subscribers: {error}");
+    }
+}
+
 /// Subscribe to backend health change notifications (MCM, autopilot, camera list, connectivity).
 pub(crate) fn subscribe() -> broadcast::Receiver<()> {
     ensure_fan_in();
@@ -359,7 +384,6 @@ pub(crate) fn retain(keep: &HashSet<Uuid>) {
         .retain(|camera_uuid, _| keep.contains(camera_uuid));
 }
 
-/// TCP reachability probe with [`TCP_PROBE_TIMEOUT`].
 #[instrument(level = "debug", skip_all, fields(%hostname, %port))]
 pub(crate) async fn tcp_probe(hostname: Ipv4Addr, port: u16) -> bool {
     let address = SocketAddr::from((hostname, port));
@@ -379,10 +403,9 @@ fn health_sender() -> &'static broadcast::Sender<()> {
     })
 }
 
+/// Ask the fan-in task to re-evaluate health; it publishes only on a real change.
 fn notify_health() {
-    if let Err(error) = health_sender().send(()) {
-        debug!("No system health subscribers: {error}");
-    }
+    HEALTH_DIRTY.notify_one();
 }
 
 /// True when any camera has a debounced connectivity transition awaiting a second sample.
@@ -425,6 +448,7 @@ fn ensure_fan_in() {
 
         loop {
             tokio::select! {
+                _ = HEALTH_DIRTY.notified() => {}
                 _ = mcm_rx.recv() => {
                     if mcm_client::health().state == McmHealth::Online {
                         reset_after_mcm_recovery();
@@ -435,7 +459,7 @@ fn ensure_fan_in() {
                     sync_mcm_camera_errors().await;
                 }
             }
-            notify_health();
+            publish_health_if_changed().await;
         }
     });
 }
@@ -528,6 +552,37 @@ mod tests {
         );
         assert_eq!(degraded.mcm_detail.as_deref(), Some("mcm down"));
         assert_eq!(degraded.autopilot_detail.as_deref(), Some("no frames"));
+    }
+
+    #[test]
+    fn health_comparable_ignores_volatile_diagnostics() {
+        fn sample_health(mcm: McmHealth, failures: u32) -> SystemHealth {
+            SystemHealth {
+                mcm,
+                diagnostics: Diagnostics {
+                    mcm_consecutive_failures: failures,
+                    last_frame_age_ms: Some(100),
+                    last_heartbeat_age_ms: Some(200),
+                    last_servo_age_ms: Some(300),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        }
+
+        let a = sample_health(McmHealth::Down, 5);
+        let b = sample_health(McmHealth::Down, 99);
+        let mut c = sample_health(McmHealth::Down, 5);
+        c.diagnostics.last_frame_age_ms = Some(999);
+        c.diagnostics.last_heartbeat_age_ms = Some(888);
+        c.diagnostics.last_servo_age_ms = Some(777);
+
+        assert_eq!(health_comparable(a.clone()), health_comparable(b));
+        assert_eq!(health_comparable(a), health_comparable(c));
+        assert_ne!(
+            health_comparable(sample_health(McmHealth::Online, 0)),
+            health_comparable(sample_health(McmHealth::Down, 0))
+        );
     }
 
     #[test]
