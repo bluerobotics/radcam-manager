@@ -13,9 +13,9 @@ bench = false
 
 [dependencies]
 autopilot = { path="../libs/autopilot" }
-radcam_commands = { path="../libs/radcam_commands" }
+br4kcam_commands = { path="../libs/br4kcam_commands" }
 mcm_client = { path = "../libs/mcm_client" }
-radcam_api = { path = "../libs/radcam_api" }
+br4kcam_api = { path = "../libs/br4kcam_api" }
 
 anyhow = { workspace = true }
 ts-rs = { workspace = true }

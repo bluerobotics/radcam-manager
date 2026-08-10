@@ -3,9 +3,9 @@ members = [
     "backend/libs/autopilot",
     "backend/libs/blueos_client",
     "backend/libs/mcm_client",
-    "backend/libs/radcam_api",
-    "backend/libs/radcam_commands",
-    "backend/libs/radcam_manager",
+    "backend/libs/br4kcam_api",
+    "backend/libs/br4kcam_commands",
+    "backend/libs/br4kcam_manager",
     "backend/libs/settings",
     "backend/libs/utils",
     "backend/libs/web_client",
@@ -19,7 +19,7 @@ version = "0.3.0"
 edition = "2024"
 license = "MIT"
 authors = ["João Antônio Cardoso"]
-homepage = "https://github.com/bluerobotics/radcam-manager"
+homepage = "https://github.com/bluerobotics/br4kcam-manager"
 
 [workspace.dependencies]
 anyhow = "1.0.98"

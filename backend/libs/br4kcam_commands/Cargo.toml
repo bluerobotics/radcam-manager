@@ -1,5 +1,5 @@
 [package]
-name = "mcm_client"
+name = "br4kcam_commands"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,27 +7,31 @@ authors.workspace = true
 homepage.workspace = true
 
 [lib]
-name = "mcm_client"
+name = "br4kcam_commands"
 path = "src/mod.rs"
 bench = false
 
 [dependencies]
-br4kcam_api = { path = "../br4kcam_api" }
 web_client = { path = "../web_client" }
+mcm_client = { path = "../mcm_client" }
+utils = { path = "../utils" }
 
 anyhow = { workspace = true }
-indexmap = { workspace = true }
-once_cell = { workspace = true }
-semver = { workspace = true }
+axum = { version = "0.8.3", features = ["ws"] }
+base16ct = { version = "0.2.0", features = ["alloc"] }
+md-5 = "0.10.6"
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 serde_repr = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+serde_with = "3.12.0"
 tracing = { workspace = true }
-ts-rs = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 url = { workspace = true }
 uuid = { workspace = true }
+ts-rs = { workspace = true }
+tsync = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }

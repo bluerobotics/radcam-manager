@@ -12,7 +12,7 @@ path = "src/mod.rs"
 bench = false
 
 [dependencies]
-radcam_api = { path = "../radcam_api" }
+br4kcam_api = { path = "../br4kcam_api" }
 settings = { path="../settings" }
 blueos_client = { path="../blueos_client" }
 
