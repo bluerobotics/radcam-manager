@@ -54,7 +54,7 @@ const MCM_DOWN: SystemHealth = health({
   diagnostics: { ...DIAGNOSTICS, mcm_consecutive_failures: 3 },
 })
 
-const CAMERA = { cameraUuid: 'cam', cameraLabel: 'RadCam' }
+const CAMERA = { cameraUuid: 'cam', cameraLabel: 'RadCam', hardwareConfigured: true }
 const ONVIF_ERROR = 'ONVIF authentication failed: wrong password'
 
 const MCM_TITLE = 'BlueOS video service unavailable'
@@ -176,7 +176,7 @@ function problemCases(): ProblemCase[] {
         input: baseInput({ ...CAMERA, systemHealth: health({ lua_script }) }),
         check: (problems) => luaScript(problems)?.showUpdateLuaScript === true },
       { name: `lua_script=${lua_script} without camera hides the fix`,
-        input: baseInput({ systemHealth: health({ lua_script }) }),
+        input: baseInput({ hardwareConfigured: true, systemHealth: health({ lua_script }) }),
         check: (problems) =>
           !luaScript(problems)?.showUpdateLuaScript
           && luaScript(problems)?.body.includes('discovered') === true },
@@ -187,6 +187,37 @@ function problemCases(): ProblemCase[] {
     { name: 'lua_script unknown yields no problem',
       input: baseInput({ ...CAMERA, systemHealth: health({ lua_script: 'unknown' }) }),
       check: (problems) => luaScript(problems) == null },
+    { name: 'lua_scripting_disabled after hardware setup',
+      input: baseInput({
+        ...CAMERA,
+        systemHealth: health({ lua_scripting_disabled: true }),
+      }),
+      kinds: ['lua_scripting_disabled'],
+      degraded: true },
+    { name: 'lua_scripting_disabled ignored before hardware setup',
+      input: baseInput({
+        ...CAMERA,
+        hardwareConfigured: false,
+        systemHealth: health({ lua_scripting_disabled: true }),
+      }),
+      titles: [],
+      degraded: false },
+    { name: 'lua_script ignored before hardware setup',
+      input: baseInput({
+        ...CAMERA,
+        hardwareConfigured: false,
+        systemHealth: health({ lua_script: 'missing' }),
+      }),
+      titles: [],
+      degraded: false },
+    { name: 'parameter drift ignored before hardware setup',
+      input: baseInput({
+        ...CAMERA,
+        hardwareConfigured: false,
+        systemHealth: driftHealth,
+      }),
+      titles: [],
+      degraded: false },
     { name: 'onvif auth while camera online',
       input: cameraInput('online', { cameraOnvifAuthError: ONVIF_ERROR }),
       titles: [ONVIF_TITLE],
@@ -202,7 +233,7 @@ function problemCases(): ProblemCase[] {
       input: cameraInput('unreachable', { cameraStreamError: 'MCM stream state: stopped' }),
       titles: [CAMERA_UNREACHABLE_TITLE] },
     { name: 'parameter drift',
-      input: baseInput({ systemHealth: driftHealth }),
+      input: baseInput({ systemHealth: driftHealth, hardwareConfigured: true }),
       degraded: true,
       check: (problems) => {
         const problem = drift(problems)
@@ -212,6 +243,7 @@ function problemCases(): ProblemCase[] {
       } },
     { name: 'parameter drift detail caps the list',
       input: baseInput({
+        hardwareConfigured: true,
         systemHealth: health({
           parameter_drifts: Array.from({ length: 5 }, (_, index) => ({
             name: `SERVO${index + 1}_FUNCTION`,
@@ -222,7 +254,10 @@ function problemCases(): ProblemCase[] {
       }),
       check: (problems) => drift(problems)?.detail?.includes('…and 2 more') === true },
     { name: 'parameter drift hidden while autopilot is down',
-      input: baseInput({ systemHealth: health({ ...driftHealth, autopilot: 'mavlink_down' }) }),
+      input: baseInput({
+        hardwareConfigured: true,
+        systemHealth: health({ ...driftHealth, autopilot: 'mavlink_down' }),
+      }),
       check: (problems) => drift(problems) == null },
     { name: 'mcm progress uses the first-seen clock',
       input: baseInput({ problemFirstSeen: { mcm: 1_000_000 }, nowMs: 1_045_000 }),

@@ -50,6 +50,12 @@ export type HealthProblemsInput = {
   cameraUuid: string | null
   cameraLabel: string
   cameraConnectivity: CameraConnectivity
+  /**
+   * True once this camera has had hardware setup applied. Setup-oriented
+   * autopilot problems (SCR_ENABLE, lua script, parameter drift) are only
+   * meaningful after that — before setup, Welcome alone is the right UX.
+   */
+  hardwareConfigured?: boolean
   /** True when the selected camera is configured but absent from MCM discovery. */
   cameraExpectedMissing?: boolean
   /** MCM video stream failure detail when the stream stayed broken. */
@@ -178,18 +184,22 @@ export function collectHealthProblems(input: HealthProblemsInput): HealthProblem
     const autopilot = autopilotProblem(health)
     if (autopilot) problems.push(autopilot)
 
-    const drift = parameterDriftProblem(health)
-    if (drift) problems.push(drift)
+    // SCR_ENABLE / lua script / saved-param drift are fixed by hardware setup.
+    // Before any setup, Welcome covers that — don't open System status over it.
+    if (input.hardwareConfigured === true) {
+      const drift = parameterDriftProblem(health)
+      if (drift) problems.push(drift)
 
-    if (health.autopilot === 'online' && health.lua_scripting_disabled) {
-      problems.push({
-        kind: 'lua_scripting_disabled',
-        ...KIND_TABLE.lua_scripting_disabled.problem,
-      })
+      if (health.autopilot === 'online' && health.lua_scripting_disabled) {
+        problems.push({
+          kind: 'lua_scripting_disabled',
+          ...KIND_TABLE.lua_scripting_disabled.problem,
+        })
+      }
+
+      const script = luaScriptProblem(health, input.cameraUuid)
+      if (script) problems.push(script)
     }
-
-    const script = luaScriptProblem(health, input.cameraUuid)
-    if (script) problems.push(script)
   }
 
   if (input.cameraUuid) {
