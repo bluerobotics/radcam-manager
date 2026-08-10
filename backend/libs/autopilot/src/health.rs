@@ -8,9 +8,9 @@ use std::{
 };
 
 use ::mavlink::ardupilotmega::{MavComponent, MavMessage, MavSeverity, STATUSTEXT_DATA};
+use br4kcam_api::{AutopilotHealth, Diagnostics, LuaScriptStatus};
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
-use radcam_api::{AutopilotHealth, Diagnostics, LuaScriptStatus};
 use tokio::sync::{Notify, broadcast};
 use tracing::*;
 use uuid::Uuid;
@@ -34,7 +34,7 @@ const DEGRADED_GRACE: Duration = Duration::from_secs(1);
 const LUA_SCRIPT_FAILURE_TTL: Duration = Duration::from_secs(15);
 #[cfg(test)]
 const LUA_SCRIPT_FAILURE_TTL: Duration = Duration::from_millis(50);
-const RAD_CAM_LUA_SCRIPT: &str = "radcam.lua";
+const BR4KCAM_LUA_SCRIPT: &str = "br4kcam.lua";
 
 static HEALTH: OnceCell<Mutex<Health>> = OnceCell::new();
 static HEALTH_TX: OnceCell<broadcast::Sender<()>> = OnceCell::new();
@@ -525,7 +525,7 @@ fn is_scripting_failure(severity: MavSeverity, text: &str) -> bool {
     const BENIGN_SCRIPTING_LIFECYCLE: [&str; 2] = ["Scripting: restarted", "Scripting: stopped"];
 
     if text.starts_with("Lua: ") {
-        return scripting_warning_or_above(severity) && text.contains(RAD_CAM_LUA_SCRIPT);
+        return scripting_warning_or_above(severity) && text.contains(BR4KCAM_LUA_SCRIPT);
     }
 
     if text.starts_with("Scripting: ") {
@@ -840,7 +840,7 @@ mod tests {
     fn scripting_statustext_classifies_failures_and_ignores_lifecycle_noise() {
         assert!(is_scripting_failure(
             MavSeverity::MAV_SEVERITY_CRITICAL,
-            "Lua: /scripts/radcam.lua:42: attempt to call a nil value"
+            "Lua: /scripts/br4kcam.lua:42: attempt to call a nil value"
         ));
         assert!(is_scripting_failure(
             MavSeverity::MAV_SEVERITY_ERROR,
@@ -856,7 +856,7 @@ mod tests {
         ));
         assert!(!is_scripting_failure(
             MavSeverity::MAV_SEVERITY_DEBUG,
-            "Lua: Running radcam.lua"
+            "Lua: Running br4kcam.lua"
         ));
         assert!(!is_scripting_failure(
             MavSeverity::MAV_SEVERITY_CRITICAL,

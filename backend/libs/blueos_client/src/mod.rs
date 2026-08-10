@@ -66,8 +66,8 @@ pub async fn ensure_mavlink_endpoint(mavlink_endpoint: &str) -> Result<bool> {
         };
 
         Endpoint {
-            name: "Radcam Manager".to_string(),
-            owner: "radcam-manager".to_string(),
+            name: "4K Cam Manager".to_string(),
+            owner: "br4kcam-manager".to_string(),
             connection_type: kind.to_string(),
             place: "0.0.0.0".to_string(),
             argument: port,
@@ -84,8 +84,12 @@ pub async fn ensure_mavlink_endpoint(mavlink_endpoint: &str) -> Result<bool> {
             .await
             .context("Failed getting MAVLink endpoints from BlueOS")?;
 
+    // Match by owner+port (not display name) so renaming the endpoint does not create a duplicate.
     if let Some(existing_endpoint) = current_endpoints.iter().find(|current| {
-        (current.name == desired_endpoint.name) && (current.owner == desired_endpoint.owner)
+        current.owner == desired_endpoint.owner
+            && current.argument == desired_endpoint.argument
+            && current.connection_type == desired_endpoint.connection_type
+            && current.place == desired_endpoint.place
     }) {
         if desired_endpoint.eq(existing_endpoint) {
             debug!("MAVLink endpoint already present");

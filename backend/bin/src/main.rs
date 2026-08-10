@@ -1,7 +1,7 @@
 use anyhow::Result;
 use tracing::*;
 
-use radcam_manager::{
+use br4kcam_manager::{
     logger,
     web::{self, ShutdownReason},
 };

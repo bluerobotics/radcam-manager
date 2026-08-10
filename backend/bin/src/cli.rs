@@ -41,14 +41,14 @@ pub struct Args {
     mcm_address: String,
 
     /// Sets the file path for the autopilot lua script to control zoom and focus
-    #[arg(long, default_value = "./scripts/radcam.lua", value_parser = expand::<String>)]
+    #[arg(long, default_value = "./scripts/br4kcam.lua", value_parser = expand::<String>)]
     autopilot_scripts_file: Option<String>,
 
     /// Sets the settings file path
     #[arg(
         long,
         value_name = "./settings.json",
-        default_value = "~/.config/radcam-manager/settings.json",
+        default_value = "~/.config/br4kcam-manager/settings.json",
         value_parser = expand::<String>,
     )]
     settings_file: String,

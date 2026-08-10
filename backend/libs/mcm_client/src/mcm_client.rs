@@ -13,7 +13,7 @@ use crate::mcm_types::{
 
 use super::{Camera, Credentials, Stream};
 
-const KNOWN_RADCAM_HARDWARE: &[&str] = &["HW0100302", "HW20200610"];
+const KNOWN_BR4KCAM_HARDWARE: &[&str] = &["HW0100302", "HW20200610"];
 
 /// MCM ships as its own BlueOS extension on its own release cadence, so this must not
 /// be a caret range: `"0.2.4"` means `>=0.2.4, <0.3.0`, which locks every camera out
@@ -58,12 +58,12 @@ impl MCMClient {
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub async fn get_radcams(&self) -> Result<Vec<Camera>> {
+    pub async fn get_br4kcams(&self) -> Result<Vec<Camera>> {
         let devices = self.get_onvif_devices().await?;
 
-        let radcam_devices = radcams_from_onvif_devices(devices, self.skip_hardware_check);
+        let br4kcam_devices = br4kcams_from_onvif_devices(devices, self.skip_hardware_check);
 
-        Ok(radcam_devices)
+        Ok(br4kcam_devices)
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -72,7 +72,7 @@ impl MCMClient {
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub async fn get_radcam_video_sources(&self) -> Result<Vec<ApiVideoSource>> {
+    pub async fn get_br4kcam_video_sources(&self) -> Result<Vec<ApiVideoSource>> {
         let sources = self
             .get_video_sources()
             .await?
@@ -89,8 +89,8 @@ impl MCMClient {
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub async fn get_radcam_streams(&self) -> Result<Vec<Stream>> {
-        let radcam_streams = self
+    pub async fn get_br4kcam_streams(&self) -> Result<Vec<Stream>> {
+        let br4kcam_streams = self
             .get_streams()
             .await?
             .into_iter()
@@ -145,7 +145,7 @@ impl MCMClient {
         //     .flat_map(|stream| stream.video_and_stream.stream_information.endpoints)
         //     .collect::<Vec<Url>>();
 
-        Ok(radcam_streams)
+        Ok(br4kcam_streams)
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -208,10 +208,10 @@ impl MCMClient {
         };
 
         let data = PostStream {
-            name: format!("RadCam {id}"),
+            name: format!("4K Cam {id}"),
             source: source.source,
             stream_information: StreamInformation {
-                endpoints: vec![format!("rtsp://0.0.0.0:8554/radcam_{id}").parse()?],
+                endpoints: vec![format!("rtsp://0.0.0.0:8554/br4kcam_{id}").parse()?],
                 configuration: CaptureConfiguration::Video(VideoCaptureConfiguration {
                     encode,
                     height: size.height,
@@ -226,7 +226,10 @@ impl MCMClient {
     }
 }
 
-fn radcams_from_onvif_devices(devices: Vec<OnvifDevice>, skip_hardware_check: bool) -> Vec<Camera> {
+fn br4kcams_from_onvif_devices(
+    devices: Vec<OnvifDevice>,
+    skip_hardware_check: bool,
+) -> Vec<Camera> {
     devices
         .iter()
         .filter_map(|device| {
@@ -234,7 +237,7 @@ fn radcams_from_onvif_devices(devices: Vec<OnvifDevice>, skip_hardware_check: bo
                 || device
                     .hardware
                     .as_deref()
-                    .is_some_and(|hardware| KNOWN_RADCAM_HARDWARE.contains(&hardware));
+                    .is_some_and(|hardware| KNOWN_BR4KCAM_HARDWARE.contains(&hardware));
 
             if device.name != Some("hd".to_string()) || !hardware_ok {
                 trace!("Skipping unknown {device:?}");
@@ -242,7 +245,7 @@ fn radcams_from_onvif_devices(devices: Vec<OnvifDevice>, skip_hardware_check: bo
                 return None;
             };
 
-            trace!("RadCam found: {device:?}");
+            trace!("4K Cam found: {device:?}");
 
             Some(Camera {
                 hostname: device.ip,

@@ -221,7 +221,7 @@ impl MavlinkComponent {
         crate::health::set_rebooting(true);
         let _guard = RebootingGuard;
 
-        // This is a workaround to this issue: https://github.com/bluerobotics/radcam-manager/issues/57
+        // This is a workaround to this issue: https://github.com/bluerobotics/br4kcam-manager/issues/57
         blueos_client::reboot_autopilot().await?;
 
         // FIXME: once the aforementioned issue is fixed, we can use the code below:
