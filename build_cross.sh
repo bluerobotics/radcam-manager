@@ -29,11 +29,11 @@ npm run build
 cd "$DIRNAME"
 for TARGET in "${TARGETS[@]}"; do
     # Workaround from: https://github.com/cross-rs/cross/wiki/FAQ#glibc-version-error
-    # This will result in a binary located at "target/build/$TARGET/$TARGET/release/radcam-manager"
+    # This will result in a binary located at "target/build/$TARGET/$TARGET/release/br4kcam-manager"
     export CARGO_TARGET_DIR=target/build/"$TARGET"
 
     echo "Building for target: $TARGET"
-    cross build --bin=radcam-manager --release --locked --target "$TARGET" "$@"
+    cross build --bin=br4kcam-manager --release --locked --target "$TARGET" "$@"
 done
 
 echo "All builds completed successfully!"

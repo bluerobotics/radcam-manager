@@ -1,12 +1,12 @@
-# RadCam Manager
+# 4K Cam Manager
 
 It provides a Vue3 application to be loaded either as a BlueOS extension, and as an iframe for Cockpit.
 
 The project has a backend with basically three services:
 
-1. A [Mavlink Camera Manager](http://github.com/mavlink/mavlink-camera-manager) client, responsible to authenticate and setup RadCam streams.
+1. A [Mavlink Camera Manager](http://github.com/mavlink/mavlink-camera-manager) client, responsible to authenticate and setup 4K Cam streams.
 2. A web server, responsible to serve the frontend as a static websitem as well as providing a REST API for it.
-3. A RadCam protocol proxy, translating requests from the frontend to the camera itself.
+3. A 4K Cam protocol proxy, translating requests from the frontend to the camera itself.
 
 ## How to run
 
@@ -14,18 +14,18 @@ There are a few options:
 
 ### As a BlueOS extension:
 
-1. Find the RadCam Manager on the Extensions Store, and install it.
-2. A "RadCam" should appear on the left menu after a few seconds.
-3. Click the "RadCam" menu item to access the application's interface.
+1. Find the 4K Cam Manager on the Extensions Store, and install it.
+2. A "4K Cam" should appear on the left menu after a few seconds.
+3. Click the "4K Cam" menu item to access the application's interface.
 4. Open Cockpit, there should be an available configured iframe
 
 ### As a BlueOS extension, manually:
 
-- Extension Identifier: `bluerobotics.radcam_manager`
+- Extension Identifier: `bluerobotics.br4kcam_manager`
 
-- Extension Name: `RadCam Manager`
+- Extension Name: `4K Cam Manager`
 
-- Docker image: `joaoantoniocardoso/radcam-manager`
+- Docker image: `joaoantoniocardoso/br4kcam-manager`
 
 - Docker tag: `latest`
 
@@ -38,8 +38,8 @@ There are a few options:
   },
   "HostConfig": {
     "Binds": [
-      "/var/logs/blueos/extensions/radcam-manager:/logs",
-      "/usr/blueos/extensions/radcam-manager:/app",
+      "/var/logs/blueos/extensions/br4kcam-manager:/logs",
+      "/usr/blueos/extensions/br4kcam-manager:/app",
       "/root/.config/blueos/ardupilot-manager/firmware/scripts:/scripts"
     ],
     "ExtraHosts": [
@@ -54,7 +54,7 @@ There are a few options:
     }
   },
   "entrypoint": [
-    "./radcam-manager",
+    "./br4kcam-manager",
     "--verbose",
     "--web-server", "0.0.0.0:8080",
     "--mcm-address", "blueos.internal:6020",
@@ -63,7 +63,7 @@ There are a few options:
     "--mavlink-component-id", "56",
     "--log-path", "/logs",
     "--settings-file", "/app/settings.json",
-    "--autopilot-scripts-file", "/scripts/radcam.lua",
+    "--autopilot-scripts-file", "/scripts/br4kcam.lua",
     "--blueos-address", "blueos.internal"
   ]
 }
@@ -72,14 +72,14 @@ There are a few options:
 ### As a standalone application, via Docker container:
 
 ```bash
-docker build . -t radcam-manager --progress=plain
-docker run --rm -it --net=host radcam-manager:latest --help
+docker build . -t br4kcam-manager --progress=plain
+docker run --rm -it --net=host br4kcam-manager:latest --help
 ```
 
 ###  As a standalone application, locally:
 ```bash
 ./build.sh
-./backend/target/radcam-manager --help
+./backend/target/br4kcam-manager --help
 ```
 
 **NOTE**: this software requires:

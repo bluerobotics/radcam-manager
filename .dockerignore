@@ -9,4 +9,4 @@ node_modules
 build
 **/dist
 **/target/*
-!target/build/**/release/radcam-manager
+!target/build/**/release/br4kcam-manager

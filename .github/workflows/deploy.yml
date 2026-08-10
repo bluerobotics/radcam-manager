@@ -49,9 +49,9 @@ jobs:
 
       - name: Prepare temporary artifact
         run: |
-          ls -lah target/build/${{ matrix.target }}/${{ matrix.target }}/release/radcam-manager
-          file radcam-manager-${{ matrix.target }}
-          tar -czpvf temporary-artifact-${{ matrix.target }}.tar.gz target/build/${{ matrix.target }}/${{ matrix.target }}/release/radcam-manager
+          ls -lah target/build/${{ matrix.target }}/${{ matrix.target }}/release/br4kcam-manager
+          file br4kcam-manager-${{ matrix.target }}
+          tar -czpvf temporary-artifact-${{ matrix.target }}.tar.gz target/build/${{ matrix.target }}/${{ matrix.target }}/release/br4kcam-manager
 
       - name: Upload temporary artifact
         uses: actions/upload-artifact@v4
@@ -63,16 +63,16 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: radcam-manager-${{ matrix.target }}
-          path: target/build/${{ matrix.target }}/${{ matrix.target }}/release/radcam-manager
+          name: br4kcam-manager-${{ matrix.target }}
+          path: target/build/${{ matrix.target }}/${{ matrix.target }}/release/br4kcam-manager
 
       - name: Upload binaries to release
         if: ${{ github.event_name == 'push' }}
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          asset_name: radcam-manager-${{ matrix.target }}
-          file: target/build/${{ matrix.target }}/${{ matrix.target }}/release/radcam-manager
+          asset_name: br4kcam-manager-${{ matrix.target }}
+          file: target/build/${{ matrix.target }}/${{ matrix.target }}/release/br4kcam-manager
           tag: ${{ github.ref }}
           prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
           overwrite: true
@@ -108,7 +108,7 @@ jobs:
           docker-username: ${{ secrets.DOCKER_USERNAME }}
           docker-password: ${{ secrets.DOCKER_PASSWORD }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          image-name: "radcam-manager"
+          image-name: "br4kcam-manager"
           skip-checkout: true
 
       - name: Check Semantic Versioning
