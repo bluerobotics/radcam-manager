@@ -1,6 +1,6 @@
 import type { CameraConnectivity, SystemHealth } from '@/bindings/radcam_api'
 
-/** Best-effort copy for BlueOS HTTP pages (often non-secure-context). */
+/** Best-effort copy for BlueOS HTTP pages (often non-secure-context / iframe). */
 export type CopyTextResult = 'copied' | 'manual'
 
 export type DiagnosticsContext = {
@@ -26,37 +26,71 @@ export function buildDiagnosticsPayload(ctx: DiagnosticsContext): Record<string,
   }
 }
 
-export async function copyText(text: string): Promise<CopyTextResult> {
-  if (!text) return 'manual'
-
-  try {
-    if (window.isSecureContext && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return 'copied'
-    }
-  } catch {
-    // Fall through to execCommand / manual select.
-  }
-
+/**
+ * Fallback copy via a temporary field + execCommand.
+ * stopPropagation on focusin matters inside Vuetify/dialog focus traps (BlueOS pattern).
+ * textarea keeps large JSON payloads intact.
+ */
+function copyWithFallbackMethod(text: string): boolean {
   const field = document.createElement('textarea')
+  field.addEventListener('focusin', (event) => event.stopPropagation())
   field.value = text
   field.setAttribute('readonly', '')
-  // Nearly invisible but still focusable — off-screen nodes are ignored by some browsers.
   field.style.cssText =
     'position:fixed;top:0;left:0;width:2em;height:2em;padding:0;border:none;outline:none;box-shadow:none;background:transparent;opacity:0.01;z-index:2147483647'
   document.body.appendChild(field)
-  field.focus()
-  field.select()
-  field.setSelectionRange(0, text.length)
 
-  let ok = false
   try {
-    ok = document.execCommand('copy')
-  } catch {
-    ok = false
+    field.focus()
+    field.select()
+    field.setSelectionRange(0, text.length)
+    return document.execCommand('copy')
+  } catch (error) {
+    console.error(`Failed to copy text to clipboard. Reason: ${error}`)
+    return false
+  } finally {
+    document.body.removeChild(field)
   }
-  document.body.removeChild(field)
-  return ok ? 'copied' : 'manual'
+}
+
+async function copyWithClipboardAPI(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch (error) {
+    console.error(`Failed to copy text to clipboard using Clipboard API. Reason: ${error}`)
+    return copyWithFallbackMethod(text)
+  }
+}
+
+/** Copy text with Clipboard API when allowed, else BlueOS-style execCommand fallback. */
+export async function copyText(text: string): Promise<CopyTextResult> {
+  if (!text) return 'manual'
+
+  const canUseClipboardApi =
+    typeof navigator !== 'undefined'
+    && typeof navigator.clipboard?.writeText === 'function'
+
+  try {
+    if (canUseClipboardApi && typeof navigator.permissions?.query === 'function') {
+      const permissionStatus = await navigator.permissions.query({
+        name: 'clipboard-write' as PermissionName,
+      })
+
+      if (permissionStatus.state === 'granted' || permissionStatus.state === 'prompt') {
+        // prompt: writeText itself triggers the browser prompt; don't wait on onchange.
+        return (await copyWithClipboardAPI(text)) ? 'copied' : 'manual'
+      }
+      return copyWithFallbackMethod(text) ? 'copied' : 'manual'
+    }
+  } catch (error) {
+    console.error('Error while requesting clipboard-write permission:', error)
+  }
+
+  if (canUseClipboardApi) {
+    return (await copyWithClipboardAPI(text)) ? 'copied' : 'manual'
+  }
+  return copyWithFallbackMethod(text) ? 'copied' : 'manual'
 }
 
 export function diagnosticsJson(blob: unknown): string {
