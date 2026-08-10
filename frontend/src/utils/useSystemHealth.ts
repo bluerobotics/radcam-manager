@@ -1,6 +1,6 @@
 import { computed, onUnmounted, shallowRef, type ComputedRef, type ShallowRef } from 'vue'
 
-import type { AutopilotHealth, Diagnostics, ExpectedCamera, SystemHealth } from '@/bindings/radcam_api'
+import type { AutopilotHealth, Diagnostics, ExpectedCamera, SystemHealth } from '@/bindings/br4kcam_api'
 import { backendClient } from './backendClient'
 
 const systemHealth = shallowRef<SystemHealth | null>(null)

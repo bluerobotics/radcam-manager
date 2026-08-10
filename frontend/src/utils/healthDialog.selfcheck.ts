@@ -1,4 +1,4 @@
-import type { CameraConnectivity, SystemHealth } from '@/bindings/radcam_api'
+import type { CameraConnectivity, SystemHealth } from '@/bindings/br4kcam_api'
 import {
   closeHealthDialog,
   degradedBannerCopy,
@@ -54,7 +54,7 @@ const MCM_DOWN: SystemHealth = health({
   diagnostics: { ...DIAGNOSTICS, mcm_consecutive_failures: 3 },
 })
 
-const CAMERA = { cameraUuid: 'cam', cameraLabel: 'RadCam', hardwareConfigured: true }
+const CAMERA = { cameraUuid: 'cam', cameraLabel: '4K Cam', hardwareConfigured: true }
 const ONVIF_ERROR = 'ONVIF authentication failed: wrong password'
 
 const MCM_TITLE = 'BlueOS video service unavailable'

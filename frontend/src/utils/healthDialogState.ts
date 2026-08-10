@@ -10,7 +10,7 @@ import {
   type HealthProblemsInput,
 } from './systemHealthProblems'
 
-const HEALTH_DIALOG_MINIMIZED_KEY = 'radcam-health-dialog-minimized'
+const HEALTH_DIALOG_MINIMIZED_KEY = 'br4kcam-health-dialog-minimized'
 
 function isHealthDialogMinimizedPersisted(): boolean {
   try {

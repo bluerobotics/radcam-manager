@@ -689,7 +689,7 @@ import BlueSlider from './BlueSlider.vue'
 import BlueSwitch from './BlueSwitch.vue'
 import ExpansiblePanel from './ExpansiblePanel.vue'
 import BlueSelect from './BlueSelect.vue'
-import { type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, BaseAutoWhiteBalanceSceneValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/radcam'
+import { type BaseParameterSetting, type VideoParameterSettings, type VideoResolutionValue, BaseAutoWhiteBalanceModeValue, BaseAutoWhiteBalanceSceneValue, type AdvancedParameterSetting, type CameraControl } from '@/bindings/br4kcam'
 import { backendClient } from '@/utils/backendClient'
 import {
   createActuatorTokenSource,
@@ -701,7 +701,7 @@ import { createPendingFields } from '@/utils/pendingFields'
 import { rebootCamera } from '@/utils/rebootCamera'
 import { useCameraState } from '@/utils/useCameraState'
 import type { ActuatorsConfig, ActuatorsControl, ActuatorsParametersConfig, ActuatorsState, CameraID, MountType, ScriptFunction, ServoChannel } from '@/bindings/autopilot'
-import type { CameraStateEvent, OnePushAwbStatus } from '@/bindings/radcam_api'
+import type { CameraStateEvent, OnePushAwbStatus } from '@/bindings/br4kcam_api'
 import WelcomeDialog from './WelcomeDialog.vue'
 import {
   autopilotDependentControlsBlocked,
