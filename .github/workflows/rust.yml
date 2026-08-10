@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Use cached dependencies
         uses: Swatinem/rust-cache@v2
@@ -31,7 +31,7 @@ jobs:
         run: cargo install cross
 
       - name: Install build dependencies - NPM
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "*"
           cache-dependency-path: "frontend/package-lock.json"

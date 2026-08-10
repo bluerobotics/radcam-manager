@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Use cached dependencies
         uses: Swatinem/rust-cache@v2
@@ -36,7 +36,7 @@ jobs:
         run: cargo install cross
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "*"
           cache-dependency-path: "frontend/package-lock.json"
@@ -54,14 +54,14 @@ jobs:
           tar -czpvf temporary-artifact-${{ matrix.target }}.tar.gz target/build/${{ matrix.target }}/${{ matrix.target }}/release/br4kcam-manager
 
       - name: Upload temporary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: temporary-artifact-${{ matrix.target }}.tar.gz
           path: temporary-artifact-${{ matrix.target }}.tar.gz
           retention-days: 1
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: br4kcam-manager-${{ matrix.target }}
           path: target/build/${{ matrix.target }}/${{ matrix.target }}/release/br4kcam-manager
@@ -83,10 +83,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ./
           pattern: temporary-artifact-*.tar.gz
@@ -98,7 +98,7 @@ jobs:
           ls -R
 
       - name: Remove temporary artifacts
-        uses: geekyeggo/delete-artifact@v5
+        uses: geekyeggo/delete-artifact@v6
         with:
           name: temporary-artifact-*.tar.gz
 
@@ -113,7 +113,7 @@ jobs:
 
       - name: Check Semantic Versioning
         id: semver
-        uses: skymatic/semver-validation-action@v3
+        uses: skymatic/semver-validation-action@v4
         continue-on-error: true
         with:
           version: ${{ github.ref_name }}
