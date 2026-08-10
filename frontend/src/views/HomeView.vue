@@ -405,6 +405,8 @@ const healthProblemsNowMs = ref(Date.now())
 const cameraConnectivity = ref<CameraConnectivity>('unknown')
 const cameraStreamError = ref<string | null>(null)
 const cameraOnvifAuthError = ref<string | null>(null)
+/** Per-camera actuators_configured from camera/state — gates setup health problems. */
+const actuatorsConfiguredByUuid = ref<Record<string, boolean>>({})
 const connectionState = ref<ConnectionState>('connecting')
 let everConnected = false
 /** Connection state the dialog renders, held past reconnect so it cannot flash by. */
@@ -538,6 +540,10 @@ const healthInputBase = computed(() => ({
   cameraExpectedMissing: expectedMissing.value.some(
     (camera) => camera.uuid === selectedCameraUUID.value,
   ),
+  // Setup-oriented problems only after hardware setup; Welcome owns first-run UX.
+  hardwareConfigured:
+    selectedCameraUUID.value != null
+    && actuatorsConfiguredByUuid.value[selectedCameraUUID.value] === true,
 }))
 
 const healthFlags = computed(() =>
@@ -669,6 +675,12 @@ const uiByCamera = new Map<string, CameraUiState>()
 const applyCameraState = (body: unknown) => {
   if (typeof body !== 'object' || body === null) return
   const data = body as CameraStateEvent
+  if (typeof data.actuators_configured === 'boolean') {
+    actuatorsConfiguredByUuid.value = {
+      ...actuatorsConfiguredByUuid.value,
+      [data.camera_uuid]: data.actuators_configured,
+    }
+  }
   if (data.ui) {
     uiByCamera.set(data.camera_uuid, data.ui)
     if (data.camera_uuid === selectedCameraUUID.value) {
@@ -920,6 +932,7 @@ const unsubscribeConnectionState = backendClient.onConnectionState((state, previ
     disconnectedSince.value = new Date()
     connectionStats.value = null
     uiByCamera.clear()
+    actuatorsConfiguredByUuid.value = {}
     uiLoading.value = false
     uiRebooting.value = false
     errorDialogMessage.value = null
