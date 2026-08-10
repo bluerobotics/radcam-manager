@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
+use br4kcam_api::LuaScriptStatus;
 use indexmap::IndexMap;
 use mavlink::ardupilotmega::SERVO_OUTPUT_RAW_DATA;
 use mlua::Lua;
-use radcam_api::LuaScriptStatus;
 use tera::Tera;
 use tracing::*;
 use uuid::Uuid;
@@ -14,7 +14,18 @@ use crate::{
 };
 
 const PARAM_TABLE_KEY_BASE: u8 = 73;
-pub const PARAM_PREFIX: &str = "RCAM";
+pub const PARAM_PREFIX: &str = "BR4KCAM";
+
+/// Stable ownership marker stamped into every generated script (new installs).
+const SCRIPT_OWNERSHIP_MARKER: &str = "BLUEROBOTICS_4K_CAM_MANAGER_SCRIPT";
+
+/// Content snippets that identify scripts this product wrote (current or historical).
+/// Filenames are unreliable across brands; ownership is detected from content only.
+/// The shared header line matches every prior export without naming older brands.
+const SCRIPT_CONTENT_OWNERSHIP_MARKERS: &[&str] = &[
+    SCRIPT_OWNERSHIP_MARKER,
+    "Focus correction script. This script was generated and exported by",
+];
 
 const SCRIPT_HEALTH_STALE_THRESHOLD: u8 = 3;
 
@@ -61,6 +72,7 @@ impl Manager {
                 anyhow::Error::msg(error)
             })?;
 
+        remove_conflicting_owned_scripts(path_obj).await;
         info!("Wrote new lua script to {path:?}");
         crate::health::refresh_lua_script_status().await;
         // Settings save is deferred to update_config finalize / ExportLuaScript caller.
@@ -95,6 +107,8 @@ impl Manager {
         if expected.is_empty() {
             return LuaScriptStatus::Unknown;
         }
+
+        remove_conflicting_owned_scripts(std::path::Path::new(&path)).await;
 
         match tokio::fs::read_to_string(&path).await {
             Ok(installed) if expected.contains(&installed) => LuaScriptStatus::Ok,
@@ -583,11 +597,53 @@ fn generate_lua_script(config: &CameraActuators) -> Result<String> {
     context.insert("furthest_points", &config.furthest_points.to_lua());
     context.insert("version", env!("CARGO_PKG_VERSION"));
 
-    let template = include_str!("radcam.lua.template");
+    let template = include_str!("br4kcam.lua.template");
 
     let file = Tera::one_off(template, &context, false)?;
 
     Ok(file)
+}
+
+fn script_has_ownership_marker(contents: &str) -> bool {
+    SCRIPT_CONTENT_OWNERSHIP_MARKERS
+        .iter()
+        .any(|marker| contents.contains(marker))
+}
+
+/// Remove other `.lua` files in the scripts directory that look like ours by content.
+///
+/// After a rebrand the configured path may change; an older file left beside it would
+/// still run on the autopilot. Filenames are unreliable across brands, so ownership is
+/// detected from stamped content markers only.
+async fn remove_conflicting_owned_scripts(keep: &std::path::Path) {
+    let Some(dir) = keep.parent() else {
+        return;
+    };
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("lua") {
+            continue;
+        }
+        let Ok(contents) = tokio::fs::read_to_string(&path).await else {
+            continue;
+        };
+        if !script_has_ownership_marker(&contents) {
+            continue;
+        }
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => info!(
+                ?path,
+                "Removed conflicting 4K Cam Manager lua script (matched by content marker)"
+            ),
+            Err(error) => warn!(?error, ?path, "Failed removing conflicting lua script"),
+        }
+    }
 }
 
 fn validate_lua(script: &str) -> Result<()> {
@@ -611,8 +667,22 @@ mod tests {
         validate_lua(&contents).unwrap();
 
         assert!(contents.contains("warn_missing_servo_function"));
+        assert!(contents.contains(SCRIPT_OWNERSHIP_MARKER));
         assert!(contents.contains("find_servo_function(K_FOCUS, \"CameraFocus\""));
         assert!(contents.contains("find_servo_function(K_ZOOM, \"CameraZoom\""));
         assert!(contents.contains("servo function not found"));
+    }
+
+    #[test]
+    fn ownership_markers_recognize_legacy_and_current_scripts() {
+        assert!(script_has_ownership_marker(
+            "-- BLUEROBOTICS_4K_CAM_MANAGER_SCRIPT\nlocal x = 1"
+        ));
+        assert!(script_has_ownership_marker(
+            "--- Focus correction script. This script was generated and exported by an older manager."
+        ));
+        assert!(!script_has_ownership_marker(
+            "-- some unrelated vehicle script"
+        ));
     }
 }

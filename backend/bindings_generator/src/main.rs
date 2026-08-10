@@ -8,13 +8,13 @@ use autopilot::api;
 use regex::Regex;
 use ts_rs::TS;
 
-use mcm_client::{Camera, Stream, mcm_types};
-use radcam_commands::{
+use br4kcam_commands::{
     Action, CameraControl,
     protocol::display::{
         advanced_display::AdvancedParameterSetting, base_display::BaseParameterSetting,
     },
 };
+use mcm_client::{Camera, Stream, mcm_types};
 
 fn main() -> Result<()> {
     if let Err(error) = generate_typescript_bindings_for_mcm_client() {
@@ -27,13 +27,13 @@ fn main() -> Result<()> {
         return Err(error);
     }
 
-    if let Err(error) = generate_typescript_bindings_for_radcam() {
-        println!("Failed generating typecript bindings for RadCam: {error:?}");
+    if let Err(error) = generate_typescript_bindings_for_br4kcam() {
+        println!("Failed generating typecript bindings for 4K Cam: {error:?}");
         return Err(error);
     }
 
-    if let Err(error) = generate_typescript_bindings_for_radcam_api() {
-        println!("Failed generating typescript bindings for RadCam API: {error:?}");
+    if let Err(error) = generate_typescript_bindings_for_br4kcam_api() {
+        println!("Failed generating typescript bindings for 4K Cam API: {error:?}");
         return Err(error);
     }
 
@@ -131,11 +131,11 @@ fn generate_typescript_bindings_for_autopilot() -> Result<()> {
     write_bindings(&output, ts_rs_bindings + &tsync_bindings)
 }
 
-fn generate_typescript_bindings_for_radcam() -> Result<()> {
+fn generate_typescript_bindings_for_br4kcam() -> Result<()> {
     let root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
 
-    let inputs = vec![root_dir.join("backend/libs/radcam_commands")];
-    let output = root_dir.join("frontend/src/bindings/radcam.ts");
+    let inputs = vec![root_dir.join("backend/libs/br4kcam_commands")];
+    let output = root_dir.join("frontend/src/bindings/br4kcam.ts");
 
     prepare_output(&output)?;
 
@@ -159,31 +159,31 @@ fn generate_typescript_bindings_for_radcam() -> Result<()> {
     write_bindings(&output, ts_rs_bindings + &tsync_bindings)
 }
 
-fn generate_typescript_bindings_for_radcam_api() -> Result<()> {
+fn generate_typescript_bindings_for_br4kcam_api() -> Result<()> {
     let root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
-    let output = root_dir.join("frontend/src/bindings/radcam_api.d.ts");
+    let output = root_dir.join("frontend/src/bindings/br4kcam_api.d.ts");
 
     prepare_output(&output)?;
 
     let ts_rs_bindings = [
-        radcam_api::CameraConnectivity::export_to_string()?,
-        radcam_api::McmHealth::export_to_string()?,
-        radcam_api::AutopilotHealth::export_to_string()?,
-        radcam_api::LuaScriptStatus::export_to_string()?,
-        radcam_api::ExpectedCamera::export_to_string()?,
-        radcam_api::ParameterDrift::export_to_string()?,
-        radcam_api::Diagnostics::export_to_string()?,
-        radcam_api::SystemHealth::export_to_string()?,
-        radcam_api::CameraStateEvent::export_to_string()?,
-        radcam_api::CameraUiState::export_to_string()?,
-        radcam_api::OnePushAwbStatus::export_to_string()?,
-        radcam_api::OnePushAwbPhase::export_to_string()?,
-        radcam_api::ConnectionStats::export_to_string()?,
-        radcam_api::WsRequest::export_to_string()?,
-        radcam_api::WsClientMessage::export_to_string()?,
-        radcam_api::UiDismissField::export_to_string()?,
-        radcam_api::WsResponse::export_to_string()?,
-        radcam_api::WsEvent::export_to_string()?,
+        br4kcam_api::CameraConnectivity::export_to_string()?,
+        br4kcam_api::McmHealth::export_to_string()?,
+        br4kcam_api::AutopilotHealth::export_to_string()?,
+        br4kcam_api::LuaScriptStatus::export_to_string()?,
+        br4kcam_api::ExpectedCamera::export_to_string()?,
+        br4kcam_api::ParameterDrift::export_to_string()?,
+        br4kcam_api::Diagnostics::export_to_string()?,
+        br4kcam_api::SystemHealth::export_to_string()?,
+        br4kcam_api::CameraStateEvent::export_to_string()?,
+        br4kcam_api::CameraUiState::export_to_string()?,
+        br4kcam_api::OnePushAwbStatus::export_to_string()?,
+        br4kcam_api::OnePushAwbPhase::export_to_string()?,
+        br4kcam_api::ConnectionStats::export_to_string()?,
+        br4kcam_api::WsRequest::export_to_string()?,
+        br4kcam_api::WsClientMessage::export_to_string()?,
+        br4kcam_api::UiDismissField::export_to_string()?,
+        br4kcam_api::WsResponse::export_to_string()?,
+        br4kcam_api::WsEvent::export_to_string()?,
     ]
     .join("\n\n");
 

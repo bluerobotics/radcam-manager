@@ -10,7 +10,7 @@ use crate::{
 
 /// Tolerance for [`ParamType::REAL32`] / [`ParamType::REAL64`] actuator values only.
 /// Integer parameters are compared exactly after normalising to a common numeric
-/// representation. Lua param-table values such as `RCAM1_ENABLE` arrive as `REAL32`
+/// representation. Lua param-table values such as `BR4KCAM1_ENABLE` arrive as `REAL32`
 /// while the expectation holds `UINT8`, so the comparison must coerce by value, not
 /// by encoded MAVLink wire form.
 pub(crate) const PARAM_DRIFT_TOLERANCE: f32 = 0.5;

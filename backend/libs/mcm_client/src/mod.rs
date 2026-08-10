@@ -6,10 +6,10 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use br4kcam_api::McmHealth;
 use indexmap::IndexMap;
 use mcm_client::MCMClient;
 use once_cell::sync::OnceCell;
-use radcam_api::McmHealth;
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{RwLock, broadcast},
@@ -64,7 +64,7 @@ struct Manager {
     auth_failures: HashMap<Uuid, String>,
     stream_failures: HashMap<Uuid, String>,
     _authentication_task_handler: JoinHandle<()>,
-    _start_radcams_task_handler: JoinHandle<()>,
+    _start_br4kcams_task_handler: JoinHandle<()>,
 }
 
 pub type Cameras = IndexMap<Uuid, Camera>;
@@ -103,23 +103,25 @@ pub async fn init(mcm_address: SocketAddr, skip_hardware_check: bool) {
     if let Some(manager) = MANAGER.get() {
         let mut lock = manager.write().await;
         lock._authentication_task_handler.abort();
-        lock._start_radcams_task_handler.abort();
+        lock._start_br4kcams_task_handler.abort();
         lock._authentication_task_handler =
             tokio::spawn(
-                async move { authenticate_radcams(&mcm_address, skip_hardware_check).await },
+                async move { authenticate_br4kcams(&mcm_address, skip_hardware_check).await },
             );
-        lock._start_radcams_task_handler =
+        lock._start_br4kcams_task_handler =
             tokio::spawn(
-                async move { start_radcams_streams(&mcm_address, skip_hardware_check).await },
+                async move { start_br4kcams_streams(&mcm_address, skip_hardware_check).await },
             );
         return;
     }
 
     let cameras = IndexMap::new();
     let _authentication_task_handler =
-        tokio::spawn(async move { authenticate_radcams(&mcm_address, skip_hardware_check).await });
-    let _start_radcams_task_handler =
-        tokio::spawn(async move { start_radcams_streams(&mcm_address, skip_hardware_check).await });
+        tokio::spawn(async move { authenticate_br4kcams(&mcm_address, skip_hardware_check).await });
+    let _start_br4kcams_task_handler =
+        tokio::spawn(
+            async move { start_br4kcams_streams(&mcm_address, skip_hardware_check).await },
+        );
 
     MANAGER.get_or_init(|| {
         RwLock::new(Manager {
@@ -127,7 +129,7 @@ pub async fn init(mcm_address: SocketAddr, skip_hardware_check: bool) {
             auth_failures: HashMap::new(),
             stream_failures: HashMap::new(),
             _authentication_task_handler,
-            _start_radcams_task_handler,
+            _start_br4kcams_task_handler,
         })
     });
 }
@@ -137,7 +139,7 @@ pub async fn shutdown() {
     if let Some(manager) = MANAGER.get() {
         let mut lock = manager.write().await;
         lock._authentication_task_handler.abort();
-        lock._start_radcams_task_handler.abort();
+        lock._start_br4kcams_task_handler.abort();
         lock.cameras.clear();
         lock.auth_failures.clear();
         lock.stream_failures.clear();
@@ -150,12 +152,12 @@ impl Drop for Manager {
         debug!("Finishing tasks...");
 
         self._authentication_task_handler.abort();
-        self._start_radcams_task_handler.abort();
+        self._start_br4kcams_task_handler.abort();
     }
 }
 
 #[instrument(level = "debug")]
-async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: bool) {
+async fn authenticate_br4kcams(mcm_address: &SocketAddr, skip_hardware_check: bool) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
@@ -170,25 +172,25 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-            let Some(radcams) =
-                probe_mcm_link(mcm.address, "device list", || mcm.get_radcams()).await
+            let Some(br4kcams) =
+                probe_mcm_link(mcm.address, "device list", || mcm.get_br4kcams()).await
             else {
                 break;
             };
             report_success(mcm.address);
 
             let known_cameras = cameras().await;
-            let radcam_uuids: HashSet<Uuid> = radcams.iter().map(|camera| camera.uuid).collect();
-            prune_auth_failures(&radcam_uuids).await;
+            let br4kcam_uuids: HashSet<Uuid> = br4kcams.iter().map(|camera| camera.uuid).collect();
+            prune_auth_failures(&br4kcam_uuids).await;
             for uuid in known_cameras.keys() {
-                if !radcam_uuids.contains(uuid)
+                if !br4kcam_uuids.contains(uuid)
                     && let Err(error) = remove_camera(uuid).await
                 {
                     debug!("Failed removing stale camera {uuid}: {error:?}");
                 }
             }
 
-            for camera in &radcams {
+            for camera in &br4kcams {
                 if let Some(known_camera) = known_cameras.get(&camera.uuid) {
                     if known_camera != camera
                         && let Err(error) = add_camera(camera).await
@@ -200,7 +202,7 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
                     continue;
                 }
 
-                debug!("New RadCam found: {camera:?}");
+                debug!("New 4K Cam found: {camera:?}");
 
                 match probe_mcm_link_unanswered(mcm.address, "onvif/authentication", || {
                     mcm.authenticate(camera)
@@ -223,14 +225,14 @@ async fn authenticate_radcams(mcm_address: &SocketAddr, skip_hardware_check: boo
                     continue;
                 }
 
-                debug!("New RadCam added: {camera:?}");
+                debug!("New 4K Cam added: {camera:?}");
             }
         }
     }
 }
 
 #[instrument(level = "debug")]
-async fn start_radcams_streams(mcm_address: &SocketAddr, skip_hardware_check: bool) {
+async fn start_br4kcams_streams(mcm_address: &SocketAddr, skip_hardware_check: bool) {
     let mut stream_failure_counts: HashMap<Url, u32> = HashMap::new();
 
     loop {
@@ -247,21 +249,21 @@ async fn start_radcams_streams(mcm_address: &SocketAddr, skip_hardware_check: bo
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-            let Some(existing_radcam_streams) =
-                await_mcm_probe(mcm.address, "streams", || mcm.get_radcam_streams()).await
+            let Some(existing_br4kcam_streams) =
+                await_mcm_probe(mcm.address, "streams", || mcm.get_br4kcam_streams()).await
             else {
                 break;
             };
 
-            let Some(available_radcam_sources) =
-                await_mcm_probe(mcm.address, "v4l", || mcm.get_radcam_video_sources()).await
+            let Some(available_br4kcam_sources) =
+                await_mcm_probe(mcm.address, "v4l", || mcm.get_br4kcam_video_sources()).await
             else {
                 break;
             };
 
             let mut observed_sources = HashSet::new();
 
-            for source in available_radcam_sources {
+            for source in available_br4kcam_sources {
                 if !source.source.ends_with("stream_0") {
                     continue; // We only want the main stream
                 }
@@ -281,7 +283,7 @@ async fn start_radcams_streams(mcm_address: &SocketAddr, skip_hardware_check: bo
                 let _ = available_source.set_username("");
                 observed_sources.insert(available_source.clone());
 
-                let matching_stream = existing_radcam_streams.iter().find(|stream| {
+                let matching_stream = existing_br4kcam_streams.iter().find(|stream| {
                     let mut existing_source = stream.source_endpoint.clone();
                     let _ = existing_source.set_password(None);
                     let _ = existing_source.set_username("");

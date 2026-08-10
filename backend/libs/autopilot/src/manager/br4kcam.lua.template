@@ -1,7 +1,8 @@
 --- WARNING: THIS FILE WAS AUTOMATICALLY GENERATED, DO NOT EDIT IT.
+-- BLUEROBOTICS_4K_CAM_MANAGER_SCRIPT
 
---- Focus correction script. This script was generated and exported by RadCam extension.
---- For more information, visit https://github.com/BlueRobotics/radcam-manager
+--- Focus correction script. This script was generated and exported by 4K Cam Manager.
+--- For more information, visit https://github.com/BlueRobotics/br4kcam-manager
 --- Version: {{ version }}
 
 -- Usage: change the output controlling focus from CameraFocus to "Script1"
@@ -38,7 +39,7 @@ local function warn_missing_servo_function(function_name, warned_flag)
         return
     end
 
-    gcs:send_text(MAV_SEVERITY_WARNING, "RadCam: " .. function_name .. " servo function not found")
+    gcs:send_text(MAV_SEVERITY_WARNING, "4K Cam: " .. function_name .. " servo function not found")
     warned_flag[1] = true
 end
 
