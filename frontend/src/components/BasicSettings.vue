@@ -269,15 +269,15 @@
                         </td>
                         <td class="mt-1 text-center">
                           {{ row.high.bitrate }} kbps<br>
-                          <span class="opacity-70">{{ row.high.storage }} Gb/h</span>
+                          <span class="opacity-70">{{ row.high.storage }} GB/h</span>
                         </td>
                         <td class="mt-1 text-center">
                           {{ row.medium.bitrate }} kbps<br>
-                          <span class="opacity-70">{{ row.medium.storage }} Gb/h</span>
+                          <span class="opacity-70">{{ row.medium.storage }} GB/h</span>
                         </td>
                         <td class="mt-1 text-center">
                           {{ row.low.bitrate }} kbps<br>
-                          <span class="opacity-70">{{ row.low.storage }} Gb/h</span>
+                          <span class="opacity-70">{{ row.low.storage }} GB/h</span>
                         </td>
                       </tr>
                     </tbody>
