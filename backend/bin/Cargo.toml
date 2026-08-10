@@ -1,17 +1,17 @@
 [package]
-name = "radcam-manager"
+name = "br4kcam-manager"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 homepage.workspace = true
-default-run = "radcam-manager"
+default-run = "br4kcam-manager"
 
 [dependencies]
 autopilot = { path="../libs/autopilot" }
 blueos_client = { path="../libs/blueos_client" }
 mcm_client = { path="../libs/mcm_client" }
-radcam_manager = { path="../libs/radcam_manager" }
+br4kcam_manager = { path="../libs/br4kcam_manager" }
 settings = { path="../libs/settings" }
 web_client = { path="../libs/web_client" }
 

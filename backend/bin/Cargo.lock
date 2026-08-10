@@ -2100,7 +2100,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "radcam-manager"
+name = "br4kcam-manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2108,8 +2108,8 @@ dependencies = [
  "clap",
  "mcm_client",
  "once_cell",
- "radcam_commands",
- "radcam_manager",
+ "br4kcam_commands",
+ "br4kcam_manager",
  "shellexpand",
  "tokio",
  "tracing",
@@ -2118,7 +2118,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "radcam_commands"
+name = "br4kcam_commands"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2140,7 +2140,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "radcam_manager"
+name = "br4kcam_manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2153,7 +2153,7 @@ dependencies = [
  "md-5",
  "mime_guess",
  "once_cell",
- "radcam_commands",
+ "br4kcam_commands",
  "regex",
  "reqwest",
  "ringbuffer",

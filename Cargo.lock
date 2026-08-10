@@ -171,6 +171,7 @@ dependencies = [
  "anyhow",
  "axum",
  "blueos_client",
+ "br4kcam_api",
  "chrono",
  "futures",
  "indexmap 2.10.0",
@@ -179,7 +180,6 @@ dependencies = [
  "mlua",
  "num_enum",
  "once_cell",
- "radcam_api",
  "reqwest",
  "serde",
  "serde_derive",
@@ -285,9 +285,9 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "autopilot",
+ "br4kcam_api",
+ "br4kcam_commands",
  "mcm_client",
- "radcam_api",
- "radcam_commands",
  "regex",
  "ts-rs",
  "tsync",
@@ -329,6 +329,107 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "web_client",
+]
+
+[[package]]
+name = "br4kcam-manager"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "autopilot",
+ "blueos_client",
+ "br4kcam_manager",
+ "chrono",
+ "clap 4.5.42",
+ "mcm_client",
+ "once_cell",
+ "settings",
+ "shellexpand",
+ "tokio",
+ "tracing",
+ "vergen-gix",
+ "web_client",
+]
+
+[[package]]
+name = "br4kcam_api"
+version = "0.3.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "br4kcam_commands"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base16ct",
+ "mcm_client",
+ "md-5",
+ "reqwest",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "tokio",
+ "tracing",
+ "ts-rs",
+ "tsync",
+ "url",
+ "utils",
+ "uuid",
+ "web_client",
+]
+
+[[package]]
+name = "br4kcam_manager"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "autopilot",
+ "axum",
+ "base16ct",
+ "br4kcam_api",
+ "br4kcam_commands",
+ "chrono",
+ "flate2",
+ "futures",
+ "include_dir",
+ "indexmap 2.10.0",
+ "mcm_client",
+ "md-5",
+ "mime_guess",
+ "once_cell",
+ "regex",
+ "reqwest",
+ "ringbuffer",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "thiserror 2.0.12",
+ "tokio",
+ "toml",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-appender",
+ "tracing-log",
+ "tracing-subscriber",
+ "url",
+ "url_params_serializer",
+ "uuid",
+ "vergen-gix",
  "web_client",
 ]
 
@@ -2527,9 +2628,9 @@ name = "mcm_client"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "br4kcam_api",
  "indexmap 2.10.0",
  "once_cell",
- "radcam_api",
  "semver",
  "serde",
  "serde_derive",
@@ -3039,107 +3140,6 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
-
-[[package]]
-name = "radcam-manager"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "autopilot",
- "blueos_client",
- "chrono",
- "clap 4.5.42",
- "mcm_client",
- "once_cell",
- "radcam_manager",
- "settings",
- "shellexpand",
- "tokio",
- "tracing",
- "vergen-gix",
- "web_client",
-]
-
-[[package]]
-name = "radcam_api"
-version = "0.3.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_derive",
- "serde_json",
- "ts-rs",
- "uuid",
-]
-
-[[package]]
-name = "radcam_commands"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "axum",
- "base16ct",
- "mcm_client",
- "md-5",
- "reqwest",
- "serde",
- "serde_derive",
- "serde_json",
- "serde_repr",
- "serde_with",
- "tokio",
- "tracing",
- "ts-rs",
- "tsync",
- "url",
- "utils",
- "uuid",
- "web_client",
-]
-
-[[package]]
-name = "radcam_manager"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "autopilot",
- "axum",
- "base16ct",
- "chrono",
- "flate2",
- "futures",
- "include_dir",
- "indexmap 2.10.0",
- "mcm_client",
- "md-5",
- "mime_guess",
- "once_cell",
- "radcam_api",
- "radcam_commands",
- "regex",
- "reqwest",
- "ringbuffer",
- "semver",
- "serde",
- "serde_derive",
- "serde_json",
- "serde_repr",
- "serde_with",
- "thiserror 2.0.12",
- "tokio",
- "toml",
- "tower",
- "tower-http",
- "tracing",
- "tracing-appender",
- "tracing-log",
- "tracing-subscriber",
- "url",
- "url_params_serializer",
- "uuid",
- "vergen-gix",
- "web_client",
-]
 
 [[package]]
 name = "rand"
