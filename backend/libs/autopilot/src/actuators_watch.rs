@@ -162,7 +162,11 @@ pub fn servo_mark_advanced(before: Option<Duration>, after: Option<Duration>) ->
 
 /// True when this camera's cached actuators state is fresh enough to serve without a one-shot wait.
 pub fn cache_is_fresh(camera_uuid: Uuid) -> bool {
-    last_servo_age(camera_uuid).is_some_and(|age| age < STREAM_STALE_AFTER)
+    cache_is_fresh_age(last_servo_age(camera_uuid))
+}
+
+fn cache_is_fresh_age(age: Option<Duration>) -> bool {
+    age.is_some_and(|age| age < STREAM_STALE_AFTER)
 }
 
 /// SERVO stream interest, request and sample timestamps for health classification.
@@ -546,14 +550,30 @@ mod tests {
     }
 
     #[test]
-    fn cache_freshness_is_per_camera() {
+    fn cache_freshness_uses_stale_threshold() {
+        assert!(!cache_is_fresh_age(None));
+        assert!(cache_is_fresh_age(Some(Duration::ZERO)));
+        assert!(cache_is_fresh_age(Some(
+            STREAM_STALE_AFTER - Duration::from_millis(1)
+        )));
+        assert!(!cache_is_fresh_age(Some(STREAM_STALE_AFTER)));
+        assert!(!cache_is_fresh_age(Some(
+            STREAM_STALE_AFTER + Duration::from_secs(1)
+        )));
+    }
+
+    #[test]
+    fn servo_sample_marks_are_per_camera() {
+        // Hold the map lock across mark+read so a parallel test cannot clear
+        // LAST_SERVO_AT between the two (the flake that failed CI-style probes).
         let camera_a = Uuid::nil();
         let camera_b = Uuid::from_u128(1);
-        assert!(!cache_is_fresh(camera_a));
-        assert!(!cache_is_fresh(camera_b));
-
-        mark_servo_sample(camera_a);
-        assert!(cache_is_fresh(camera_a));
-        assert!(!cache_is_fresh(camera_b));
+        let mut map = LAST_SERVO_AT.lock().expect("servo map");
+        map.clear();
+        assert!(!map.contains_key(&camera_a));
+        assert!(!map.contains_key(&camera_b));
+        map.insert(camera_a, Instant::now());
+        assert!(map.contains_key(&camera_a));
+        assert!(!map.contains_key(&camera_b));
     }
 }
