@@ -120,7 +120,7 @@ import {
   VideoRcModeValue,
   type VideoParameterSettings,
   type VideoResolutionValue,
-} from "@/bindings/radcam"
+} from "@/bindings/br4kcam"
 
 const props = defineProps<{
   selectedCameraUuid: string | null

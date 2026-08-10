@@ -48,7 +48,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CameraConnectivity, SystemHealth } from '@/bindings/radcam_api'
+import type { CameraConnectivity, SystemHealth } from '@/bindings/br4kcam_api'
 import CopyFeedbackToast from '@/components/CopyFeedbackToast.vue'
 import { useCopyDiagnostics } from '@/utils/useCopyDiagnostics'
 import ExpansiblePanel from './ExpansiblePanel.vue'

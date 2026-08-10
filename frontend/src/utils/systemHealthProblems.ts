@@ -2,7 +2,7 @@ import type {
   AutopilotHealth,
   CameraConnectivity,
   SystemHealth,
-} from '@/bindings/radcam_api'
+} from '@/bindings/br4kcam_api'
 
 export type HealthProblemKind =
   | 'mcm'
@@ -75,7 +75,7 @@ const KIND_TABLE = {
     problem: {
       severity: 'error',
       title: 'BlueOS video service unavailable',
-      body: 'RadCam Manager cannot reach the BlueOS video service, so cameras cannot be discovered or controlled.',
+      body: '4K Cam Manager cannot reach the BlueOS video service, so cameras cannot be discovered or controlled.',
     },
   },
   autopilot: {
@@ -96,7 +96,7 @@ const KIND_TABLE = {
       severity: 'warning',
       title: 'Camera video stream not running',
       body: (camera: string) =>
-        `${camera} is responding, but its video stream is not running. RadCam Manager is restarting it automatically.`,
+        `${camera} is responding, but its video stream is not running. 4K Cam Manager is restarting it automatically.`,
       progress: 'Restarting the video stream…',
     },
   },
@@ -108,7 +108,7 @@ const KIND_TABLE = {
       severity: 'error',
       title: 'Camera ONVIF password does not match',
       body: (camera: string) =>
-        `${camera} is responding to RadCam Manager, but the BlueOS video service cannot log in over ONVIF with the expected factory credentials (admin / blue), so there is no video. Restore the camera's ONVIF password to admin / blue.`,
+        `${camera} is responding to 4K Cam Manager, but the BlueOS video service cannot log in over ONVIF with the expected factory credentials (admin / blue), so there is no video. Restore the camera's ONVIF password to admin / blue.`,
       progress: 'Waiting for ONVIF login to succeed…',
     },
   },
@@ -343,7 +343,7 @@ function autopilotProblem(health: SystemHealth): HealthProblem | null {
       kind: 'autopilot',
       severity: 'info',
       title: 'Checking autopilot connection',
-      body: 'RadCam Manager is still determining whether the MAVLink link and flight controller are available. This is normal while BlueOS is starting.',
+      body: '4K Cam Manager is still determining whether the MAVLink link and flight controller are available. This is normal while BlueOS is starting.',
       detail: health.autopilot_detail ?? null,
       progress: 'Waiting for autopilot status from BlueOS…',
     }
@@ -357,7 +357,7 @@ function autopilotProblem(health: SystemHealth): HealthProblem | null {
         kind: 'autopilot',
         severity: 'error',
         title: 'Autopilot service unavailable',
-        body: 'RadCam Manager cannot configure its MAVLink connection through BlueOS. Focus, zoom and tilt are unavailable. Check that BlueOS is fully started; if this persists, restart BlueOS.',
+        body: '4K Cam Manager cannot configure its MAVLink connection through BlueOS. Focus, zoom and tilt are unavailable. Check that BlueOS is fully started; if this persists, restart BlueOS.',
         detail: health.autopilot_detail ?? null,
         progress: 'Waiting for BlueOS to finish starting…',
       }
@@ -368,8 +368,8 @@ function autopilotProblem(health: SystemHealth): HealthProblem | null {
         severity: 'error',
         title: 'MAVLink connection unavailable',
         body: neverReceived
-          ? 'RadCam Manager has not received any MAVLink data from BlueOS yet. Focus, zoom and tilt are unavailable. Check that BlueOS is fully started, then verify MAVLink endpoints are configured.'
-          : 'No MAVLink data is reaching RadCam Manager. Focus, zoom and tilt are unavailable. Check BlueOS MAVLink endpoints, then restart BlueOS if needed.',
+          ? '4K Cam Manager has not received any MAVLink data from BlueOS yet. Focus, zoom and tilt are unavailable. Check that BlueOS is fully started, then verify MAVLink endpoints are configured.'
+          : 'No MAVLink data is reaching 4K Cam Manager. Focus, zoom and tilt are unavailable. Check BlueOS MAVLink endpoints, then restart BlueOS if needed.',
         detail: health.autopilot_detail ?? null,
         progress: neverReceived
           ? 'Waiting for the first MAVLink data from BlueOS…'
@@ -450,8 +450,8 @@ function luaScriptProblem(
         severity: 'warning',
         title: 'Autopilot script is out of date',
         body: canUpdate
-          ? 'The script installed on the flight controller is not the one this version of RadCam Manager expects, so focus and zoom may misbehave. Update it — the autopilot may reboot.'
-          : 'The script installed on the flight controller is not the one this version of RadCam Manager expects, so focus and zoom may misbehave. A camera must be discovered before the script can be updated.',
+          ? 'The script installed on the flight controller is not the one this version of 4K Cam Manager expects, so focus and zoom may misbehave. Update it — the autopilot may reboot.'
+          : 'The script installed on the flight controller is not the one this version of 4K Cam Manager expects, so focus and zoom may misbehave. A camera must be discovered before the script can be updated.',
         showUpdateLuaScript: canUpdate,
       }
     case 'failing':
@@ -490,7 +490,7 @@ function cameraProblem(
         kind: 'camera',
         severity: 'error',
         title: 'Camera unavailable',
-        body: `RadCam Manager can no longer reach ${label}. Check the Ethernet cable between the camera and the vehicle, and confirm the camera has power.`,
+        body: `4K Cam Manager can no longer reach ${label}. Check the Ethernet cable between the camera and the vehicle, and confirm the camera has power.`,
         showForget: expectedMissing,
         progress: 'Waiting for the camera to come back online…',
       }

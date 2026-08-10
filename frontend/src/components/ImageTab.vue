@@ -724,14 +724,14 @@ import {
     AdvancedDisplayLowFramerateValue,
     AdvancedDisplayLedControlValue,  
     AdvancedDisplaySceneModeValue
-} from '@/bindings/radcam'
+} from '@/bindings/br4kcam'
 
 
 import { enumToOptions } from '@/utils/enumUtils'
 import { backendClient } from '@/utils/backendClient'
 import { useCameraState } from '@/utils/useCameraState'
 import { createPendingFields } from '@/utils/pendingFields'
-import type { OnePushAwbStatus } from '@/bindings/radcam_api'
+import type { OnePushAwbStatus } from '@/bindings/br4kcam_api'
 import { computed, ref, toRef, watch } from 'vue'
 
 const props = defineProps<{

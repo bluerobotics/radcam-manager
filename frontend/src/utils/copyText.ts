@@ -1,4 +1,4 @@
-import type { CameraConnectivity, SystemHealth } from '@/bindings/radcam_api'
+import type { CameraConnectivity, SystemHealth } from '@/bindings/br4kcam_api'
 
 /** Best-effort copy for BlueOS HTTP pages (often non-secure-context / iframe). */
 export type CopyTextResult = 'copied' | 'manual'

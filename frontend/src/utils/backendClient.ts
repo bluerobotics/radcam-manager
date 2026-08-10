@@ -5,7 +5,7 @@ import type {
   WsEvent,
   WsRequest,
   WsResponse,
-} from '@/bindings/radcam_api'
+} from '@/bindings/br4kcam_api'
 
 type PendingRequest = {
   method: 'GET' | 'POST'

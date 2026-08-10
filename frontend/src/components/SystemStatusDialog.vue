@@ -45,7 +45,7 @@
         class="text-sm text-white text-center mb-4 opacity-90"
         aria-live="polite"
       >
-        Waiting while RadCam Manager keeps retrying in the background.
+        Waiting while 4K Cam Manager keeps retrying in the background.
       </p>
       <div
         v-for="(problem, index) in viewProblems"
@@ -257,7 +257,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import type { CameraConnectivity, SystemHealth } from '@/bindings/radcam_api'
+import type { CameraConnectivity, SystemHealth } from '@/bindings/br4kcam_api'
 import CopyFeedbackToast from '@/components/CopyFeedbackToast.vue'
 import StatusDialogShell from '@/components/StatusDialogShell.vue'
 import { backendClient, type ConnectionState } from '@/utils/backendClient'
@@ -356,26 +356,26 @@ const connectionCopy = computed((): StatusCopy | null => {
   if (!props.everConnected) {
     if (connecting) {
       return {
-        title: 'Connecting to RadCam Manager',
+        title: 'Connecting to 4K Cam Manager',
         body: 'Establishing a connection. Controls stay paused until the backend is ready.',
         progress: 'Connecting…',
       }
     }
     return {
-      title: 'Unable to reach RadCam Manager',
+      title: 'Unable to reach 4K Cam Manager',
       body: 'Retrying automatically. Controls stay paused until the backend is ready.',
       progress: 'Retrying…',
     }
   }
   if (connecting) {
     return {
-      title: 'Reconnecting to RadCam Manager',
+      title: 'Reconnecting to 4K Cam Manager',
       body: 'Restoring the connection. Controls are paused until the backend is back.',
       progress: 'Reconnecting…',
     }
   }
   return {
-    title: 'RadCam Manager unavailable',
+    title: '4K Cam Manager unavailable',
     body: 'Connection lost. Reconnecting automatically — controls are paused until the backend is back.',
     progress: 'Waiting to retry…',
   }

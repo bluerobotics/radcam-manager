@@ -258,7 +258,7 @@
         v-if="discoveryEmpty"
         class="px-6 py-8 text-center text-sm opacity-70"
       >
-        No cameras discovered yet. Connect a RadCam and it will appear here.
+        No cameras discovered yet. Connect a 4K Cam and it will appear here.
       </div>
       <div v-if="configMode === 'basic'">
         <BasicSettings
@@ -353,7 +353,7 @@ import type {
   CameraStateEvent,
   CameraUiState,
   OnePushAwbStatus,
-} from '@/bindings/radcam_api'
+} from '@/bindings/br4kcam_api'
 import HealthDiagnostics from '@/components/HealthDiagnostics.vue'
 import BasicSettings from '@/components/BasicSettings.vue'
 import BlueButtonGroup from '@/components/BlueButtonGroup.vue'
@@ -640,7 +640,7 @@ const isCockpitMode = useRouteQuery<string, boolean>('cockpit_mode', 'false', {
 const configButtons = [
   {
     name: 'Basic',
-    tooltip: 'Basic setup for the RadCam',
+    tooltip: 'Basic setup for the 4K Cam',
     onSelected: () => (configMode.value = 'basic'),
     preSelected: true,
   },
