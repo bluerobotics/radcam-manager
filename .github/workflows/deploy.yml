@@ -113,7 +113,7 @@ jobs:
 
       - name: Check Semantic Versioning
         id: semver
-        uses: skymatic/semver-validation-action@v4
+        uses: skymatic/semver-validation-action@v4.0.0
         continue-on-error: true
         with:
           version: ${{ github.ref_name }}
