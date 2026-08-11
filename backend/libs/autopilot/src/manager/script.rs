@@ -13,7 +13,9 @@ use crate::{
     parameters::{ActuatorsParameters, ChannelFunction, ParamType},
 };
 
-const PARAM_TABLE_KEY_BASE: u8 = 73;
+// Off the pre-rebrand base: ArduPilot ties each key to a prefix CRC, so a renamed
+// prefix on the same key makes param:add_table fail until that key is wiped.
+const PARAM_TABLE_KEY_BASE: u8 = 90;
 pub const PARAM_PREFIX: &str = "BR4KCAM";
 
 /// Stable ownership marker stamped into every generated script (new installs).
