@@ -109,6 +109,20 @@ pub async fn ensure_mavlink_endpoint(mavlink_endpoint: &str) -> Result<bool> {
         return Ok(true);
     }
 
+    if let Some(legacy_endpoint) = current_endpoints.iter().find(|current| {
+        has_alphabetic_prefix(&current.name, "cam Manager")
+            && has_alphabetic_prefix(&current.owner, "cam-manager")
+    }) {
+        web_client::delete::<(), _, _>(
+            &blueos_address,
+            "ardupilot-manager/v1.0/endpoints/",
+            vec![legacy_endpoint.clone()],
+            (),
+        )
+        .await
+        .context("Failed to remove legacy MAVLink endpoint")?;
+    }
+
     info!("MAVLink endpoint not present, creating it...");
 
     web_client::post::<(), _, _>(
@@ -126,4 +140,10 @@ pub async fn reboot_autopilot() -> Result<()> {
     let blueos_address = MANAGER.get().unwrap().read().await.blueos_address;
 
     web_client::post(&blueos_address, "ardupilot-manager/v1.0/restart", (), ()).await
+}
+
+fn has_alphabetic_prefix(value: &str, suffix: &str) -> bool {
+    value
+        .strip_suffix(suffix)
+        .is_some_and(|prefix| !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_alphabetic()))
 }
