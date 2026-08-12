@@ -39,12 +39,17 @@ pub struct CockpitIframeWidget {
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CockpitAction {
+    /// ID for this Action
     pub id: String,
+    /// Name for this Action
     pub name: String,
+    /// Type of this Action
     #[serde(flatten)]
     pub action_type: CockpitActionType,
     /// Version of this Action
     pub version: String,
+    /// Description showing to the user
+    pub description: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -200,6 +205,10 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
                     })
                     .to_string(),
                 }),
+                description: format!(
+                    "Triggers one-push white balance on {} only.",
+                    camera.hostname
+                ),
                 version: env!("CARGO_PKG_VERSION").to_string(), // TODO: freeze this once we settle with a button layout
             }]
         })
@@ -225,6 +234,7 @@ fn actions(cameras: &Cameras) -> Vec<CockpitAction> {
                 })
                 .to_string(),
             }),
+            description: "Triggers one-push white balance on every configured 4K Cam.".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         },
     );
