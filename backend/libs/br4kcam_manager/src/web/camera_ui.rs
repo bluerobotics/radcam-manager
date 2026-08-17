@@ -19,7 +19,7 @@ use crate::web::camera_state;
 
 const REBOOT_GRACE: Duration = Duration::from_secs(180);
 const LOADING_GRACE: Duration = Duration::from_secs(120);
-const MIN_LOADING: Duration = Duration::from_secs(3);
+const MIN_LOADING: Duration = Duration::from_secs(5);
 
 static UI: OnceCell<Mutex<HashMap<Uuid, Entry>>> = OnceCell::new();
 
@@ -514,7 +514,7 @@ mod tests {
     use autopilot::api::Action as AutopilotAction;
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn loading_overlay_lasts_at_least_three_seconds() {
+    async fn loading_overlay_lasts_at_least_min_loading() {
         let camera_uuid = Uuid::from_u128(0x1111_2222_3333_4444);
         start_autopilot_action(camera_uuid, &AutopilotAction::ExportLuaScript);
         assert!(get(camera_uuid).loading);
