@@ -51,7 +51,7 @@
       >
         <v-btn
           :disabled="cameraControlsDisabled || wbBusy"
-          class="py-1 px-3 ml-4 rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
+          class="py-1 px-3 ml-4 max-w-full rounded-md bg-[#414141] hover:bg-[#0A3E6B]"
           size="small"
           variant="elevated"
           theme="dark"

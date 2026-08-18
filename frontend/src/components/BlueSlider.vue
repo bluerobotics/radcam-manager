@@ -1,8 +1,8 @@
 <template>
-  <div class="flex w-full justify-between items-center">
+  <div class="flex w-full min-w-0 justify-between items-center">
     <div
       v-if="label"
-      class="min-w-[130px]"
+      class="min-w-[130px] shrink-0"
     >
       <label
         :for="sliderId"
@@ -10,12 +10,12 @@
         :class="theme === 'dark' ? 'text-white' : 'text-black'"
       >{{ label }}</label>
     </div>
-    <div class="flex justify-between items-center">
+    <div class="flex min-w-0 flex-1 items-center justify-between">
       <div
         name="slider-track"
-        class="relative overflow-visible rounded-[6px] elevation-1"
+        class="relative w-full min-w-0 overflow-visible rounded-[6px] elevation-1"
         :class="[theme === 'dark' ? 'bg-[#464646AA]' : 'bg-[#00000011]', disabled ? 'opacity-50' : '']"
-        :style="{ width: width || '100%', height: height || '30px', cursor: disabled ? 'not-allowed' : 'pointer' }"
+        :style="{ maxWidth: width || '100%', height: height || '30px', cursor: disabled ? 'not-allowed' : 'pointer' }"
       >
         <div class="absolute inset-x-[18%] top-1/2 -translate-y-1/2 flex justify-between pointer-events-none">
           <div

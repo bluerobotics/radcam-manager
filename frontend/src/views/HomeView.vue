@@ -1,20 +1,21 @@
 <template>
   <v-container
     no-gutters
-    class="max-w-[800px] text-white pa-0  rounded-[8px] elevation-5 no-user-select"
+    :fluid="isCockpitMode"
+    class="text-white pa-0  rounded-[8px] elevation-5 no-user-select"
     :class="[
       theme === 'dark' ? 'bg-[#363636]' : 'bg-[#F5F5F5]',
-      {
-        'transparent-card mb-10': isCockpitMode,
-        'mt-6': !isCockpitMode,
-      },
+      isCockpitMode ? 'transparent-card mb-10 w-full max-w-full overflow-x-hidden' : 'mt-6 max-w-[800px]',
     ]"
   >
     <div
       class="flex items-center justify-between rounded-t-[8px]"
-      :class="isCockpitMode ? 'bg-[#2C2C2C88]' : 'bg-[#15151577]'"
+      :class="isCockpitMode ? 'bg-[#2C2C2C88] min-w-0' : 'bg-[#15151577]'"
     >
-      <div class="flex items-center justify-around w-[400px] pl-5 border-b-[1px] border-[#ffffff88]">
+      <div
+        class="flex items-center justify-around pl-5 border-b-[1px] border-[#ffffff88]"
+        :class="isCockpitMode ? 'min-w-0 flex-1 max-w-[400px]' : 'w-[400px]'"
+      >
         <v-menu
           offset-y
           theme="dark"
@@ -252,7 +253,8 @@
       </v-alert>
     </div>
     <div
-      class="min-w-[650px] transition-all duration-300 ease-in-out"
+      class="transition-all duration-300 ease-in-out"
+      :class="isCockpitMode ? 'min-w-0' : 'min-w-[650px]'"
     >
       <div
         v-if="discoveryEmpty"
