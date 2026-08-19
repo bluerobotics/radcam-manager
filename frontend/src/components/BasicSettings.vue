@@ -32,14 +32,14 @@
       @update:expanded="panelsOpen.image = $event"
     >
       <BlueButtonGroup
-        label="Water environment White Balance"
+        label="Water environment white balance"
         :disabled="isConfigured !== true || cameraControlsDisabled || wbBusy"
         :button-items="WhiteBalanceSceneButtonItems"
         theme="dark"
         type="switch"
       />
       <BlueButtonGroup
-        label="White Balance Mode"
+        label="White balance mode"
         :disabled="isConfigured !== true || cameraControlsDisabled || wbBusy"
         :button-items="whiteBalanceModeButtonItems"
         theme="dark"
