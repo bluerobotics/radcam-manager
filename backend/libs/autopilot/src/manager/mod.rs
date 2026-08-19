@@ -75,6 +75,7 @@ mod apply_tests {
 
     #[tokio::test]
     async fn finalize_runs_only_after_reboot_when_needed() {
+        let _health_tests = crate::health::lock_health_tests().await;
         let phase = AtomicUsize::new(0);
         reboot_outside_apply_with(
             Box::pin(async {
@@ -100,6 +101,7 @@ mod apply_tests {
 
     #[tokio::test]
     async fn finalize_skipped_when_no_reboot() {
+        let _health_tests = crate::health::lock_health_tests().await;
         let finalized = AtomicUsize::new(0);
         reboot_outside_apply_with(
             Box::pin(async { Ok(false) }),
