@@ -232,9 +232,11 @@ export function enrichHealthProblems(
 }
 
 export function healthDialogView(state: HealthDialogState, degraded: boolean): HealthDialogView {
-  const showDialog = state.mode === 'open'
-  const showDegradedBanner = state.mode === 'minimized' && degraded
   const awaitingRecovery = state.awaitingClose && state.mode === 'open'
+  // mode can still be open for one tick after health recovers, before the
+  // reducer sets awaitingClose. Do not flash an empty "System status" dialog.
+  const showDialog = state.mode === 'open' && (awaitingRecovery || degraded)
+  const showDegradedBanner = state.mode === 'minimized' && degraded
   const recoveryTitleText = awaitingRecovery
     ? recoveryTitle(state.episodeKinds, state.forgetSuccess)
     : null

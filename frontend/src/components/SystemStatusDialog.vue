@@ -349,6 +349,8 @@ const actionError = ref<string | null>(null)
 
 /** Freeze visible copy for the Vuetify leave animation after parent clears props. */
 const leaveSnapshot = ref<LeaveSnapshot | null>(null)
+/** Last copy while `show` was true. Hide-time props are already cleared. */
+const lastShown = ref<LeaveSnapshot | null>(null)
 
 const connectionCopy = computed((): StatusCopy | null => {
   if (props.connectionState === 'connected') return null
@@ -398,6 +400,15 @@ const busyCopy = computed((): StatusCopy | null => {
   }
 })
 
+const liveSnapshot = computed((): LeaveSnapshot => ({
+  awaitingClose: props.awaitingClose,
+  recoveryTitle: props.recoveryTitle ?? 'All clear',
+  recoveryMessage: props.recoveryMessage ?? 'All clear. Click Close to continue.',
+  problems: props.problems,
+  connectionCopy: connectionCopy.value,
+  busyCopy: busyCopy.value,
+}))
+
 const viewConnectionCopy = computed(() => {
   if (props.show) return connectionCopy.value
   return leaveSnapshot.value?.connectionCopy ?? connectionCopy.value
@@ -423,6 +434,14 @@ const actionProgressLabel = computed(() => {
 })
 
 watch(
+  liveSnapshot,
+  (live) => {
+    if (props.show) lastShown.value = live
+  },
+  { immediate: true },
+)
+
+watch(
   () => props.show,
   (show) => {
     if (show) {
@@ -430,14 +449,7 @@ watch(
       actionError.value = null
       actionInProgress.value = null
     } else {
-      leaveSnapshot.value = {
-        awaitingClose: props.awaitingClose,
-        recoveryTitle: props.recoveryTitle ?? 'All clear',
-        recoveryMessage: props.recoveryMessage ?? 'All clear. Click Close to continue.',
-        problems: props.problems,
-        connectionCopy: connectionCopy.value,
-        busyCopy: busyCopy.value,
-      }
+      leaveSnapshot.value = lastShown.value
       clearCopyState()
     }
   },
