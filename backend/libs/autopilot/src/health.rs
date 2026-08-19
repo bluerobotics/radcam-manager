@@ -811,6 +811,9 @@ fn stream_detail(stream: &ServoStreamHealth) -> String {
 #[cfg(test)]
 static HEALTH_TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Serializes tests that mutate process-lifetime health/eligibility, or that hold
+/// `CONFIG_APPLY`. `observe_param_value_from_sync` treats a held apply lock as
+/// in-apply and skips live PARAM_VALUE.
 #[cfg(test)]
 pub(crate) async fn lock_health_tests() -> tokio::sync::MutexGuard<'static, ()> {
     HEALTH_TEST_GUARD.lock().await
