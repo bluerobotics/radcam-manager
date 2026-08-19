@@ -327,6 +327,10 @@ function stateCases(): [name: string, run: () => void][] {
       assert(toast === 'BlueOS video service is back (after about 5 sec).', `toast must omit Close hint: ${toast}`)
       assert(healthDialogView(minimizeHealthDialog(degradedOpen()), true).showDegradedBanner, 'minimized+degraded must show banner')
     }],
+    ['open without degraded or recovery does not flash an empty dialog', () => {
+      const view = healthDialogView(degradedOpen(), false)
+      assert(!view.showDialog && !view.awaitingClose, 'healthy open-without-recovery must not show')
+    }],
     ['healthy boot never opens the modal', () => {
       let state = initialHealthDialogState()
       for (const autopilot of ['unknown', 'syncing', 'online'] as const) {
